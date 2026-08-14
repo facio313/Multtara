@@ -1,118 +1,236 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin, Calendar, Video, Activity, Droplets, Wind, Waves, Thermometer } from 'lucide-react';
-import api from '../services/api';
+import api, { unwrapList } from '../services/api';
+import useGeolocation from '../hooks/useGeolocation';
+import SpotPhoto from '../components/SpotPhoto';
+import BrandMark from '../components/BrandMark';
+import { scoreLabel, scoreTone } from '../utils/scoreColor';
+import { ACTIVITY_LABELS, spotTypeLabel } from '../utils/spotType';
 import './HomePage.css';
 
+const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토'];
+
 const HomePage = () => {
-  const [spots, setSpots] = useState([]);
+  const [activity, setActivity] = useState('swim');
+  const [ranking, setRanking] = useState([]);
+  const [forecast, setForecast] = useState([]);
+  const [forecastMessage, setForecastMessage] = useState('');
+  const [bestDate, setBestDate] = useState('');
+  const [cams, setCams] = useState([]);
+  const [nearby, setNearby] = useState([]);
+  const [firstSwim, setFirstSwim] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const position = useGeolocation();
 
   useEffect(() => {
-    const fetchSpots = async () => {
-      try {
-        const response = await api.get('/spots/');
-        let results = [];
-        if (response.data && Array.isArray(response.data.results)) {
-          results = response.data.results;
-        } else if (Array.isArray(response.data)) {
-          results = response.data;
-        }
-        setSpots(results.slice(0, 3));
-      } catch (error) {
-        console.error('Failed to fetch spots', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchSpots();
+    api
+      .get('/spots/forecast-summary/')
+      .then((response) => {
+        setForecast(response.data.days || []);
+        setForecastMessage(response.data.message || '');
+        setBestDate(response.data.best_date || '');
+      })
+      .catch(() => {
+        setForecast([]);
+        setForecastMessage('');
+      });
+
+    api
+      .get('/spots/livecams/', { params: { page_size: 5 } })
+      .then((response) => setCams(unwrapList(response.data)))
+      .catch(() => setCams([]));
+
+    api
+      .get('/spots/first-swim/', { params: { page_size: 6 } })
+      .then((response) => setFirstSwim(unwrapList(response.data)))
+      .catch(() => setFirstSwim([]));
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    api
+      .get('/spots/ranking/', { params: { activity, page_size: 9 } })
+      .then((response) => {
+        if (!cancelled) setRanking(unwrapList(response.data));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRanking([]);
+          setError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activity]);
+
+  useEffect(() => {
+    if (!position) return;
+    api
+      .get('/spots/nearby/', { params: { lat: position.lat, lng: position.lng, radius: 120 } })
+      .then((response) => setNearby(unwrapList(response.data).slice(0, 5)))
+      .catch(() => setNearby([]));
+  }, [position]);
+
+  const featured = ranking[0];
+  const rest = ranking.slice(1);
+
   return (
-    <div className="home-dashboard">
-      <section className="dashboard-section hero-section glass-panel">
-        <h1 className="text-gradient">PongDang</h1>
-        <p>오늘, 가장 완벽한 물 여행지를 만나보세요.</p>
-      </section>
-
-      <div className="dashboard-grid">
-        {/* Top Spots */}
-        <section className="dashboard-card glass-panel">
-          <h2 className="flex-center" style={{ justifyContent: 'flex-start', gap: '8px' }}>
-            <MapPin size={24} color="var(--color-wave)" /> 추천 스팟
-          </h2>
-          {loading ? (
-            <p style={{ color: 'var(--color-text-secondary)' }}>데이터를 불러오는 중입니다...</p>
-          ) : (
-            <ul className="spot-list">
-              {spots.length > 0 ? (
-                spots.map((spot, index) => (
-                  <Link to={`/spot/${spot.id}`} key={spot.id || index} style={{ textDecoration: 'none', color: 'inherit' }}>
-                    <li className="spot-list-item">
-                      <div className="spot-info">
-                        <strong>{index + 1}. {spot.name}</strong>
-                        <span className="spot-region">{spot.region}</span>
-                      </div>
-                      <span className="spot-badge">{spot.type === 'sea' ? '바다' : spot.type === 'valley' ? '계곡' : spot.type}</span>
-                    </li>
-                  </Link>
-                ))
-              ) : (
-                <li style={{ color: 'var(--color-text-secondary)' }}>스팟 데이터가 없습니다.</li>
-              )}
-            </ul>
-          )}
-        </section>
-
-        {/* Forecast Summary */}
-        <section className="dashboard-card glass-panel">
-          <h2 className="flex-center" style={{ justifyContent: 'flex-start', gap: '8px' }}>
-            <Calendar size={24} color="var(--color-aqua)" /> 이번 주 물놀이 지수
-          </h2>
-          <div className="forecast-summary flex-center">
-            <div className="forecast-day">
-              <span className="day">금</span>
-              <div className="bar" style={{ height: '60%', background: 'var(--color-aqua)' }}></div>
-              <span className="score">85</span>
-            </div>
-            <div className="forecast-day">
-              <span className="day">토</span>
-              <div className="bar" style={{ height: '90%', background: 'var(--gradient-water)' }}></div>
-              <span className="score" style={{ color: 'var(--color-wave)', fontWeight: 'bold' }}>98</span>
-            </div>
-            <div className="forecast-day">
-              <span className="day">일</span>
-              <div className="bar" style={{ height: '40%', background: 'var(--color-sunset)' }}></div>
-              <span className="score">65</span>
-            </div>
-          </div>
-        </section>
-
-        {/* Livecam Picks */}
-        <section className="dashboard-card glass-panel livecam-card">
-          <h2 className="flex-center" style={{ justifyContent: 'flex-start', gap: '8px' }}>
-            <Video size={24} color="var(--color-coral)" /> 실시간 라이브캠
-          </h2>
-          <div className="livecam-grid">
-            <div className="livecam-feed">
-              <img src="https://picsum.photos/seed/cam1/400/300" alt="cam1" />
-              <span className="cam-label">해운대</span>
-            </div>
-            <div className="livecam-feed">
-              <img src="https://picsum.photos/seed/cam2/400/300" alt="cam2" />
-              <span className="cam-label">협재 해변</span>
-            </div>
-            <div className="livecam-feed">
-              <img src="https://picsum.photos/seed/cam3/400/300" alt="cam3" />
-              <span className="cam-label">가평 계곡</span>
-            </div>
-            <div className="livecam-feed">
-              <img src="https://picsum.photos/seed/cam4/400/300" alt="cam4" />
-              <span className="cam-label">경포대</span>
-            </div>
-          </div>
-        </section>
+    <div className="page home-page">
+      <div className="home-top">
+        <div className="home-brand">
+          <BrandMark />
+        </div>
+        <h1>지금 가기 좋은 <em>물</em></h1>
+        <div className="chip-row">
+          {Object.entries(ACTIVITY_LABELS).map(([key, label]) => (
+            <button
+              key={key}
+              className={`chip ${activity === key ? 'active' : ''}`}
+              onClick={() => setActivity(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {loading && (
+        <div className="home-board">
+          <div className="skeleton photo" />
+          <div className="skeleton copy" />
+        </div>
+      )}
+
+      {error && <p className="empty">순위를 불러오지 못했습니다.</p>}
+
+      {!loading && featured && (
+        <div className="home-board">
+          <Link to={`/spot/${featured.id}`} className="lead-poster">
+            <SpotPhoto className="lead-photo" spot={featured} alt={featured.name} />
+            <div className="lead-copy">
+              <span className={`lead-score score is-${scoreTone(featured.water_index)}`}>
+                {featured.water_index ?? '-'}
+              </span>
+              <span className="lead-kicker">
+                {featured.region} · {spotTypeLabel(featured.type)}
+              </span>
+              <h2>{featured.name}</h2>
+              <p>{scoreLabel(featured.water_index)} · {ACTIVITY_LABELS[activity]}</p>
+            </div>
+          </Link>
+
+          {rest.length > 0 && (
+            <section className="rank-panel">
+              <h3>순위</h3>
+              <ul>
+                {rest.map((spot, index) => (
+                  <li key={spot.id}>
+                    <Link to={`/spot/${spot.id}`} className="rank-row">
+                      <span className="rank-no">{String(index + 2).padStart(2, '0')}</span>
+                      <span className="rank-copy">
+                        <strong>{spot.name}</strong>
+                        <em>{spot.region}</em>
+                      </span>
+                      <span className={`score is-${scoreTone(spot.water_index)}`}>
+                        {spot.water_index ?? '-'}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      )}
+
+      {!loading && !featured && !error && (
+        <p className="empty">이 활동에 맞는 장소가 없습니다.</p>
+      )}
+
+      {forecast.length > 0 && (
+        <section className="week-block">
+          <div className="week-head">
+            <h3>이번 주</h3>
+            {forecastMessage && <p>{forecastMessage}</p>}
+          </div>
+          <div className="week-strip">
+            {forecast.map((day) => {
+              const date = new Date(`${day.forecast_date}T00:00:00`);
+              const isBest = day.forecast_date === bestDate;
+              return (
+                <div className={`week-cell${isBest ? ' is-best' : ''}`} key={day.forecast_date}>
+                  <span>{WEEKDAY[date.getDay()]}</span>
+                  <strong className={`score is-${scoreTone(day.predicted_index)}`}>
+                    {day.predicted_index}
+                  </strong>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {(firstSwim.length > 0 || nearby.length > 0) && (
+        <div className="home-duo">
+          {firstSwim.length > 0 && (
+            <section>
+              <h3 className="section-title">입수 가능</h3>
+              <div className="temp-grid">
+                {firstSwim.map((spot) => (
+                  <Link to={`/spot/${spot.id}`} key={spot.id} className="temp-card">
+                    <SpotPhoto className="temp-image" spot={spot} alt="" />
+                    <span>
+                      <strong>{spot.name}</strong>
+                      <em>{spot.condition?.water_temp ? `${spot.condition.water_temp}°` : spot.region}</em>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+          {nearby.length > 0 && (
+            <section>
+              <h3 className="section-title">근처</h3>
+              <ul className="rank-list">
+                {nearby.map((spot) => (
+                  <li key={spot.id}>
+                    <Link to={`/spot/${spot.id}`} className="rank-row">
+                      <span className="rank-copy">
+                        <strong>{spot.name}</strong>
+                        <em>{spot.region}</em>
+                      </span>
+                      <span className={`score is-${scoreTone(spot.water_index)}`}>
+                        {spot.water_index ?? '-'}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      )}
+
+      {cams.length > 0 && (
+        <section>
+          <h3 className="section-title">미리보기</h3>
+          <div className="preview-mosaic">
+            {cams.map((cam) => (
+              <Link to={`/spot/${cam.id}`} key={cam.id} className="preview-card">
+                <SpotPhoto className="preview-image" spot={cam} alt={cam.name} />
+                <span>{cam.name}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 };

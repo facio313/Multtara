@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 class SpotModelTests(TestCase):
     def setUp(self):
         self.spot = WaterSpot.objects.create(
-            type='beach',
+            type='sea',
             name='Test Beach',
             lat=37.123,
             lng=126.123,
@@ -15,7 +15,7 @@ class SpotModelTests(TestCase):
 
     def test_water_spot_creation(self):
         self.assertEqual(self.spot.name, 'Test Beach')
-        self.assertEqual(self.spot.type, 'beach')
+        self.assertEqual(self.spot.type, 'sea')
 
     def test_nearby_facility_creation(self):
         facility = NearbyFacility.objects.create(
@@ -47,7 +47,7 @@ from apps.spots.views import WaterSpotViewSet
 class SpotViewTests(TestCase):
     def setUp(self):
         self.spot = WaterSpot.objects.create(
-            type='beach',
+            type='sea',
             name='Test Beach API',
             lat=37.123,
             lng=126.123,

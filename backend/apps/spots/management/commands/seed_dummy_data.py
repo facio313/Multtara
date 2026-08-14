@@ -1,88 +1,562 @@
-import random
-from datetime import timedelta
 from django.core.management.base import BaseCommand
-from django.utils import timezone
-from apps.users.models import User
+
+from apps.conditions.models import CrowdLevel, WaterCondition
 from apps.spots.models import WaterSpot
-from apps.conditions.models import WaterCondition, ConditionScore
-from apps.forecasts.models import WaterForecast
+from services.water_forecast import upsert_forecast_for_spot
+from services.water_index import upsert_scores_for_spot
+
+SPOTS = [
+    {
+        "name": "해운대 해수욕장",
+        "type": "sea",
+        "lat": 35.1586,
+        "lng": 129.1603,
+        "region": "부산",
+        "address": "부산 해운대구 해운대해변로 264",
+        "tags": ["#여름휴가", "#서핑", "#야경"],
+        "livecam": True,
+        "description": "부산의 대표 해수욕장. 수온과 파고가 물놀이·서핑 판단의 핵심입니다.",
+        "condition": {
+            "water_temp": 24.8,
+            "air_temp": 29.0,
+            "wind_speed": 3.1,
+            "wave_height": 0.7,
+            "water_quality_grade": "1",
+            "rainfall_recent": 0,
+            "rip_current_risk": "low",
+            "uv_index": 8,
+            "tide_schedule": {"low_tide": ["05:40", "18:10"], "high_tide": ["12:05", "00:20"]},
+        },
+        "crowd": "high",
+    },
+    {
+        "name": "광안리 해수욕장",
+        "type": "sea",
+        "lat": 35.1532,
+        "lng": 129.1186,
+        "region": "부산",
+        "address": "부산 수영구 광안해변로 219",
+        "tags": ["#야경", "#물멍", "#광안대교"],
+        "livecam": True,
+        "description": "광안대교 야경이 유명한 도심 해변입니다.",
+        "condition": {
+            "water_temp": 24.2,
+            "air_temp": 28.5,
+            "wind_speed": 2.4,
+            "wave_height": 0.5,
+            "water_quality_grade": "1",
+            "rainfall_recent": 0,
+            "rip_current_risk": "low",
+            "uv_index": 7,
+        },
+        "crowd": "high",
+    },
+    {
+        "name": "송정 해수욕장",
+        "type": "sea",
+        "lat": 35.1786,
+        "lng": 129.1996,
+        "region": "부산",
+        "address": "부산 해운대구 송정해변로 62",
+        "tags": ["#서핑", "#파도"],
+        "description": "서핑 입문자에게 자주 추천되는 부산 해변입니다.",
+        "condition": {
+            "water_temp": 23.6,
+            "air_temp": 27.8,
+            "wind_speed": 6.5,
+            "wave_height": 1.4,
+            "water_quality_grade": "1",
+            "rainfall_recent": 2,
+            "rip_current_risk": "medium",
+            "uv_index": 8,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "경포 해수욕장",
+        "type": "sea",
+        "lat": 37.8056,
+        "lng": 128.9078,
+        "region": "강원",
+        "address": "강원 강릉시 창해로 514",
+        "tags": ["#동해", "#일출", "#물멍"],
+        "livecam": True,
+        "description": "강릉 대표 해변. 경포호와 이어지는 동선이 있습니다.",
+        "condition": {
+            "water_temp": 22.1,
+            "air_temp": 26.4,
+            "wind_speed": 4.2,
+            "wave_height": 0.9,
+            "water_quality_grade": "1",
+            "rainfall_recent": 1,
+            "rip_current_risk": "low",
+            "uv_index": 7,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "속초 해수욕장",
+        "type": "sea",
+        "lat": 38.1901,
+        "lng": 128.6036,
+        "region": "강원",
+        "address": "강원 속초시 해오름로 190",
+        "tags": ["#동해", "#가족여행"],
+        "description": "설악산과 가까운 동해 해변입니다.",
+        "condition": {
+            "water_temp": 21.4,
+            "air_temp": 25.8,
+            "wind_speed": 3.8,
+            "wave_height": 0.8,
+            "water_quality_grade": "1",
+            "rainfall_recent": 0,
+            "rip_current_risk": "low",
+            "uv_index": 6,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "양양 설악비치",
+        "type": "sea",
+        "lat": 38.1230,
+        "lng": 128.6320,
+        "region": "강원",
+        "address": "강원 양양군 강현면 동해대로",
+        "tags": ["#서핑", "#파도"],
+        "livecam": True,
+        "description": "서핑 포인트로 알려진 양양 해변입니다.",
+        "condition": {
+            "water_temp": 21.8,
+            "air_temp": 25.2,
+            "wind_speed": 8.4,
+            "wave_height": 1.7,
+            "water_quality_grade": "1",
+            "rainfall_recent": 3,
+            "rip_current_risk": "medium",
+            "uv_index": 7,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "을왕리 해수욕장",
+        "type": "sea",
+        "lat": 37.4495,
+        "lng": 126.3724,
+        "region": "인천",
+        "address": "인천 중구 용유서로 272",
+        "tags": ["#근교", "#일몰"],
+        "description": "서울에서 접근이 쉬운 서해 해변입니다.",
+        "condition": {
+            "water_temp": 23.4,
+            "air_temp": 28.1,
+            "wind_speed": 5.1,
+            "wave_height": 0.6,
+            "water_quality_grade": "2",
+            "rainfall_recent": 4,
+            "rip_current_risk": "low",
+            "uv_index": 7,
+            "tide_schedule": {"low_tide": ["08:10", "20:40"], "high_tide": ["14:20", "02:30"]},
+        },
+        "crowd": "high",
+    },
+    {
+        "name": "대천 해수욕장",
+        "type": "sea",
+        "lat": 36.3116,
+        "lng": 126.5142,
+        "region": "충남",
+        "address": "충남 보령시 대해로 876",
+        "tags": ["#서해", "#가족여행"],
+        "description": "서해 대표 해수욕장 중 한 곳입니다.",
+        "condition": {
+            "water_temp": 23.9,
+            "air_temp": 29.2,
+            "wind_speed": 3.6,
+            "wave_height": 0.4,
+            "water_quality_grade": "2",
+            "rainfall_recent": 1,
+            "rip_current_risk": "low",
+            "uv_index": 8,
+        },
+        "crowd": "high",
+    },
+    {
+        "name": "협재 해수욕장",
+        "type": "sea",
+        "lat": 33.3940,
+        "lng": 126.2396,
+        "region": "제주",
+        "address": "제주 제주시 한림읍 한림로 329-10",
+        "tags": ["#에메랄드", "#물멍"],
+        "livecam": True,
+        "description": "에메랄드빛 수색으로 유명한 제주 서쪽 해변입니다.",
+        "condition": {
+            "water_temp": 25.6,
+            "air_temp": 30.2,
+            "wind_speed": 4.0,
+            "wave_height": 0.6,
+            "water_quality_grade": "1",
+            "rainfall_recent": 0,
+            "rip_current_risk": "low",
+            "uv_index": 10,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "중문 색달 해변",
+        "type": "sea",
+        "lat": 33.2451,
+        "lng": 126.4116,
+        "region": "제주",
+        "address": "제주 서귀포시 중문관광로 72",
+        "tags": ["#서핑", "#중문"],
+        "description": "중문관광단지 아래 검은 모래 해변입니다.",
+        "condition": {
+            "water_temp": 25.1,
+            "air_temp": 29.4,
+            "wind_speed": 7.2,
+            "wave_height": 1.3,
+            "water_quality_grade": "1",
+            "rainfall_recent": 2,
+            "rip_current_risk": "medium",
+            "uv_index": 10,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "가평 용추계곡",
+        "type": "valley",
+        "lat": 37.8680,
+        "lng": 127.4890,
+        "region": "경기",
+        "address": "경기 가평군 가평읍 용추로",
+        "tags": ["#계곡", "#한적한_계곡"],
+        "livecam": True,
+        "description": "서울 근교에서 찾기 쉬운 계곡입니다.",
+        "condition": {
+            "water_temp": 18.4,
+            "air_temp": 27.0,
+            "wind_speed": 1.2,
+            "rainfall_recent": 8,
+            "water_level": 0.9,
+            "water_quality_grade": "1",
+            "uv_index": 6,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "명지계곡",
+        "type": "valley",
+        "lat": 37.9415,
+        "lng": 127.4293,
+        "region": "경기",
+        "address": "경기 가평군 북면 가화로",
+        "tags": ["#계곡", "#물놀이"],
+        "description": "가평 북쪽의 깊은 계곡입니다.",
+        "condition": {
+            "water_temp": 17.2,
+            "air_temp": 26.1,
+            "wind_speed": 1.0,
+            "rainfall_recent": 22,
+            "water_level": 1.6,
+            "water_quality_grade": "1",
+            "uv_index": 5,
+        },
+        "crowd": "low",
+    },
+    {
+        "name": "설악산 천불동계곡",
+        "type": "valley",
+        "lat": 38.1194,
+        "lng": 128.4653,
+        "region": "강원",
+        "address": "강원 속초시 설악산로",
+        "tags": ["#등산", "#비경"],
+        "description": "설악산 주 계곡. 수위와 강수량이 안전의 기준입니다.",
+        "condition": {
+            "water_temp": 14.8,
+            "air_temp": 23.5,
+            "wind_speed": 2.8,
+            "rainfall_recent": 18,
+            "water_level": 1.8,
+            "water_quality_grade": "1",
+            "uv_index": 6,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "지리산 뱀사골",
+        "type": "valley",
+        "lat": 35.3532,
+        "lng": 127.5811,
+        "region": "전북",
+        "address": "전북 남원시 산내면 뱀사골길",
+        "tags": ["#지리산", "#계곡"],
+        "description": "지리산 서쪽 대표 계곡입니다.",
+        "condition": {
+            "water_temp": 16.5,
+            "air_temp": 25.4,
+            "wind_speed": 1.5,
+            "rainfall_recent": 12,
+            "water_level": 1.3,
+            "water_quality_grade": "1",
+            "uv_index": 7,
+        },
+        "crowd": "low",
+    },
+    {
+        "name": "수안보 온천",
+        "type": "hotspring",
+        "lat": 36.8475,
+        "lng": 127.9953,
+        "region": "충북",
+        "address": "충북 충주시 수안보면 온천리",
+        "tags": ["#온천", "#힐링"],
+        "description": "중부내륙 대표 온천 지구입니다.",
+        "condition": {
+            "air_temp": 22.0,
+            "water_temp": 48.0,
+            "wind_speed": 1.1,
+            "rainfall_recent": 0,
+            "uv_index": 4,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "덕구 온천",
+        "type": "hotspring",
+        "lat": 37.0795,
+        "lng": 129.2554,
+        "region": "경북",
+        "address": "경북 울진군 북면 덕구온천로",
+        "tags": ["#온천", "#천연온천"],
+        "description": "국내에서 드문 자연용출 온천입니다.",
+        "condition": {
+            "air_temp": 19.4,
+            "water_temp": 42.0,
+            "wind_speed": 1.8,
+            "rainfall_recent": 1,
+            "uv_index": 5,
+        },
+        "crowd": "low",
+    },
+    {
+        "name": "온양 온천",
+        "type": "hotspring",
+        "lat": 36.7806,
+        "lng": 127.0042,
+        "region": "충남",
+        "address": "충남 아산시 온천동",
+        "tags": ["#온천", "#근교"],
+        "description": "수도권에서 접근이 쉬운 온천 관광지입니다.",
+        "condition": {
+            "air_temp": 24.8,
+            "water_temp": 45.0,
+            "wind_speed": 1.4,
+            "rainfall_recent": 0,
+            "uv_index": 5,
+        },
+        "crowd": "high",
+    },
+    {
+        "name": "동막 해수욕장 갯벌",
+        "type": "tidal_flat",
+        "lat": 37.5928,
+        "lng": 126.4587,
+        "region": "인천",
+        "address": "인천 강화군 화도면 해안남로",
+        "tags": ["#갯벌", "#가족여행"],
+        "description": "강화도 남단의 넓은 갯벌입니다.",
+        "condition": {
+            "water_temp": 22.8,
+            "air_temp": 27.5,
+            "wind_speed": 3.3,
+            "rainfall_recent": 0,
+            "uv_index": 7,
+            "tide_schedule": {"low_tide": ["14:20", "02:50"], "high_tide": ["08:10", "20:40"]},
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "선재도 갯벌",
+        "type": "tidal_flat",
+        "lat": 37.2557,
+        "lng": 126.5254,
+        "region": "인천",
+        "address": "인천 옹진군 영흥면 선재리",
+        "tags": ["#갯벌", "#조개잡이"],
+        "description": "서해 물때가 체험 가능 시간을 가릅니다.",
+        "condition": {
+            "water_temp": 23.1,
+            "air_temp": 28.0,
+            "wind_speed": 4.4,
+            "rainfall_recent": 1,
+            "uv_index": 8,
+            "tide_schedule": {"low_tide": ["15:05"], "high_tide": ["09:20"]},
+        },
+        "crowd": "low",
+    },
+    {
+        "name": "무창포 갯벌",
+        "type": "tidal_flat",
+        "lat": 36.2447,
+        "lng": 126.5361,
+        "region": "충남",
+        "address": "충남 보령시 웅천읍 열린바다1길",
+        "tags": ["#신비의바닷길", "#갯벌"],
+        "description": "신비의 바닷길로 알려진 서해 갯벌입니다.",
+        "condition": {
+            "water_temp": 23.5,
+            "air_temp": 28.6,
+            "wind_speed": 3.0,
+            "rainfall_recent": 0,
+            "uv_index": 8,
+            "tide_schedule": {"low_tide": ["13:50"], "high_tide": ["07:40"]},
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "청평호",
+        "type": "lake",
+        "lat": 37.7356,
+        "lng": 127.4163,
+        "region": "경기",
+        "address": "경기 가평군 청평면",
+        "tags": ["#호수", "#물멍"],
+        "description": "북한강 수계의 호수 풍경입니다.",
+        "condition": {
+            "water_temp": 22.0,
+            "air_temp": 27.4,
+            "wind_speed": 2.2,
+            "rainfall_recent": 3,
+            "uv_index": 6,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "충주호",
+        "type": "lake",
+        "lat": 37.0050,
+        "lng": 127.9920,
+        "region": "충북",
+        "address": "충북 충주시 동량면",
+        "tags": ["#호수", "#드라이브"],
+        "description": "남한강 상류의 넓은 호수입니다.",
+        "condition": {
+            "water_temp": 21.2,
+            "air_temp": 26.8,
+            "wind_speed": 2.6,
+            "rainfall_recent": 5,
+            "uv_index": 6,
+        },
+        "crowd": "low",
+    },
+    {
+        "name": "정방폭포",
+        "type": "waterfall",
+        "lat": 33.2447,
+        "lng": 126.5716,
+        "region": "제주",
+        "address": "제주 서귀포시 칠십리로214번길 37",
+        "tags": ["#폭포", "#서귀포"],
+        "description": "바닷쪽으로 떨어지는 서귀포 폭포입니다.",
+        "condition": {
+            "water_temp": 19.0,
+            "air_temp": 28.8,
+            "wind_speed": 3.5,
+            "rainfall_recent": 6,
+            "uv_index": 9,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "천지연폭포",
+        "type": "waterfall",
+        "lat": 33.2469,
+        "lng": 126.5543,
+        "region": "제주",
+        "address": "제주 서귀포시 천지동",
+        "tags": ["#폭포", "#야경"],
+        "description": "서귀포 도심과 가까운 폭포입니다.",
+        "condition": {
+            "water_temp": 18.6,
+            "air_temp": 28.4,
+            "wind_speed": 2.1,
+            "rainfall_recent": 4,
+            "uv_index": 8,
+        },
+        "crowd": "high",
+    },
+    {
+        "name": "동강 래프팅",
+        "type": "riverside",
+        "lat": 37.2830,
+        "lng": 128.6550,
+        "region": "강원",
+        "address": "강원 영월군 영월읍 동강로",
+        "tags": ["#래프팅", "#액티비티"],
+        "description": "수량과 유속이 래프팅 적합도를 좌우합니다.",
+        "condition": {
+            "water_temp": 17.8,
+            "air_temp": 26.2,
+            "wind_speed": 1.6,
+            "rainfall_recent": 28,
+            "water_level": 2.1,
+            "water_quality_grade": "1",
+            "uv_index": 6,
+        },
+        "crowd": "medium",
+    },
+    {
+        "name": "캐리비안베이",
+        "type": "waterpark",
+        "lat": 37.2965,
+        "lng": 127.2020,
+        "region": "경기",
+        "address": "경기 용인시 처인구 에버랜드로 199",
+        "tags": ["#워터파크", "#아이와함께"],
+        "description": "용인 대표 워터파크입니다.",
+        "condition": {
+            "water_temp": 28.0,
+            "air_temp": 31.5,
+            "wind_speed": 1.0,
+            "rainfall_recent": 0,
+            "uv_index": 9,
+        },
+        "crowd": "high",
+    },
+]
+
 
 class Command(BaseCommand):
-    help = 'Seed dummy data for PongDang'
+    help = "Seed nationwide dummy spots, then compute Water Index and 7-day forecast."
 
     def handle(self, *args, **kwargs):
-        self.stdout.write("Deleting old data...")
-        WaterForecast.objects.all().delete()
-        ConditionScore.objects.all().delete()
-        WaterCondition.objects.all().delete()
+        self.stdout.write("Resetting spot data...")
         WaterSpot.objects.all().delete()
 
-        spot_names = [
-            ("해운대 해수욕장", "sea"), ("광안리 해수욕장", "sea"), ("경포대 해수욕장", "sea"), 
-            ("속초 해수욕장", "sea"), ("중문 색달 해변", "sea"), ("협재 해수욕장", "sea"),
-            ("을왕리 해수욕장", "sea"), ("대천 해수욕장", "sea"), ("송정 해수욕장", "sea"),
-            ("송지호 해수욕장", "sea"), ("가평 용추계곡", "valley"), ("명지계곡", "valley"), 
-            ("지리산 뱀사골", "valley"), ("설악산 천불동계곡", "valley"), ("쌍곡계곡", "valley"),
-            ("수안보 온천", "hotspring"), ("덕구 온천", "hotspring"), ("온양 온천", "hotspring"),
-            ("백암 온천", "hotspring"), ("도고 온천", "hotspring"), ("동막 해수욕장 갯벌", "tidal_flat"),
-            ("선재도 갯벌", "tidal_flat"), ("제부도 갯벌", "tidal_flat"), ("무창포 갯벌", "tidal_flat"),
-            ("캐리비안베이", "waterpark"), ("오션월드", "waterpark"), ("청평호", "lake"), 
-            ("충주호", "lake"), ("정방폭포", "waterfall"), ("천지연폭포", "waterfall")
-        ]
-        
-        # Add more to reach ~50
-        for i in range(20):
-            spot_names.append((f"테스트 스팟 {i+1}", random.choice(["sea", "valley", "lake"])))
-
-        self.stdout.write(f"Creating {len(spot_names)} spots...")
-        
-        activities = ["swim", "surf", "relax", "mudflat", "onsen", "rafting"]
-        now = timezone.now()
-
-        for name, s_type in spot_names:
+        for item in SPOTS:
+            image = f"https://picsum.photos/seed/{item['name']}/1200/800"
             spot = WaterSpot.objects.create(
-                name=name,
-                type=s_type,
-                lat=35.0 + random.uniform(0, 3),
-                lng=126.0 + random.uniform(0, 3),
-                region="강원" if random.random() > 0.5 else "부산/경남",
-                address=f"테스트 주소 {name}",
-                tags=["#여름휴가", "#물멍", "#가족여행"],
-                image_url=f"https://picsum.photos/seed/{random.randint(1, 1000)}/800/600",
-                description=f"{name}은 아주 멋진 곳입니다."
+                name=item["name"],
+                type=item["type"],
+                lat=item["lat"],
+                lng=item["lng"],
+                region=item["region"],
+                address=item["address"],
+                tags=item["tags"],
+                image_url=image,
+                livecam_url=image if item.get("livecam") else "",
+                description=item["description"],
             )
-
-            # Condition
-            WaterCondition.objects.create(
+            WaterCondition.objects.create(spot=spot, **item["condition"])
+            CrowdLevel.objects.create(
                 spot=spot,
-                water_temp=random.uniform(15.0, 28.0),
-                air_temp=random.uniform(20.0, 35.0),
-                wind_speed=random.uniform(0.5, 10.0),
-                wave_height=random.uniform(0.1, 2.5),
-                water_quality_grade=random.randint(1, 3),
-                fetched_at=now
+                predicted_level=item["crowd"],
+                recommended_time="오전 9-11시",
+                parking_availability="보통",
             )
+            upsert_scores_for_spot(spot)
+            upsert_forecast_for_spot(spot)
 
-            # Scores
-            for act in activities:
-                score = random.randint(30, 98)
-                if s_type == 'sea' and act == 'surf': score = random.randint(60, 98)
-                if s_type == 'hotspring' and act == 'onsen': score = random.randint(80, 98)
-                
-                ConditionScore.objects.create(
-                    spot=spot,
-                    activity=act,
-                    score=score,
-                    computed_at=now
-                )
-
-            # Forecasts (7 days)
-            for d in range(1, 8):
-                WaterForecast.objects.create(
-                    spot=spot,
-                    forecast_date=(now + timedelta(days=d)).date(),
-                    predicted_index=random.randint(50, 95),
-                    computed_at=now
-                )
-
-        self.stdout.write(self.style.SUCCESS('Successfully seeded dummy data!'))
+        self.stdout.write(self.style.SUCCESS(f"Seeded {len(SPOTS)} nationwide spots with computed scores."))

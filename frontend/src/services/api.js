@@ -8,7 +8,6 @@ const api = axios.create({
   },
 });
 
-// Response Interceptor for Error Handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -16,5 +15,11 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+export function unwrapList(data) {
+  if (Array.isArray(data)) return data;
+  if (data && Array.isArray(data.results)) return data.results;
+  return [];
+}
 
 export default api;

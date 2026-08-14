@@ -2,10 +2,15 @@ from django.db import models
 
 class WaterSpot(models.Model):
     SPOT_TYPES = (
-        ('beach', 'Beach'),
-        ('river', 'River'),
-        ('valley', 'Valley'),
-        ('hotspring', 'Hot Spring'),
+        ("sea", "Sea"),
+        ("pool", "Pool"),
+        ("hotspring", "Hot Spring"),
+        ("valley", "Valley"),
+        ("lake", "Lake"),
+        ("waterpark", "Waterpark"),
+        ("waterfall", "Waterfall"),
+        ("tidal_flat", "Tidal Flat"),
+        ("riverside", "Riverside"),
     )
     type = models.CharField(max_length=20, choices=SPOT_TYPES)
     name = models.CharField(max_length=200)
@@ -20,6 +25,12 @@ class WaterSpot(models.Model):
     address = models.CharField(max_length=255)
     image_url = models.URLField(blank=True)
     description = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return self.name
 
 class NearbyFacility(models.Model):
     spot = models.ForeignKey(WaterSpot, on_delete=models.CASCADE)

@@ -1,41 +1,37 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React from 'react';
+import { NavLink } from 'react-router-dom';
+import { House, Map, CalendarDays, Video, User } from 'lucide-react';
+import BrandMark from '../BrandMark';
 import './Navigation.css';
 
 const navItems = [
-  { path: '/', label: '홈', icon: '🏠' },
-  { path: '/map', label: '지도', icon: '📍' },
-  { path: '/forecast', label: '예보', icon: '📅' },
-  { path: '/livecam', label: '물멍', icon: '📹' },
-  { path: '/profile', label: 'MY', icon: '👤' },
+  { path: '/', label: '홈', icon: House },
+  { path: '/map', label: '지도', icon: Map },
+  { path: '/forecast', label: '예보', icon: CalendarDays },
+  { path: '/livecam', label: '미리보기', icon: Video },
+  { path: '/profile', label: '내 정보', icon: User },
 ];
 
 const Navigation = () => {
-  const location = useLocation();
-
-  if (location.pathname === '/onboarding') return null;
-
   return (
     <header className="app-navigation">
       <div className="nav-container">
-        {/* Desktop Logo */}
-        <Link to="/" className="nav-brand text-gradient">
-          <span className="brand-icon">🌊</span> 퐁당
-        </Link>
-
-        {/* Navigation Links */}
+        <NavLink to="/" className="nav-brand">
+          <BrandMark />
+        </NavLink>
         <nav className="nav-menu">
           {navItems.map((item) => {
-            const isActive = location.pathname === item.path;
+            const Icon = item.icon;
             return (
-              <Link
+              <NavLink
                 key={item.path}
                 to={item.path}
-                className={`nav-item ${isActive ? 'active' : ''}`}
+                end={item.path === '/'}
+                className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
               >
-                <span className="nav-icon">{item.icon}</span>
-                <span className="nav-label">{item.label}</span>
-              </Link>
+                <Icon size={18} strokeWidth={1.75} />
+                <span>{item.label}</span>
+              </NavLink>
             );
           })}
         </nav>

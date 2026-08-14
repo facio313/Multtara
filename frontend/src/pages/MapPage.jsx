@@ -1,83 +1,138 @@
-import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Map as MapIcon, Search } from 'lucide-react';
-import api from '../services/api';
+import api, { unwrapList } from '../services/api';
+import SpotPhoto from '../components/SpotPhoto';
+import { scoreTone } from '../utils/scoreColor';
+import { spotTypeLabel } from '../utils/spotType';
 import './MapPage.css';
 
-// Fix for default marker icon in react-leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
+const TYPE_FILTERS = [
+  { id: '', label: '전체' },
+  { id: 'sea', label: '바다' },
+  { id: 'valley', label: '계곡' },
+  { id: 'hotspring', label: '온천' },
+  { id: 'tidal_flat', label: '갯벌' },
+  { id: 'lake', label: '호수' },
+];
+
+function scoreIcon(score) {
+  return L.divIcon({
+    className: 'score-marker',
+    html: `<div class="score-marker-inner is-${scoreTone(score)}">${score ?? '-'}</div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+  });
+}
 
 const MapPage = () => {
   const [spots, setSpots] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [spotType, setSpotType] = useState('');
 
   useEffect(() => {
     const fetchSpots = async () => {
       try {
-        const response = await api.get('/spots/');
-        const results = response.data.results || response.data;
-        if (Array.isArray(results)) {
-          setSpots(results);
-        }
+        const response = await api.get('/spots/', {
+          params: { page_size: 100, ...(spotType ? { type: spotType } : {}) },
+        });
+        setSpots(unwrapList(response.data));
       } catch (error) {
         console.error('Failed to fetch spots', error);
+        setSpots([]);
       } finally {
         setLoading(false);
       }
     };
+    setLoading(true);
     fetchSpots();
-  }, []);
+  }, [spotType]);
 
-  const filteredSpots = spots.filter(s => s.name.includes(search) || s.region.includes(search));
-  
-  // Default center (Seoul/Korea)
-  const defaultCenter = [36.5, 127.5];
+  const filteredSpots = useMemo(
+    () =>
+      spots.filter(
+        (spot) =>
+          spot.name.includes(search) ||
+          spot.region.includes(search) ||
+          spotTypeLabel(spot.type).includes(search)
+      ),
+    [spots, search]
+  );
 
   return (
-    <div className="map-page">
-      <div className="map-header glass-panel">
-        <h1><MapIcon className="inline-icon" /> 물따라 지도</h1>
-        <div className="search-box">
-          <Search size={18} className="search-icon" />
-          <input 
-            type="text" 
-            placeholder="해수욕장, 계곡, 지역 검색..." 
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+    <div className="page map-page">
+      <header className="page-head">
+        <h1>지도</h1>
+        <p>숫자는 물놀이 지수입니다.</p>
+      </header>
+
+      <div className="map-toolbar">
+        <input
+          type="search"
+          placeholder="장소 또는 지역"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        <div className="chip-row">
+          {TYPE_FILTERS.map((item) => (
+            <button
+              key={item.label}
+              className={`chip ${spotType === item.id ? 'active' : ''}`}
+              onClick={() => setSpotType(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
       </div>
-      
-      <div className="map-container-wrapper glass-panel">
-        {loading ? (
-          <div className="flex-center" style={{ height: '100%' }}>지도 불러오는 중...</div>
-        ) : (
-          <MapContainer center={defaultCenter} zoom={7} style={{ height: '100%', width: '100%', borderRadius: '12px' }}>
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+
+      <div className="map-split">
+        <div className="map-list">
+          {loading && <p className="empty">불러오는 중</p>}
+          {!loading && filteredSpots.length === 0 && (
+            <p className="empty">해당하는 장소가 없습니다.</p>
+          )}
+          <ul className="spot-rows">
             {filteredSpots.map((spot) => (
-              <Marker key={spot.id} position={[spot.lat, spot.lng]}>
-                <Popup>
-                  <div className="custom-popup">
+              <li key={spot.id}>
+                <Link to={`/spot/${spot.id}`} className="spot-row">
+                  <SpotPhoto className="spot-thumb" spot={spot} />
+                  <span className="spot-copy">
                     <strong>{spot.name}</strong>
-                    <p>{spot.region}</p>
-                    <span className="badge">{spot.type}</span>
-                  </div>
-                </Popup>
-              </Marker>
+                    <em>{spot.region} · {spotTypeLabel(spot.type)}</em>
+                  </span>
+                  <span className={`score is-${scoreTone(spot.water_index)}`}>
+                    {spot.water_index ?? '-'}
+                  </span>
+                </Link>
+              </li>
             ))}
-          </MapContainer>
-        )}
+          </ul>
+        </div>
+        <div className="map-frame">
+          {!loading && (
+            <MapContainer center={[36.5, 127.8]} zoom={7} style={{ height: '100%', width: '100%' }}>
+              <TileLayer
+                attribution='&copy; OpenStreetMap &copy; CARTO'
+                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+              />
+              {filteredSpots.map((spot) => (
+                <Marker key={spot.id} position={[spot.lat, spot.lng]} icon={scoreIcon(spot.water_index)}>
+                  <Popup>
+                    <div className="map-popup">
+                      <strong>{spot.name}</strong>
+                      <p>{spot.region} · {spotTypeLabel(spot.type)}</p>
+                      <Link to={`/spot/${spot.id}`}>자세히</Link>
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
+            </MapContainer>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,7 +1,11 @@
 from django.db import models
 
 class WaterCondition(models.Model):
-    spot = models.ForeignKey('spots.WaterSpot', on_delete=models.CASCADE)
+    spot = models.ForeignKey(
+        "spots.WaterSpot",
+        on_delete=models.CASCADE,
+        related_name="conditions",
+    )
     water_temp = models.FloatField(null=True, blank=True)
     air_temp = models.FloatField(null=True, blank=True)
     wind_speed = models.FloatField(null=True, blank=True)
@@ -15,14 +19,37 @@ class WaterCondition(models.Model):
     weather_alert = models.CharField(max_length=200, blank=True)
     fetched_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ["-fetched_at"]
+
 class ConditionScore(models.Model):
-    spot = models.ForeignKey('spots.WaterSpot', on_delete=models.CASCADE)
-    activity = models.CharField(max_length=100)
+    ACTIVITIES = (
+        ("swim", "Swim"),
+        ("surf", "Surf"),
+        ("relax", "Relax"),
+        ("mudflat", "Mudflat"),
+        ("onsen", "Onsen"),
+        ("rafting", "Rafting"),
+    )
+    spot = models.ForeignKey(
+        "spots.WaterSpot",
+        on_delete=models.CASCADE,
+        related_name="scores",
+    )
+    activity = models.CharField(max_length=100, choices=ACTIVITIES)
     score = models.FloatField()
     computed_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ["-computed_at"]
+        unique_together = ("spot", "activity")
+
 class CrowdLevel(models.Model):
-    spot = models.ForeignKey('spots.WaterSpot', on_delete=models.CASCADE)
+    spot = models.ForeignKey(
+        "spots.WaterSpot",
+        on_delete=models.CASCADE,
+        related_name="crowd_levels",
+    )
     predicted_level = models.CharField(max_length=50)
     recommended_time = models.CharField(max_length=100, blank=True)
     parking_availability = models.CharField(max_length=100, blank=True)
