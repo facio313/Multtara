@@ -1,0 +1,199 @@
+.home-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem;
+}
+
+.hero-section {
+  padding: 3rem 2rem;
+  text-align: center;
+}
+
+.hero-section h1 {
+  font-size: 3rem;
+  margin-bottom: 0.5rem;
+}
+
+.hero-section p {
+  color: var(--color-text-secondary);
+  font-size: 1.1rem;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+@media (min-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+}
+
+.dashboard-card {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports ((animation-timeline: view()) and (animation-range: entry)) {
+    @keyframes fade-in-up {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    
+    .dashboard-card {
+      animation: fade-in-up auto linear forwards;
+      animation-timeline: view(block);
+      animation-range: entry 0% cover 20%;
+    }
+  }
+}
+
+.dashboard-card h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.spot-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.spot-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: var(--color-bg);
+  border-radius: 8px;
+  transition: transform 0.2s;
+}
+
+.spot-list-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+
+.spot-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.spot-region {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.spot-badge {
+  background: var(--color-foam);
+  color: var(--color-wave);
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.forecast-summary {
+  height: 150px;
+  background: var(--color-bg);
+  border-radius: 12px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-around;
+  padding: 1rem;
+}
+
+.forecast-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  width: 40px;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.forecast-day .day {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  order: 3;
+}
+
+.forecast-day .score {
+  font-size: 1rem;
+  order: 1;
+}
+
+.forecast-day .bar {
+  width: 20px;
+  border-radius: 10px;
+  order: 2;
+  transition: height 0.5s ease-out;
+}
+
+.livecam-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.livecam-feed {
+  background: var(--color-bg);
+  border-radius: 8px;
+  aspect-ratio: 16/9;
+  color: var(--color-text-secondary);
+}
+
+/* ==========================================================================
+   Desktop & Tablet Layout (Grid)
+   ========================================================================== */
+@media (min-width: 769px) {
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+
+  .livecam-card {
+    grid-column: span 2; /* Span full width on desktop */
+  }
+
+  .livecam-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* ==========================================================================
+   Mobile Layout (Stack)
+   ========================================================================== */
+@media (max-width: 768px) {
+  .home-dashboard {
+    padding: 1rem;
+    padding-bottom: calc(70px + env(safe-area-inset-bottom)); /* Account for bottom nav */
+  }
+
+  .dashboard-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+}

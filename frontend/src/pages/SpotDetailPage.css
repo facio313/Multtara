@@ -1,0 +1,133 @@
+.spot-detail-page {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 2rem;
+}
+
+.detail-header-image {
+  height: 350px;
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  border-bottom-left-radius: 24px;
+  border-bottom-right-radius: 24px;
+}
+
+.back-btn {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+.header-overlay {
+  background: linear-gradient(to top, rgba(10,22,40,0.9), transparent);
+  width: 100%;
+  padding: 3rem 1.5rem 1.5rem 1.5rem;
+  color: #fff;
+  border-bottom-left-radius: 24px;
+  border-bottom-right-radius: 24px;
+}
+
+.header-overlay h1 {
+  font-size: 2rem;
+  margin: 0.5rem 0;
+}
+
+.header-overlay p {
+  color: rgba(255,255,255,0.8);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+}
+
+.detail-content {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: -20px;
+}
+
+.detail-section {
+  padding: 1.5rem;
+}
+
+.detail-section h2 {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.condition-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .condition-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.condition-card {
+  background: var(--color-bg);
+  padding: 1rem;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.cond-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.cond-info span {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.cond-info strong {
+  font-size: 1.1rem;
+  color: var(--color-text);
+}
+
+.chart-container {
+  width: 100%;
+  margin-top: 1rem;
+}
+
+.description {
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  margin-bottom: 1.5rem;
+}
+
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tag-chip {
+  background: var(--color-foam);
+  color: var(--color-ocean);
+  padding: 0.4rem 0.8rem;
+  border-radius: 16px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}

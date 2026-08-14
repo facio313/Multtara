@@ -1,0 +1,153 @@
+/* Navigation Base */
+.app-navigation {
+  background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--color-border);
+  z-index: 1000;
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-navigation {
+    background: rgba(19, 26, 38, 0.85);
+  }
+}
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.brand-icon {
+  font-size: 1.75rem;
+}
+
+/* ==========================================================================
+   Desktop & Tablet Layout (Top Navigation)
+   ========================================================================== */
+@media (min-width: 769px) {
+  .app-navigation {
+    position: sticky;
+    top: 0;
+    width: 100%;
+  }
+
+  .nav-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .nav-menu {
+    display: flex;
+    gap: 2rem;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--color-text-secondary);
+    font-weight: 500;
+    transition: color 0.2s ease;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+  }
+
+  .nav-item:hover, .nav-item.active {
+    color: var(--color-wave);
+    background-color: var(--color-foam);
+  }
+
+  .nav-item .nav-icon {
+    font-size: 1.25rem;
+  }
+}
+
+/* ==========================================================================
+   Mobile Layout (Bottom Navigation)
+   ========================================================================== */
+@media (max-width: 768px) {
+  .app-navigation {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-top: 1px solid var(--color-border);
+    border-bottom: none;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05);
+  }
+
+  .nav-brand {
+    display: none; /* Hide brand logo on mobile bottom nav */
+  }
+
+  .nav-container {
+    padding: 0.5rem 1rem;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  }
+
+  .bottom-nav {
+  display: flex;
+  justify-content: space-around;
+  padding: 0.5rem;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: 0.75rem;
+  padding: 0.5rem;
+  border-radius: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.nav-item::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 12px;
+  background: var(--color-ocean);
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: -1;
+}
+
+.nav-item:hover {
+  color: var(--color-ocean);
+  transform: translateY(-2px);
+}
+
+.nav-item.active {
+  color: var(--color-ocean-deep);
+  font-weight: 700;
+}
+
+.nav-item.active::after {
+  opacity: 0.1;
+  transform: scale(1);
+}
+
+.nav-item.active svg {
+  stroke-width: 2.5;
+  color: var(--color-wave);
+  filter: drop-shadow(0 2px 4px rgba(74, 158, 255, 0.4));
+}
+}

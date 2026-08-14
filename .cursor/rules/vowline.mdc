@@ -1,0 +1,6 @@
+---
+description: Vowline cross-cutting operating skill for substantive AI agent work.
+alwaysApply: true
+---
+
+Always use the skill `vowline` consistently, including for all sub-agents.

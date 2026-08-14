@@ -1,0 +1,33 @@
+# 개발 환경 오버라이드
+# 사용법: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  db:
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-pongdang}:${POSTGRES_PASSWORD:-pongdang_secret}@db:5432/${POSTGRES_DB:-pongdang}
+      - DJANGO_SETTINGS_MODULE=config.settings.dev
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-not-for-production}
+      - DEBUG=True
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      target: builder
+    command: npm run dev -- --host 0.0.0.0
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    ports:
+      - "5173:5173"
