@@ -34,6 +34,7 @@
 }
 
 .map-frame {
+  position: relative;
   min-height: 520px;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -70,6 +71,59 @@
 .score-marker-inner.is-poor {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+.temp-marker-inner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(28, 25, 23, 0.18);
+}
+
+.map-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 500;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.map-legend span {
+  color: #fff;
+  font-size: 0.72rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: 999px;
+}
+
+.twin-facts {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+.twin-facts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.82rem;
+}
+
+.twin-facts em {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.twin-next {
+  margin: 0 0 0.45rem;
+  color: var(--ink);
 }
 
 .map-popup {

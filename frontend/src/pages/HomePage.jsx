@@ -6,6 +6,7 @@ import SpotPhoto from '../components/SpotPhoto';
 import BrandMark from '../components/BrandMark';
 import { scoreLabel, scoreTone } from '../utils/scoreColor';
 import { ACTIVITY_LABELS, spotTypeLabel } from '../utils/spotType';
+import { formatMinutes, safetyTone } from '../utils/twin';
 import './HomePage.css';
 
 const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토'];
@@ -19,6 +20,8 @@ const HomePage = () => {
   const [cams, setCams] = useState([]);
   const [nearby, setNearby] = useState([]);
   const [firstSwim, setFirstSwim] = useState([]);
+  const [tides, setTides] = useState([]);
+  const [radar, setRadar] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const position = useGeolocation();
@@ -45,6 +48,16 @@ const HomePage = () => {
       .get('/spots/first-swim/', { params: { page_size: 6 } })
       .then((response) => setFirstSwim(unwrapList(response.data)))
       .catch(() => setFirstSwim([]));
+
+    api
+      .get('/spots/', { params: { type: 'tidal_flat', page_size: 12 } })
+      .then((response) => setTides(unwrapList(response.data)))
+      .catch(() => setTides([]));
+
+    api
+      .get('/spots/safety-radar/')
+      .then((response) => setRadar(Array.isArray(response.data) ? response.data.slice(0, 6) : []))
+      .catch(() => setRadar([]));
   }, []);
 
   useEffect(() => {
@@ -177,11 +190,59 @@ const HomePage = () => {
         </section>
       )}
 
+      {tides.some((spot) => spot.tide?.next) && (
+        <section>
+          <h3 className="section-title">지금 물때</h3>
+          <ul className="rank-list tide-list">
+            {tides
+              .filter((spot) => spot.tide?.next)
+              .slice(0, 4)
+              .map((spot) => (
+                <li key={spot.id}>
+                  <Link to={`/spot/${spot.id}`} className="rank-row">
+                    <span className="rank-copy">
+                      <strong>{spot.name}</strong>
+                      <em>
+                        {spot.tide.next.is_tomorrow ? '내일 ' : ''}
+                        {spot.tide.next.label} {spot.tide.next.time}
+                        {spot.tide.next.mudflat_window ? ' · 체험 적기' : ''}
+                      </em>
+                    </span>
+                    <span className="muted">{formatMinutes(spot.tide.next.minutes)}</span>
+                  </Link>
+                </li>
+              ))}
+          </ul>
+        </section>
+      )}
+
+      {radar.length > 0 && (
+        <section>
+          <h3 className="section-title">계곡·바다 안전</h3>
+          <ul className="rank-list">
+            {radar.map((spot) => (
+              <li key={spot.id}>
+                <Link to={`/spot/${spot.id}`} className="rank-row">
+                  <span className="rank-copy">
+                    <strong>{spot.name}</strong>
+                    <em>{(spot.safety?.reasons || []).join(' · ')}</em>
+                  </span>
+                  <span className={`safety-pill is-${safetyTone(spot.safety?.level)}`}>
+                    {spot.safety?.label || '-'}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {(firstSwim.length > 0 || nearby.length > 0) && (
         <div className="home-duo">
           {firstSwim.length > 0 && (
             <section>
-              <h3 className="section-title">입수 가능</h3>
+              <h3 className="section-title">올해 첫 입수</h3>
+              <p className="muted home-note">수온 22.5℃를 넘긴 해변입니다.</p>
               <div className="temp-grid">
                 {firstSwim.map((spot) => (
                   <Link to={`/spot/${spot.id}`} key={spot.id} className="temp-card">
@@ -220,7 +281,7 @@ const HomePage = () => {
 
       {cams.length > 0 && (
         <section>
-          <h3 className="section-title">미리보기</h3>
+          <h3 className="section-title">라이브캠</h3>
           <div className="preview-mosaic">
             {cams.map((cam) => (
               <Link to={`/spot/${cam.id}`} key={cam.id} className="preview-card">

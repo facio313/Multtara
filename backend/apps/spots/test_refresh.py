@@ -42,3 +42,24 @@ class RefreshConditionsCommandTests(TestCase):
         self.assertIn("Refreshed 1", out.getvalue())
         self.assertEqual(self.spot.forecasts.count(), 7)
         self.assertTrue(self.spot.scores.exists())
+
+    @patch("apps.spots.management.commands.refresh_conditions.sleep", side_effect=StopIteration)
+    @patch("apps.spots.management.commands.refresh_conditions.sync_tour")
+    @patch("apps.spots.management.commands.refresh_conditions.sync_marine")
+    @patch("apps.spots.management.commands.refresh_conditions.sync_weather")
+    def test_loop_sleeps_after_refresh(self, weather, marine, tour, sleeper):
+        weather.return_value = {"changed": [], "saved": True}
+        marine.return_value = {"skipped": True, "reason": "no KHOA obs code"}
+        tour.return_value = {"saved": True}
+        out = StringIO()
+        with self.assertRaises(StopIteration):
+            call_command(
+                "refresh_conditions",
+                spot_id=self.spot.id,
+                skip_tour=True,
+                loop=True,
+                interval=60,
+                stdout=out,
+            )
+        sleeper.assert_called_once_with(60)
+        self.assertIn("sleeping 60s", out.getvalue())

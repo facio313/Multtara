@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from apps.conditions.models import WaterCondition
 from apps.spots.models import WaterSpot
-from services.conditions_sync import sync_weather
+from services.conditions_sync import sync_marine, sync_weather
 from services.grid_converter import latlon_to_grid
 from services.marine import fetch_tide_schedule, fetch_water_temperature
 from services.public_data import PublicDataError, get_json, iter_records, result_code
@@ -246,6 +246,16 @@ class ForecastFromOutlookTests(TestCase):
         latest = WaterCondition.objects.filter(spot=self.spot).order_by("-fetched_at").first()
         self.assertEqual(latest.air_temp, 21.0)
         self.assertEqual(latest.wind_speed, 1.2)
+
+    @patch("services.conditions_sync.fetch_tide_schedule")
+    @patch("services.conditions_sync.fetch_water_temperature")
+    def test_marine_keeps_tide_when_temp_fails(self, temp, tide):
+        temp.side_effect = PublicDataError("API error 41")
+        tide.return_value = {"low_tide": ["03:35"], "high_tide": ["10:05"]}
+        result = sync_marine(self.spot)
+        self.assertIn("tide_schedule", result["changed"])
+        latest = WaterCondition.objects.filter(spot=self.spot).order_by("-fetched_at").first()
+        self.assertEqual(latest.tide_schedule["low_tide"], ["03:35"])
 
     def test_missing_key_is_explicit(self):
         with patch("services.public_data.resolve_service_key", return_value=""):

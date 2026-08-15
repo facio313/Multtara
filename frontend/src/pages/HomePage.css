@@ -319,11 +319,25 @@
   font-size: 0.92rem;
 }
 
-.temp-card em {
-  font-style: normal;
-  color: var(--muted);
+.home-note {
+  margin: -0.4rem 0 0.7rem;
+}
+
+.safety-pill {
   font-size: 0.82rem;
-  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.safety-pill.is-danger {
+  color: var(--danger);
+}
+
+.safety-pill.is-caution {
+  color: var(--accent);
+}
+
+.safety-pill.is-safe {
+  color: var(--muted);
 }
 
 .preview-mosaic {

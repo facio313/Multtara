@@ -64,6 +64,7 @@ SUCCESS_CODES = {"00", "0000", "0", "NORMAL", "NORMAL_SERVICE"}
 HINTS = {
     "12": "오픈API 서비스가 없거나 폐기되었습니다. TourAPI는 KorService2를 사용합니다.",
     "30": "data.go.kr에서 해당 API 활용신청이 되어 있지 않습니다.",
+    "41": "해당 관측 항목이 일시적으로 없습니다.",
 }
 
 

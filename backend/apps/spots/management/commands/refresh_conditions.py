@@ -1,3 +1,5 @@
+from time import sleep
+
 from django.core.management.base import BaseCommand
 
 from apps.spots.management.commands._common import add_spot_arguments, iter_spots
@@ -13,8 +15,19 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         add_spot_arguments(parser)
         parser.add_argument("--skip-tour", action="store_true")
+        parser.add_argument("--loop", action="store_true")
+        parser.add_argument("--interval", type=int, default=10800)
 
     def handle(self, *args, **options):
+        while True:
+            self.refresh_once(options)
+            if not options["loop"]:
+                return
+            interval = max(60, options["interval"])
+            self.stdout.write(f"sleeping {interval}s")
+            sleep(interval)
+
+    def refresh_once(self, options):
         spots = list(iter_spots(options.get("spot_id")))
         if not spots:
             self.stdout.write(self.style.WARNING("No spots found."))

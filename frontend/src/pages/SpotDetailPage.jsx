@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import api from '../services/api';
 import SpotPhoto from '../components/SpotPhoto';
 import { scoreLabel, scoreTone } from '../utils/scoreColor';
 import { ACTIVITY_LABELS, spotTypeLabel } from '../utils/spotType';
+import { formatMinutes, safetyTone } from '../utils/twin';
 import './SpotDetailPage.css';
 
 const WEEKDAY = ['일', '월', '화', '수', '목', '금', '토'];
@@ -65,7 +66,10 @@ const SpotDetailPage = () => {
     const date = new Date(`${row.forecast_date}T00:00:00`);
     return { name: WEEKDAY[date.getDay()], score: Math.round(row.predicted_index) };
   });
-  const tide = condition.tide_schedule || {};
+  const tide = spot.tide || {};
+  const nxt = tide.next;
+  const safety = spot.safety || {};
+  const live = spot.livecam || {};
 
   return (
     <div className="page detail-page">
@@ -73,7 +77,18 @@ const SpotDetailPage = () => {
         <ArrowLeft size={16} /> 뒤로
       </button>
 
-      <SpotPhoto className="detail-photo" spot={spot} alt={spot.name} />
+      {live.is_live && live.embed_url ? (
+        <div className="detail-live">
+          <iframe
+            title={`${spot.name} 라이브캠`}
+            src={live.embed_url}
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      ) : (
+        <SpotPhoto className="detail-photo" spot={spot} alt={spot.name} />
+      )}
 
       <header className="detail-head">
         <div>
@@ -86,6 +101,32 @@ const SpotDetailPage = () => {
         </div>
       </header>
 
+      {safety.label && (
+        <section className={`safety-card is-${safetyTone(safety.level)}`}>
+          <h2>안전</h2>
+          <p>
+            <strong>{safety.label}</strong>
+            {(safety.reasons || []).join(' · ')}
+          </p>
+        </section>
+      )}
+
+      {nxt && (
+        <section className="tide-card">
+          <h2 className="section-title">물때</h2>
+          <p className="tide-next">
+            {nxt.is_tomorrow ? '내일 ' : ''}{nxt.label} {nxt.time}
+            <em>{formatMinutes(nxt.minutes)}</em>
+          </p>
+          {spot.type === 'tidal_flat' && nxt.mudflat_window && (
+            <p className="muted">간조가 가까워 갯벌 체험 적기입니다.</p>
+          )}
+          <p className="muted tide">
+            간조 {(tide.low_tide || []).join(', ') || '-'} · 만조 {(tide.high_tide || []).join(', ') || '-'}
+          </p>
+        </section>
+      )}
+
       <section>
         <h2 className="section-title">지금</h2>
         <dl className="facts">
@@ -93,14 +134,13 @@ const SpotDetailPage = () => {
           <div><dt>기온</dt><dd>{formatValue(condition.air_temp, '°C')}</dd></div>
           <div><dt>풍속</dt><dd>{formatValue(condition.wind_speed, ' m/s')}</dd></div>
           <div><dt>파고</dt><dd>{formatValue(condition.wave_height, ' m')}</dd></div>
+          <div><dt>강수</dt><dd>{formatValue(condition.rainfall_recent, 'mm')}</dd></div>
+          <div><dt>수위</dt><dd>{formatValue(condition.water_level, 'm')}</dd></div>
+          <div><dt>자외선</dt><dd>{formatValue(condition.uv_index, '')}</dd></div>
           <div><dt>수질</dt><dd>{labeled(condition.water_quality_grade, QUALITY_LABELS)}</dd></div>
           <div><dt>이안류</dt><dd>{labeled(condition.rip_current_risk, RISK_LABELS)}</dd></div>
         </dl>
-        {(tide.low_tide || tide.high_tide) && (
-          <p className="muted tide">
-            간조 {(tide.low_tide || []).join(', ') || '-'} · 만조 {(tide.high_tide || []).join(', ') || '-'}
-          </p>
-        )}
+        {condition.weather_alert ? <p className="muted tide">{condition.weather_alert}</p> : null}
       </section>
 
       {activityScores.length > 0 && (
@@ -139,6 +179,12 @@ const SpotDetailPage = () => {
             </ResponsiveContainer>
           </div>
         </section>
+      )}
+
+      {spot.livecam_url && !live.is_live && (
+        <p className="muted">
+          공개 CCTV가 없어 장소 사진을 보여 줍니다. <Link to="/livecam">라이브캠</Link>
+        </p>
       )}
 
       {spot.description && (

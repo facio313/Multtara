@@ -7,7 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from apps.conditions.models import ConditionScore, WaterCondition
+from apps.conditions.models import ConditionScore, CrowdLevel, WaterCondition
 from apps.conditions.serializers import ConditionScoreSerializer, WaterConditionSerializer
 from apps.forecasts.models import WaterForecast
 from apps.forecasts.serializers import WaterForecastSerializer
@@ -51,6 +51,7 @@ class WaterSpotViewSet(viewsets.ReadOnlyModelViewSet):
             .prefetch_related(
                 Prefetch("scores", queryset=ConditionScore.objects.order_by("-computed_at")),
                 Prefetch("conditions", queryset=WaterCondition.objects.order_by("-fetched_at")),
+                Prefetch("crowd_levels", queryset=CrowdLevel.objects.order_by("-updated_at")),
             )
             .order_by("id")
         )
@@ -192,3 +193,16 @@ class WaterSpotViewSet(viewsets.ReadOnlyModelViewSet):
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="safety-radar")
+    def safety_radar(self, request):
+        queryset = self.filter_queryset(self.get_queryset()).filter(
+            type__in=("valley", "riverside", "waterfall", "sea")
+        )
+        serializer = self.get_serializer(queryset, many=True)
+        order = {"danger": 0, "caution": 1, "safe": 2}
+        rows = sorted(
+            serializer.data,
+            key=lambda row: (order.get((row.get("safety") or {}).get("level"), 9), row["name"]),
+        )
+        return Response(rows)

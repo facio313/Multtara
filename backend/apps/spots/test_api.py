@@ -70,3 +70,26 @@ class SpotApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data["days"]), 7)
         self.assertEqual(response.data["source"], "stored")
+
+    def test_detail_includes_safety_tide_and_twin_facts(self):
+        response = self.client.get(f"/api/v1/spots/{self.spot.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["safety"]["level"], "safe")
+        self.assertIn("next", response.data["tide"])
+        self.assertFalse(response.data["livecam"]["is_live"])
+        self.assertTrue(response.data["twin_facts"])
+
+    def test_safety_radar_lists_sea_and_valley(self):
+        WaterSpot.objects.create(
+            type="valley",
+            name="가평 용추계곡",
+            lat=37.8,
+            lng=127.5,
+            region="경기",
+            address="가평",
+        )
+        response = self.client.get("/api/v1/spots/safety-radar/")
+        self.assertEqual(response.status_code, 200)
+        names = [row["name"] for row in response.data]
+        self.assertIn("해운대 해수욕장", names)
+        self.assertIn("가평 용추계곡", names)

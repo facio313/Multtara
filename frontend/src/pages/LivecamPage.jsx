@@ -19,6 +19,7 @@ const LivecamPage = () => {
   const [filter, setFilter] = useState('전체');
   const [cams, setCams] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [watching, setWatching] = useState(null);
 
   useEffect(() => {
     api
@@ -38,12 +39,17 @@ const LivecamPage = () => {
       }),
     [cams, selected]
   );
+  const liveCount = filteredCams.filter((cam) => cam.livecam?.is_live).length;
 
   return (
     <div className="page cam-page">
       <header className="page-head">
-        <h1>미리보기</h1>
-        <p>실시간 CCTV가 아니라 장소 사진입니다.</p>
+        <h1>라이브캠</h1>
+        <p>
+          {liveCount > 0
+            ? `공개 스트림 ${liveCount}곳 · 나머지는 장소 사진입니다.`
+            : '지자체 CCTV URL이 없어 지금은 장소 사진입니다. 공개 스트림을 넣으면 여기서 재생됩니다.'}
+        </p>
       </header>
 
       <div className="chip-row">
@@ -65,21 +71,62 @@ const LivecamPage = () => {
       )}
 
       <div className="cam-grid">
-        {filteredCams.map((cam) => (
-          <Link to={`/spot/${cam.id}`} key={cam.id} className="cam-card">
-            <SpotPhoto className="cam-image" spot={cam} alt={cam.name} />
-            <div className="cam-meta">
-              <h2>{cam.name}</h2>
-              <p className="muted">
-                {cam.region} · {spotTypeLabel(cam.type)}
-              </p>
-              <span className={`score is-${scoreTone(cam.water_index)}`}>
-                {cam.water_index ?? '-'}
-              </span>
-            </div>
-          </Link>
-        ))}
+        {filteredCams.map((cam) => {
+          const live = cam.livecam?.is_live && cam.livecam?.embed_url;
+          return (
+            <article key={cam.id} className="cam-card">
+              {live ? (
+                <button
+                  type="button"
+                  className="cam-live-btn"
+                  onClick={() => setWatching(cam)}
+                >
+                  <iframe
+                    title={cam.name}
+                    src={cam.livecam.embed_url}
+                    allow="autoplay; encrypted-media"
+                  />
+                  <span className="live-badge">LIVE</span>
+                </button>
+              ) : (
+                <Link to={`/spot/${cam.id}`}>
+                  <SpotPhoto className="cam-image" spot={cam} alt={cam.name} />
+                </Link>
+              )}
+              <div className="cam-meta">
+                <h2>
+                  <Link to={`/spot/${cam.id}`}>{cam.name}</Link>
+                </h2>
+                <p className="muted">
+                  {cam.region} · {spotTypeLabel(cam.type)}
+                  {live ? '' : ' · 사진'}
+                </p>
+                <span className={`score is-${scoreTone(cam.water_index)}`}>
+                  {cam.water_index ?? '-'}
+                </span>
+              </div>
+            </article>
+          );
+        })}
       </div>
+
+      {watching?.livecam?.embed_url && (
+        <div className="cam-theater" role="dialog" aria-label="라이브 물멍">
+          <iframe
+            title={watching.name}
+            src={watching.livecam.embed_url}
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+          />
+          <div className="cam-theater-bar">
+            <strong>{watching.name}</strong>
+            <span className={`score is-${scoreTone(watching.water_index)}`}>
+              {watching.water_index ?? '-'}
+            </span>
+            <button type="button" onClick={() => setWatching(null)}>닫기</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

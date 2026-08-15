@@ -8,7 +8,7 @@ const navItems = [
   { path: '/', label: '홈', icon: House },
   { path: '/map', label: '지도', icon: Map },
   { path: '/forecast', label: '예보', icon: CalendarDays },
-  { path: '/livecam', label: '미리보기', icon: Video },
+  { path: '/livecam', label: '라이브캠', icon: Video },
   { path: '/profile', label: '내 정보', icon: User },
 ];
 

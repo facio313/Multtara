@@ -8,6 +8,7 @@ from django.utils import timezone
 from apps.conditions.models import WaterCondition
 from apps.spots.models import WaterSpot
 from services.marine import fetch_tide_schedule, fetch_water_temperature
+from services.public_data import PublicDataError
 from services.stations import CACHE_TTL, khoa_obs_code, mid_land_id, mid_ta_id
 from services.tourapi import search_spot
 from services.weather import fetch_ultra_short_observation, seven_day_outlook
@@ -79,16 +80,30 @@ def sync_marine(spot: WaterSpot, *, dry_run: bool = False) -> dict:
     if not obs_code:
         return {"skipped": True, "reason": "no KHOA obs code"}
 
-    water_temp = fetch_water_temperature(obs_code)
-    tide_schedule = fetch_tide_schedule(obs_code)
+    errors: list[str] = []
+    water_temp = None
+    tide_schedule = None
+    try:
+        water_temp = fetch_water_temperature(obs_code)
+    except PublicDataError as exc:
+        errors.append(str(exc))
+    try:
+        tide_schedule = fetch_tide_schedule(obs_code)
+    except PublicDataError as exc:
+        errors.append(str(exc))
+
+    has_tide = bool(tide_schedule and (tide_schedule.get("low_tide") or tide_schedule.get("high_tide")))
+    if water_temp is None and not has_tide and errors:
+        raise PublicDataError(errors[0])
+
     payload = {"water_temp": water_temp, "tide_schedule": tide_schedule}
     if dry_run:
-        return {"obs_code": obs_code, **payload, "saved": False}
+        return {"obs_code": obs_code, **payload, "saved": False, "errors": errors}
 
     condition = working_condition(spot)
     changed = apply_fields(condition, payload)
     save_condition(condition, changed)
-    return {"obs_code": obs_code, **payload, "saved": True, "changed": changed}
+    return {"obs_code": obs_code, **payload, "saved": True, "changed": changed, "errors": errors}
 
 
 def sync_tour(spot: WaterSpot, *, dry_run: bool = False) -> dict:

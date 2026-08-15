@@ -41,6 +41,22 @@ services:
     ports:
       - "8000:8000"
 
+  refresher:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-pongdang}:${POSTGRES_PASSWORD:-pongdang_secret}@db:5432/${POSTGRES_DB:-pongdang}
+      - DJANGO_SETTINGS_MODULE=config.settings.prod
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - DATA_GO_KR_SERVICE_KEY=${DATA_GO_KR_SERVICE_KEY:-}
+      - TOUR_API_KEY=${TOUR_API_KEY:-}
+      - KMA_API_KEY=${KMA_API_KEY:-}
+      - KHOA_API_KEY=${KHOA_API_KEY:-}
+    command: python manage.py refresh_conditions --skip-tour --loop --interval ${REFRESH_INTERVAL_SECONDS:-10800}
+
   frontend:
     build: ./frontend
     restart: unless-stopped

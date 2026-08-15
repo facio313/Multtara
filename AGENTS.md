@@ -58,11 +58,14 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 
 | 영역 | 선택 |
 |---|---|
-| 웹 | React (Vite) · React Router · Zustand · Axios |
+| 웹 | React (Vite) · React Router · Zustand · Axios · Leaflet (카카오/네이버맵은 미선정) |
 | 서버 | Python 3.11+ · Django · Django REST Framework |
 | DB | PostgreSQL 15 |
 | 인프라 | Docker · Docker Compose · Nginx |
 | 배포 | Raspberry Pi 5 (ARM64) |
+
+공공데이터: `DATA_GO_KR_SERVICE_KEY` (TourAPI / 기상청 / 해양조사원).  
+갱신: `python manage.py refresh_conditions --skip-tour` 또는 Compose `refresher` 서비스(`--loop`, 기본 3시간).
 
 ---
 
