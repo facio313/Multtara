@@ -67,6 +67,8 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 공공데이터: `DATA_GO_KR_SERVICE_KEY` (TourAPI / 기상청 / 해양조사원).  
 갱신: `python manage.py refresh_conditions --skip-tour` 또는 Compose `refresher` 서비스(`--loop`, 기본 3시간).
 
+인증: Django **세션 쿠키**(httpOnly, SameSite=Lax) + **세션 CSRF**. JWT/로컬스토리지 토큰 없음. 비밀번호 Argon2, 최소 12자, 실패 5회 잠금. 소셜 로그인은 아직 없음.
+
 ---
 
 ## Branch Strategy

@@ -7,3 +7,4 @@ gunicorn>=21.2,<22.0
 python-decouple>=3.8,<4.0
 dj-database-url>=2.1,<3.0
 requests>=2.31,<3.0
+argon2-cffi>=23.1,<26.0
