@@ -44,7 +44,17 @@ def is_skippable_error(exc: Exception) -> bool:
     if code in SKIPPABLE_CODES:
         return True
     text = str(exc)
-    return any(token in text for token in ("API error 01", "API error 30", "API error 41", "Missing API key"))
+    return any(
+        token in text
+        for token in (
+            "API error 01",
+            "API error 10",
+            "API error 11",
+            "API error 30",
+            "API error 41",
+            "Missing API key",
+        )
+    )
 
 
 def resolve_service_key(*env_names: str) -> str:
@@ -73,7 +83,7 @@ def _as_list(value: Any) -> list:
 
 
 SUCCESS_CODES = {"00", "0000", "0", "NORMAL", "NORMAL_SERVICE"}
-SKIPPABLE_CODES = {"01", "30", "41"}
+SKIPPABLE_CODES = {"01", "10", "11", "30", "41"}
 HINTS = {
     "01": "APPLICATION_ERROR. data.go.kr에서 해당 API 활용신청이 되어 있는지 확인하세요.",
     "12": "오픈API 서비스가 없거나 폐기되었습니다. TourAPI는 KorService2를 사용합니다.",

@@ -196,7 +196,13 @@ class WeatherMarineTourParseTests(TestCase):
             "body": {
                 "items": {
                     "item": [
-                        {"beachNm": "대천해수욕장", "idxCn": "관심", "wh": "0.6", "wtem": "24.2"},
+                        {
+                            "obsvtrNm": "대천 해수욕장",
+                            "lastScrCn": "관심",
+                            "lastScr": 7.0,
+                            "wvhgt": 0.6,
+                            "wtem": 24.2,
+                        },
                     ]
                 }
             },
@@ -210,8 +216,28 @@ class WeatherMarineTourParseTests(TestCase):
             "body": {
                 "items": {
                     "item": [
-                        {"plcNm": "광안리해수욕장", "grdCn": "보통", "maxWh": "0.4"},
-                        {"plcNm": "해운대해수욕장", "grdCn": "좋음", "maxWh": "0.8", "wtem": "26.1"},
+                        {
+                            "bbchNm": "광안리해수욕장",
+                            "totalIndex": "보통",
+                            "maxWvhgt": "0.4",
+                            "predcYmd": "2026-08-15",
+                            "predcNoonSeCd": "오전",
+                        },
+                        {
+                            "bbchNm": "해운대해수욕장",
+                            "totalIndex": "매우좋음",
+                            "maxWvhgt": "0.8",
+                            "avgWtem": "26.1",
+                            "predcYmd": "2026-08-15",
+                            "predcNoonSeCd": "오후",
+                        },
+                        {
+                            "bbchNm": "송정솔바람해수욕장",
+                            "totalIndex": "좋음",
+                            "maxWvhgt": "1.2",
+                            "predcYmd": "2026-08-15",
+                            "predcNoonSeCd": "오후",
+                        },
                     ]
                 }
             },
@@ -219,7 +245,10 @@ class WeatherMarineTourParseTests(TestCase):
         spot = type("Spot", (), {"name": "해운대 해수욕장", "type": "sea"})()
         extras = fetch_marine_extras(spot)
         self.assertEqual(extras["wave_height"], 0.8)
-        self.assertEqual(extras["marine_indices"]["beach"]["grade"], "좋음")
+        self.assertEqual(extras["marine_indices"]["beach"]["grade"], "매우좋음")
+        from services.stations import match_score
+        self.assertGreaterEqual(match_score("송정 해수욕장", "송정해수욕장"), 90)
+        self.assertLess(match_score("송정 해수욕장", "송정솔바람해수욕장"), 90)
 
     @patch("services.marine._service_key", return_value="test-key")
     @patch("services.marine.get_json")

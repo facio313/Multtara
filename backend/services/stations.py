@@ -75,10 +75,10 @@ SPOT_KHOA_OBS = {
     "무창포 갯벌": "DT_0004",
 }
 
-# Rip-current beaches published by KHOA (sample code DAECHON).
+# Rip-current beaches. Live codes: HAE, SONGJUNG (not SONGJEONG), DAECHON, ...
 SPOT_RIP_BEACH = {
-    "해운대 해수욕장": "HAEUNDAE",
-    "송정 해수욕장": "SONGJEONG",
+    "해운대 해수욕장": "HAE",
+    "송정 해수욕장": "SONGJUNG",
     "중문 색달 해변": "JUNGMUN",
     "대천 해수욕장": "DAECHON",
     "경포 해수욕장": "GYEONGPO",
@@ -86,16 +86,24 @@ SPOT_RIP_BEACH = {
     "양양 설악비치": "NAKSAN",
 }
 
-# Optional noonWave buoy codes. Beach/surf index wave height is preferred.
-SPOT_WAVE_OBS = {}
+# noonWave buoys verified 2026-08-15 via GetNoonWaveApiService.
+SPOT_WAVE_OBS = {
+    "해운대 해수욕장": "TW_0062",
+    "송정 해수욕장": "TW_0090",
+    "중문 색달 해변": "TW_0075",
+    "대천 해수욕장": "TW_0069",
+    "경포 해수욕장": "TW_0089",
+    "속초 해수욕장": "TW_0093",
+    "양양 설악비치": "TW_0091",
+}
 
 PLACE_ALIASES = {
     "양양 설악비치": ("낙산", "설악"),
-    "중문 색달 해변": ("중문", "색달"),
+    "중문 색달 해변": ("중문색달", "중문", "색달"),
     "동막 해수욕장 갯벌": ("동막",),
     "선재도 갯벌": ("선재",),
     "무창포 갯벌": ("무창포",),
-    "광안리 해수욕장": ("광안",),
+    "광안리 해수욕장": ("광안리", "광안"),
 }
 
 CACHE_TTL = {
@@ -190,21 +198,62 @@ def place_tokens(spot_name: str) -> list[str]:
     return [token for token in tokens if token]
 
 
+PLACE_NAME_KEYS = (
+    "bbchNm",
+    "surfPlcNm",
+    "mdftExpcnVlgNm",
+    "obsvtrNm",
+    "plcNm",
+    "placeNm",
+    "placeName",
+    "beachNm",
+    "obsName",
+    "staNm",
+    "name",
+    "title",
+)
+
+
+def _compact(value: str) -> str:
+    return str(value or "").replace(" ", "")
+
+
+def _stem(value: str) -> str:
+    text = _compact(value)
+    for suffix in ("해수욕장", "해변", "갯벌", "비치"):
+        if text.endswith(suffix):
+            return text[: -len(suffix)]
+    return text
+
+
+def row_place_name(row: dict) -> str:
+    for key in PLACE_NAME_KEYS:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def match_score(spot_name: str, place: str) -> int:
+    if not place:
+        return 0
+    compact_spot = _compact(spot_name)
+    compact_place = _compact(place)
+    if compact_spot == compact_place or _stem(compact_spot) == _stem(compact_place):
+        return 100
+    if compact_place == _stem(compact_spot) + "해수욕장":
+        return 95
+    best = 0
+    for token in place_tokens(spot_name):
+        token_compact = _compact(token)
+        if len(token_compact) < 2:
+            continue
+        if compact_place in {token_compact, token_compact + "해수욕장"}:
+            best = max(best, 90)
+        elif token_compact in compact_place:
+            best = max(best, 40)
+    return best
+
+
 def row_matches_spot(spot_name: str, row: dict) -> bool:
-    haystack = " ".join(
-        str(row.get(key) or "")
-        for key in (
-            "plcNm",
-            "placeNm",
-            "placeName",
-            "beachNm",
-            "obsName",
-            "staNm",
-            "name",
-            "title",
-        )
-    )
-    compact = haystack.replace(" ", "")
-    if not compact:
-        return False
-    return any(token.replace(" ", "") in compact for token in place_tokens(spot_name))
+    return match_score(spot_name, row_place_name(row)) >= 90

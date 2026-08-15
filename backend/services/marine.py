@@ -10,7 +10,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from services.public_data import PublicDataError, get_json, is_skippable_error, iter_records, require_service_key
-from services.stations import CACHE_TTL, rip_beach_code, row_matches_spot, wave_obs_code
+from services.stations import CACHE_TTL, match_score, rip_beach_code, row_place_name, wave_obs_code
 
 KST = ZoneInfo("Asia/Seoul")
 TEMP_URL = "https://apis.data.go.kr/1192136/surveyWaterTemp/GetSurveyWaterTempApiService"
@@ -203,27 +203,64 @@ def _text(row: dict, *keys: str) -> str:
 
 def _forecast_rows(kind: str, url: str) -> list[dict]:
     day = _today()
-    return _soft_json(
-        url,
-        {"type": "json", "numOfRows": 300, "pageNo": 1, "reqDate": day},
-        cache_key=f"khoa:{kind}:list:{day}",
-        ttl=CACHE_TTL["marine_index"],
-    )
+    rows: list[dict] = []
+    for page in range(1, 9):
+        chunk = _soft_json(
+            url,
+            {"type": "json", "numOfRows": 300, "pageNo": page, "reqDate": day},
+            cache_key=f"khoa:{kind}:list:{day}:p{page}",
+            ttl=CACHE_TTL["marine_index"],
+        )
+        rows.extend(chunk)
+        if len(chunk) < 300:
+            break
+    return rows
+
+
+def _pick_period(rows: list[dict]) -> dict:
+    now = datetime.now(KST)
+    today = now.strftime("%Y-%m-%d")
+    noon = "오전" if now.hour < 12 else "오후"
+
+    def stamp(row: dict) -> str:
+        return str(row.get("predcYmd") or row.get("obsrvnDt") or "")
+
+    dated = [row for row in rows if today in stamp(row)] or rows
+    period = [row for row in dated if str(row.get("predcNoonSeCd") or "") == noon]
+    return (period or dated)[-1]
 
 
 def _match_row(spot_name: str, rows: list[dict]) -> dict | None:
+    scored: list[tuple[int, dict]] = []
     for row in rows:
-        if row_matches_spot(spot_name, row):
-            return row
-    return None
+        score = match_score(spot_name, row_place_name(row))
+        if score >= 90:
+            scored.append((score, row))
+    if not scored:
+        return None
+    best = max(item[0] for item in scored)
+    return _pick_period([row for score, row in scored if score == best])
 
 
 def _index_payload(row: dict, kind: str) -> dict:
-    grade = _text(row, "grdCn", "beachGrd", "idxCn", "indexCn", "grade", "idxNm", "surfGrd")
-    score = _first_number(row, "score", "beachScr", "idx", "index", "surfScr", "mudScr")
-    wave = _first_number(row, "maxWh", "wh", "wavHgt", "waveHeight", "sigWh", "swh")
-    water_temp = _first_number(row, "wtem", "waterTemp", "tw", "wt")
-    payload = {"kind": kind, "grade": grade, "place": _text(row, "plcNm", "placeNm", "beachNm", "placeName")}
+    grade = _text(
+        row,
+        "totalIndex",
+        "lastScrCn",
+        "grdCn",
+        "beachGrd",
+        "idxCn",
+        "opnStat",
+    )
+    score = _first_number(row, "lastScr", "score", "beachScr", "idx", "totalIndex")
+    wave = _first_number(row, "maxWvhgt", "avgWvhgt", "wvhgt", "maxWh", "wh", "wavHgt")
+    water_temp = _first_number(row, "avgWtem", "wtem", "waterTemp", "tw", "wt")
+    payload = {
+        "kind": kind,
+        "grade": grade,
+        "place": row_place_name(row),
+        "period": _text(row, "predcNoonSeCd"),
+    }
     if score is not None:
         payload["score"] = score
     if wave is not None:
@@ -261,15 +298,16 @@ def fetch_rip_current(beach_code: str, req_date: str | None = None) -> dict | No
     if not rows:
         return None
     row = rows[-1]
-    grade = _text(row, "idxCn", "grdCn", "ripIdx", "indexCn", "idxNm", "grade")
-    level = normalize_rip_level(grade) or normalize_rip_level(_text(row, "idx", "index"))
-    wave = _first_number(row, "wh", "maxWh", "wavHgt", "waveHeight")
+    grade = _text(row, "lastScrCn", "idxCn", "grdCn", "ripIdx", "grade")
+    level = normalize_rip_level(grade) or normalize_rip_level(_text(row, "lastScr", "idx", "index"))
+    wave = _first_number(row, "wvhgt", "maxWvhgt", "wh", "maxWh", "wavHgt")
     payload = {
         "kind": "rip",
         "grade": grade or level,
         "level": level,
+        "score": _first_number(row, "lastScr"),
         "message": _text(row, "wrnMsg", "warnMsg", "message", "rmk"),
-        "place": _text(row, "beachNm", "plcNm", "placeNm"),
+        "place": _text(row, "obsvtrNm", "beachNm", "plcNm", "placeNm"),
     }
     if wave is not None:
         payload["wave_height"] = wave
@@ -291,7 +329,7 @@ def fetch_wave_height(obs_code: str, req_date: str | None = None) -> float | Non
     )
     if not rows:
         return None
-    return _first_number(rows[-1], "wh", "sigWh", "maxWh", "wavHgt", "waveHeight", "swh", "avgWh")
+    return _first_number(rows[-1], "wvhgt", "maxWvhgt", "wh", "sigWh", "maxWh", "wavHgt", "waveHeight", "swh", "avgWh")
 
 
 def fetch_marine_extras(spot) -> dict:
@@ -317,10 +355,13 @@ def fetch_marine_extras(spot) -> dict:
         mud = fetch_forecast_index(name, "mudflat")
         if mud:
             indices["mudflat"] = mud
+        beach = fetch_forecast_index(name, "beach")
+        if beach:
+            indices.setdefault("beach", beach)
 
     wave = None
     for payload in indices.values():
-        if payload.get("wave_height") is not None:
+        if wave is None and payload.get("wave_height") is not None:
             wave = payload["wave_height"]
     if wave is None:
         wave = fetch_wave_height(wave_obs_code(spot))
