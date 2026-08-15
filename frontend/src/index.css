@@ -29,13 +29,11 @@
 }
 
 html {
-  min-width: 320px;
   scroll-behavior: smooth;
   background: var(--color-bg);
 }
 
 body {
-  min-width: 320px;
   min-height: 100vh;
   margin: 0;
   color: var(--color-text);
