@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import api from '../services/api';
 import SpotPhoto from '../components/SpotPhoto';
+import useAuthStore from '../stores/authStore';
 import { scoreLabel, scoreTone } from '../utils/scoreColor';
 import { ACTIVITY_LABELS, spotTypeLabel } from '../utils/spotType';
 import { formatMinutes, safetyTone } from '../utils/twin';
@@ -27,9 +28,14 @@ function labeled(value, map) {
 const SpotDetailPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const user = useAuthStore((state) => state.user);
+  const passport = useAuthStore((state) => state.passport);
+  const checkin = useAuthStore((state) => state.checkin);
   const [spot, setSpot] = useState(null);
   const [forecast, setForecast] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [checkinMessage, setCheckinMessage] = useState('');
+  const [checkingIn, setCheckingIn] = useState(false);
 
   useEffect(() => {
     const fetchSpot = async () => {
@@ -70,6 +76,15 @@ const SpotDetailPage = () => {
   const nxt = tide.next;
   const safety = spot.safety || {};
   const live = spot.livecam || {};
+  const visited = Boolean(passport?.stamps?.some((stamp) => String(stamp.spot_id) === String(spot.id)));
+
+  const submitCheckin = async () => {
+    setCheckingIn(true);
+    setCheckinMessage('');
+    const result = await checkin(spot.id);
+    setCheckingIn(false);
+    setCheckinMessage(result.ok ? '방문 인증을 남겼습니다.' : result.message);
+  };
 
   return (
     <div className="page detail-page">
@@ -100,6 +115,24 @@ const SpotDetailPage = () => {
           <p className="muted">{scoreLabel(swimScore)} · 물놀이 지수</p>
         </div>
       </header>
+
+      <section className="passport-checkin">
+        {!user && (
+          <p className="muted">
+            <Link to="/profile">로그인</Link>하면 방문 인증을 할 수 있습니다.
+          </p>
+        )}
+        {user && visited && <p className="muted">이 장소를 인증했습니다.</p>}
+        {user && !visited && (
+          <>
+            <button type="button" className="auth-submit" onClick={submitCheckin} disabled={checkingIn}>
+              {checkingIn ? '인증 중' : '방문 인증'}
+            </button>
+            <p className="muted">지금은 위치 확인 없이 인증합니다.</p>
+          </>
+        )}
+        {checkinMessage && <p className={checkinMessage.includes('남겼') ? 'muted' : 'auth-error'}>{checkinMessage}</p>}
+      </section>
 
       {safety.label && (
         <section className={`safety-card is-${safetyTone(safety.level)}`}>

@@ -11,17 +11,32 @@ function fieldError(data) {
   return '요청을 처리하지 못했습니다.';
 }
 
-const useAuthStore = create((set) => ({
+const useAuthStore = create((set, get) => ({
   user: null,
+  passport: null,
   ready: false,
+
+  async loadPassport() {
+    if (!get().user) {
+      set({ passport: null });
+      return;
+    }
+    try {
+      const { data } = await api.get('/passport/');
+      set({ passport: data });
+    } catch {
+      set({ passport: null });
+    }
+  },
 
   async bootstrap() {
     try {
       await refreshCsrf();
       const { data } = await api.get('/auth/me/');
       set({ user: data, ready: true });
+      await get().loadPassport();
     } catch {
-      set({ user: null, ready: true });
+      set({ user: null, passport: null, ready: true });
     }
   },
 
@@ -30,6 +45,7 @@ const useAuthStore = create((set) => ({
     try {
       const { data } = await api.post('/auth/register/', payload);
       set({ user: data });
+      await get().loadPassport();
       return { ok: true };
     } catch (error) {
       return { ok: false, message: fieldError(error.response?.data) };
@@ -41,6 +57,7 @@ const useAuthStore = create((set) => ({
     try {
       const { data } = await api.post('/auth/login/', payload);
       set({ user: data });
+      await get().loadPassport();
       return { ok: true };
     } catch (error) {
       return { ok: false, message: fieldError(error.response?.data) };
@@ -54,7 +71,7 @@ const useAuthStore = create((set) => ({
     } catch {
       // Session is cleared locally even if the network call fails.
     }
-    set({ user: null });
+    set({ user: null, passport: null });
   },
 
   async changePassword(payload) {
@@ -62,6 +79,19 @@ const useAuthStore = create((set) => ({
     try {
       await api.post('/auth/password/', payload);
       return { ok: true };
+    } catch (error) {
+      return { ok: false, message: fieldError(error.response?.data) };
+    }
+  },
+
+  async checkin(spotId) {
+    await refreshCsrf();
+    try {
+      const { data } = await api.post('/passport/checkin/', {
+        spot_id: spotId,
+      });
+      set({ passport: data });
+      return { ok: true, data };
     } catch (error) {
       return { ok: false, message: fieldError(error.response?.data) };
     }

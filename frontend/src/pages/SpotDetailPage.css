@@ -142,6 +142,27 @@
   max-width: 40rem;
 }
 
+.passport-checkin {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.passport-checkin .auth-submit {
+  border: 0;
+  background: var(--ink);
+  color: var(--on-ink);
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font-weight: 650;
+}
+
+.passport-checkin .auth-error {
+  margin: 0;
+  color: var(--danger);
+}
+
 @media (max-width: 768px) {
   .detail-photo {
     height: 200px;

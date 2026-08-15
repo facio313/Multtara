@@ -1,3 +1,9 @@
+.profile-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
 .profile-page .body-note {
   max-width: 36rem;
   line-height: 1.7;
@@ -54,4 +60,47 @@
   background: none;
   color: var(--muted);
   padding: 0;
+}
+
+.stamp-list a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  color: inherit;
+}
+
+.stamp-list em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.badge-list,
+.collection-list,
+.stamp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.badge-list li,
+.collection-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.badge-list span,
+.collection-list span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.collection-list progress {
+  width: 100%;
+  max-width: 22rem;
+  height: 0.45rem;
 }

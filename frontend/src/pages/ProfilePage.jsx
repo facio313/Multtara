@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import useAuthStore from '../stores/authStore';
 import './ProfilePage.css';
 
@@ -16,7 +17,7 @@ const EMPTY_PASSWORD = {
 };
 
 const ProfilePage = () => {
-  const { user, ready, login, register, logout, changePassword } = useAuthStore();
+  const { user, passport, ready, login, register, logout, changePassword } = useAuthStore();
   const [mode, setMode] = useState('login');
   const [authForm, setAuthForm] = useState(EMPTY_AUTH);
   const [passwordForm, setPasswordForm] = useState(EMPTY_PASSWORD);
@@ -174,7 +175,9 @@ const ProfilePage = () => {
     <div className="page profile-page">
       <header className="page-head">
         <h1>{user.username}</h1>
-        <p>로그인되어 있습니다. 패스포트는 다음 단계에서 붙입니다.</p>
+        <p>
+          방문 {passport?.visited_count ?? 0}곳 · 배지 {passport?.badges?.length ?? 0}개
+        </p>
       </header>
 
       <dl className="facts">
@@ -187,6 +190,56 @@ const ProfilePage = () => {
           <dd>{user.home_region || '-'}</dd>
         </div>
       </dl>
+
+      {passport?.badges?.length > 0 && (
+        <section>
+          <h2 className="section-title">배지</h2>
+          <ul className="badge-list">
+            {passport.badges.map((badge) => (
+              <li key={badge.id}>
+                <strong>{badge.title}</strong>
+                <span>{badge.description}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {passport?.collection?.length > 0 && (
+        <section>
+          <h2 className="section-title">도감</h2>
+          <ul className="collection-list">
+            {passport.collection.map((row) => (
+              <li key={row.type}>
+                <span>
+                  {row.label} {row.visited}/{row.total}
+                </span>
+                <progress max={row.total} value={row.visited} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {passport?.stamps?.length > 0 && (
+        <section>
+          <h2 className="section-title">스탬프</h2>
+          <ul className="stamp-list">
+            {passport.stamps.map((stamp) => (
+              <li key={stamp.id}>
+                <Link to={`/spot/${stamp.spot_id}`}>
+                  <strong>{stamp.name}</strong>
+                  <em>{stamp.region}</em>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {passport && passport.visited_count === 0 && (
+        <p className="muted">장소 상세에서 방문 인증을 하면 스탬프가 쌓입니다.</p>
+      )}
 
       <form className="auth-form" onSubmit={submitPassword} autoComplete="off">
         <h2 className="section-title">비밀번호 변경</h2>

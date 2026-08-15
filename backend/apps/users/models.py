@@ -15,8 +15,22 @@ class UserActivity(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 class Passport(models.Model):
-    user = models.ForeignKey('users.User', on_delete=models.CASCADE)
-    spot = models.ForeignKey('spots.WaterSpot', on_delete=models.CASCADE)
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="passport_stamps",
+    )
+    spot = models.ForeignKey(
+        "spots.WaterSpot",
+        on_delete=models.CASCADE,
+        related_name="passport_stamps",
+    )
     verified_at = models.DateTimeField(auto_now_add=True)
     badge_earned = models.JSONField(default=dict, blank=True)
     eco_action = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=("user", "spot"), name="unique_passport_visit"),
+        ]
+        ordering = ["-verified_at"]
