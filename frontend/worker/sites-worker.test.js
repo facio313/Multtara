@@ -71,6 +71,73 @@ test('worker preserves response status and headers while rewriting HTML only', a
   assert.match(await response.text(), /경포해변 · 퐁당 PongDang/);
 });
 
+test('worker serves the root SPA shell with route metadata for direct detail requests', async () => {
+  const fetchedPaths = [];
+  const response = await worker.fetch(
+    new Request('https://pongdang.example/spot/2'),
+    {
+      ASSETS: {
+        fetch: async (request) => {
+          const pathname = new URL(request.url).pathname;
+          fetchedPaths.push(pathname);
+          if (pathname === '/') {
+            return new Response(document, {
+              status: 200,
+              headers: { 'content-type': 'text/html; charset=UTF-8' },
+            });
+          }
+          return new Response('missing', {
+            status: 404,
+            headers: { 'content-type': 'text/plain; charset=UTF-8' },
+          });
+        },
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(fetchedPaths, ['/spot/2', '/']);
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+  assert.equal(response.headers.get('permissions-policy'), 'camera=(), microphone=(), geolocation=(self)');
+  assert.equal(response.headers.get('x-frame-options'), 'DENY');
+  assert.match(await response.text(), /<title>경포해변 · 퐁당 PongDang<\/title>/);
+});
+
+test('worker never turns missing API or static asset responses into the SPA shell', async () => {
+  const excludedPaths = [
+    '/api',
+    '/api/v1/spots/',
+    '/assets',
+    '/assets/',
+    '/assets/missing',
+    '/assets/missing.js',
+    '/assets/missing.abcdefghijklmn',
+  ];
+
+  for (const pathname of excludedPaths) {
+    const fetchedPaths = [];
+    const response = await worker.fetch(
+      new Request(`https://pongdang.example${pathname}`),
+      {
+        ASSETS: {
+          fetch: async (request) => {
+            fetchedPaths.push(new URL(request.url).pathname);
+            return new Response('missing', {
+              status: 404,
+              headers: { 'content-type': 'text/plain; charset=UTF-8' },
+            });
+          },
+        },
+      },
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(fetchedPaths, [pathname]);
+    assert.equal(await response.text(), 'missing');
+  }
+});
+
 test('unknown spot keeps site metadata and absolute root image', () => {
   const html = applyRouteMetadata(document, 'https://pongdang.example/spot/99999');
 

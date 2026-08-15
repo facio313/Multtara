@@ -129,9 +129,36 @@ export function applyRouteMetadata(html, requestUrl) {
   return result;
 }
 
+function shouldServeSpaShell(request, response) {
+  if (request.method !== 'GET' || response.status !== 404) return false;
+
+  const url = new URL(request.url);
+  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return false;
+  if (url.pathname === '/assets' || url.pathname.startsWith('/assets/')) return false;
+
+  const finalSegment = url.pathname.split('/').filter(Boolean).at(-1) ?? '';
+  return !/\.[a-z0-9]{1,12}$/i.test(finalSegment);
+}
+
+async function fetchAssetOrSpaShell(request, assets) {
+  const response = await assets.fetch(request);
+  if (!shouldServeSpaShell(request, response)) return response;
+
+  const shellUrl = new URL(request.url);
+  shellUrl.pathname = '/';
+  shellUrl.search = '';
+  shellUrl.hash = '';
+
+  return assets.fetch(new Request(shellUrl.toString(), {
+    method: 'GET',
+    headers: request.headers,
+    redirect: request.redirect,
+  }));
+}
+
 export default {
   async fetch(request, env) {
-    const response = await env.ASSETS.fetch(request);
+    const response = await fetchAssetOrSpaShell(request, env.ASSETS);
     const contentType = response.headers.get('content-type') ?? '';
 
     if (!contentType.includes('text/html')) return response;
