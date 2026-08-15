@@ -1063,6 +1063,11 @@
   gap: clamp(46px, 8vw, 112px);
 }
 
+.forecast-home-section > *,
+.nearby-section > * {
+  min-width: 0;
+}
+
 .home-eyebrow {
   display: inline-flex;
   align-items: center;
@@ -1630,7 +1635,7 @@
 
   .forecast-home-section,
   .nearby-section {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .nearby-map-card {
@@ -1694,13 +1699,27 @@
   }
 
   .forecast-week-card {
+    min-width: 0;
     margin-inline: -8px;
     padding-inline: 14px;
   }
 
   .forecast-week-grid {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     overflow-x: auto;
     grid-template-columns: repeat(7, 72px);
+  }
+
+  .best-time-card {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .best-time-card strong {
+    overflow-wrap: anywhere;
   }
 
   .nearby-map-card {

@@ -27,7 +27,7 @@ function LocaleSelector({ mobile = false, className = '' }) {
       >
         {localeOptions.map((option) => (
           <option key={option.value} value={option.value}>
-            {option.label} · {t(`locale.${option.value}`)}
+            {mobile ? option.label : `${option.label} · ${t(`locale.${option.value}`)}`}
           </option>
         ))}
       </select>

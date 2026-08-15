@@ -277,6 +277,11 @@
   margin-top: 18px;
 }
 
+.profile-overview > *,
+.profile-dashboard-grid > * {
+  min-width: 0;
+}
+
 .profile-section,
 .profile-settings {
   padding: clamp(23px, 3vw, 36px);
@@ -787,10 +792,13 @@
 
   .profile-overview,
   .profile-dashboard-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .profile-collection-grid {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     grid-template-columns: repeat(4, minmax(150px, 1fr));
     overflow-x: auto;
     padding-bottom: 5px;
