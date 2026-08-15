@@ -42,6 +42,16 @@
   background: var(--surface);
 }
 
+.kakao-map {
+  height: 100%;
+  width: 100%;
+  min-height: 520px;
+}
+
+.kakao-pin {
+  cursor: pointer;
+}
+
 .score-marker {
   background: none;
   border: none;
@@ -184,5 +194,9 @@
   .map-frame {
     min-height: 340px;
     order: 1;
+  }
+
+  .kakao-map {
+    min-height: 340px;
   }
 }

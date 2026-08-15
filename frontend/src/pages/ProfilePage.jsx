@@ -17,7 +17,7 @@ const EMPTY_PASSWORD = {
 };
 
 const ProfilePage = () => {
-  const { user, passport, ready, login, register, logout, changePassword } = useAuthStore();
+  const { user, passport, safetyCards, ready, login, register, logout, changePassword } = useAuthStore();
   const [mode, setMode] = useState('login');
   const [authForm, setAuthForm] = useState(EMPTY_AUTH);
   const [passwordForm, setPasswordForm] = useState(EMPTY_PASSWORD);
@@ -239,6 +239,22 @@ const ProfilePage = () => {
 
       {passport && passport.visited_count === 0 && (
         <p className="muted">장소 상세에서 방문 인증을 하면 스탬프가 쌓입니다.</p>
+      )}
+
+      {safetyCards?.length > 0 && (
+        <section>
+          <h2 className="section-title">안전 카드</h2>
+          <ul className="stamp-list">
+            {safetyCards.map((card) => (
+              <li key={card.id}>
+                <Link to={`/safety/${card.id}`}>
+                  <strong>{card.spot?.name || '안전 카드'}</strong>
+                  <em>{card.safety?.label || '저장됨'}</em>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       <form className="auth-form" onSubmit={submitPassword} autoComplete="off">

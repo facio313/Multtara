@@ -47,6 +47,8 @@ class WaterSpotSerializer(serializers.ModelSerializer):
         )
 
     def _activity(self) -> str:
+        if self.context.get("activity"):
+            return self.context["activity"]
         request = self.context.get("request")
         if request is None:
             return "swim"

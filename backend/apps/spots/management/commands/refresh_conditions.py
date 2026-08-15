@@ -3,7 +3,7 @@ from time import sleep
 from django.core.management.base import BaseCommand
 
 from apps.spots.management.commands._common import add_spot_arguments, iter_spots
-from services.conditions_sync import sync_marine, sync_tour, sync_weather
+from services.conditions_sync import sync_marine, sync_quality, sync_tour, sync_weather
 from services.public_data import PublicDataError
 from services.water_forecast import upsert_forecast_for_spot
 from services.water_index import upsert_scores_for_spot
@@ -38,6 +38,7 @@ class Command(BaseCommand):
             for label, func, enabled in (
                 ("weather", sync_weather, True),
                 ("marine", sync_marine, True),
+                ("quality", sync_quality, True),
                 ("tour", sync_tour, not options["skip_tour"]),
             ):
                 if not enabled:
@@ -50,6 +51,8 @@ class Command(BaseCommand):
                 if result.get("skipped"):
                     continue
                 self.stdout.write(f"{spot.name} {label}: {'dry-run' if dry_run else 'ok'}")
+                for extra in result.get("errors") or []:
+                    self.stderr.write(f"{spot.name} {label}: {extra}")
 
             if dry_run:
                 continue

@@ -1,0 +1,58 @@
+.safety-card-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.offline-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.2rem 1.25rem;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.offline-card h1 {
+  font-size: 1.7rem;
+}
+
+.offline-card.is-danger {
+  border-color: var(--danger);
+}
+
+.offline-card.is-caution {
+  background: var(--accent-soft);
+}
+
+.safety-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem 1.1rem;
+  align-items: center;
+}
+
+.safety-card-page .auth-submit {
+  border: 0;
+  background: var(--ink);
+  color: var(--on-ink);
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font-weight: 650;
+}
+
+@media print {
+  .app-shell header,
+  .text-back,
+  .safety-card-actions,
+    .app-navigation,
+    nav {
+      display: none !important;
+    }
+
+  .offline-card {
+    border: 1px solid #111;
+    background: #fff;
+  }
+}

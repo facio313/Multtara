@@ -11,6 +11,7 @@ from apps.conditions.models import ConditionScore, CrowdLevel, WaterCondition
 from apps.conditions.serializers import ConditionScoreSerializer, WaterConditionSerializer
 from apps.forecasts.models import WaterForecast
 from apps.forecasts.serializers import WaterForecastSerializer
+from services.recommend import recommend_spots
 from .models import WaterSpot
 from .serializers import WaterSpotSerializer
 
@@ -101,6 +102,31 @@ class WaterSpotViewSet(viewsets.ReadOnlyModelViewSet):
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def recommend(self, request):
+        user = request.user if request.user.is_authenticated else None
+        payload = recommend_spots(self.filter_queryset(self.get_queryset()), user)
+        spots = payload["spots"]
+        page = self.paginate_queryset(spots)
+        serializer = self.get_serializer(
+            page if page is not None else spots,
+            many=True,
+            context={"request": request, "activity": payload["activity"]},
+        )
+        meta = {
+            "personalized": payload["personalized"],
+            "activity": payload["activity"],
+            "persona_type": payload["persona_type"],
+            "mood_state": payload["mood_state"],
+            "home_region": payload["home_region"],
+            "reason": payload["reason"],
+        }
+        if page is not None:
+            response = self.get_paginated_response(serializer.data)
+            response.data = {**meta, **response.data}
+            return response
+        return Response({**meta, "results": serializer.data})
 
     @action(detail=False, methods=["get"])
     def nearby(self, request):

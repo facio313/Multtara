@@ -7,6 +7,7 @@ import HomePage from './pages/HomePage';
 import LivecamPage from './pages/LivecamPage';
 import MapPage from './pages/MapPage';
 import ProfilePage from './pages/ProfilePage';
+import SafetyCardPage from './pages/SafetyCardPage';
 import SpotDetailPage from './pages/SpotDetailPage';
 import './App.css';
 
@@ -28,6 +29,7 @@ function App() {
             <Route path="/forecast" element={<ForecastPage />} />
             <Route path="/livecam" element={<LivecamPage />} />
             <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/safety/:id" element={<SafetyCardPage />} />
             <Route path="/spot/:id" element={<SpotDetailPage />} />
           </Routes>
         </main>

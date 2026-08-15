@@ -30,13 +30,15 @@ class RefreshConditionsCommandTests(TestCase):
             rainfall_recent=0,
         )
 
+    @patch("apps.spots.management.commands.refresh_conditions.sync_quality")
     @patch("apps.spots.management.commands.refresh_conditions.sync_tour")
     @patch("apps.spots.management.commands.refresh_conditions.sync_marine")
     @patch("apps.spots.management.commands.refresh_conditions.sync_weather")
-    def test_refresh_recomputes_without_network(self, weather, marine, tour):
+    def test_refresh_recomputes_without_network(self, weather, marine, tour, quality):
         weather.return_value = {"changed": ["air_temp"], "saved": True}
         marine.return_value = {"changed": ["water_temp"], "saved": True}
         tour.return_value = {"saved": True, "tourapi_id": "1"}
+        quality.return_value = {"changed": ["water_quality_grade"], "saved": True}
         out = StringIO()
         call_command("refresh_conditions", spot_id=self.spot.id, stdout=out)
         self.assertIn("Refreshed 1", out.getvalue())
@@ -44,13 +46,15 @@ class RefreshConditionsCommandTests(TestCase):
         self.assertTrue(self.spot.scores.exists())
 
     @patch("apps.spots.management.commands.refresh_conditions.sleep", side_effect=StopIteration)
+    @patch("apps.spots.management.commands.refresh_conditions.sync_quality")
     @patch("apps.spots.management.commands.refresh_conditions.sync_tour")
     @patch("apps.spots.management.commands.refresh_conditions.sync_marine")
     @patch("apps.spots.management.commands.refresh_conditions.sync_weather")
-    def test_loop_sleeps_after_refresh(self, weather, marine, tour, sleeper):
+    def test_loop_sleeps_after_refresh(self, weather, marine, tour, quality, sleeper):
         weather.return_value = {"changed": [], "saved": True}
         marine.return_value = {"skipped": True, "reason": "no KHOA obs code"}
         tour.return_value = {"saved": True}
+        quality.return_value = {"skipped": True, "reason": "no MOE station"}
         out = StringIO()
         with self.assertRaises(StopIteration):
             call_command(

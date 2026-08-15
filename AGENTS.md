@@ -58,17 +58,21 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 
 | 영역 | 선택 |
 |---|---|
-| 웹 | React (Vite) · React Router · Zustand · Axios · Leaflet (카카오/네이버맵은 미선정) |
+| 웹 | React (Vite) · React Router · Zustand · Axios · Kakao Maps (`VITE_KAKAO_MAP_KEY`, 없으면 Leaflet) |
 | 서버 | Python 3.11+ · Django · Django REST Framework |
 | DB | PostgreSQL 15 |
 | 인프라 | Docker · Docker Compose · Nginx |
 | 배포 | Raspberry Pi 5 (ARM64) |
 
-공공데이터: `DATA_GO_KR_SERVICE_KEY` (TourAPI / 기상청 / 해양조사원).  
-갱신: `python manage.py refresh_conditions --skip-tour` 또는 Compose `refresher` 서비스(`--loop`, 기본 3시간).
+공공데이터: `DATA_GO_KR_SERVICE_KEY` (TourAPI / 기상청 / 해양조사원 / 환경부 수질측정망).  
+갱신: `python manage.py refresh_conditions --skip-tour` 또는 Compose `refresher` 서비스(`--loop`, 기본 3시간). `fetch_quality`는 수질만.  
+수질: NIER `WaterQualityService/getWaterMeasuringList` → `WaterCondition.water_quality_grade`. 자외선: 기상청 `LivingWthrIdxServiceV5/getUVIdxV5` → `WaterCondition.uv_index`. 기존 Water Index 가중치 슬롯에만 반영.  
+지도: Kakao Maps JS SDK (`VITE_KAKAO_MAP_KEY`). 키가 없거나 SDK 로드 실패 시 Leaflet.  
+추천: `GET /api/v1/spots/recommend/` — 로그인 시 `persona_type` / `mood_state` / `home_region` + Water Index 규칙 랭킹. 비로그인 시 일반 지수 순. LLM 없음.
 
 인증: Django **세션 쿠키**(httpOnly, SameSite=Lax) + **세션 CSRF**. JWT/로컬스토리지 토큰 없음. 비밀번호 Argon2, 최소 12자, 실패 5회 잠금. 소셜 로그인은 아직 없음.  
-Passport: `POST /api/v1/passport/checkin/` (로그인 필요, 장소당 1회). 위치가 오면 5km 안만 허용.
+Passport: `POST /api/v1/passport/checkin/` (로그인 필요, 장소당 1회). **위도·경도 필수**, 5km 안만 허용.  
+Safety card: `POST /api/v1/safety-card/` (로그인 필요). 컨디션 스냅샷을 저장하고 기기에도 남겨 오프라인으로 본다.
 
 ---
 

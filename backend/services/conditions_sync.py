@@ -9,9 +9,10 @@ from apps.conditions.models import WaterCondition
 from apps.spots.models import WaterSpot
 from services.marine import fetch_tide_schedule, fetch_water_temperature
 from services.public_data import PublicDataError
-from services.stations import CACHE_TTL, khoa_obs_code, mid_land_id, mid_ta_id
+from services.stations import CACHE_TTL, khoa_obs_code, mid_land_id, mid_ta_id, moe_pt_no, uv_area_no
 from services.tourapi import search_spot
-from services.weather import fetch_ultra_short_observation, seven_day_outlook
+from services.water_quality import fetch_water_quality
+from services.weather import fetch_ultra_short_observation, fetch_uv_index, seven_day_outlook
 
 CONDITION_FIELDS = {
     "air_temp",
@@ -20,6 +21,8 @@ CONDITION_FIELDS = {
     "wave_height",
     "rainfall_recent",
     "tide_schedule",
+    "uv_index",
+    "water_quality_grade",
 }
 
 
@@ -40,6 +43,8 @@ def apply_fields(condition: WaterCondition, fields: dict) -> list[str]:
                 continue
             if not value.get("low_tide") and not value.get("high_tide"):
                 continue
+        if key == "water_quality_grade" and value == "":
+            continue
         setattr(condition, key, value)
         changed.append(key)
     return changed
@@ -65,14 +70,29 @@ def sync_weather(spot: WaterSpot, *, dry_run: bool = False) -> dict:
         land_reg_id=mid_land_id(spot),
         ta_reg_id=mid_ta_id(spot),
     )
+    errors: list[str] = []
+    uv_index = None
+    area = uv_area_no(spot)
+    if area:
+        try:
+            uv_index = fetch_uv_index(area)
+        except PublicDataError as exc:
+            errors.append(str(exc))
+    payload = {**observation, "uv_index": uv_index}
     if dry_run:
-        return {"observation": observation, "outlook": outlook, "saved": False}
+        return {"observation": payload, "outlook": outlook, "saved": False, "errors": errors}
 
     cache.set(outlook_cache_key(spot), outlook, CACHE_TTL["weather_forecast"])
     condition = working_condition(spot)
-    changed = apply_fields(condition, observation)
+    changed = apply_fields(condition, payload)
     save_condition(condition, changed)
-    return {"observation": observation, "outlook": outlook, "saved": True, "changed": changed}
+    return {
+        "observation": payload,
+        "outlook": outlook,
+        "saved": True,
+        "changed": changed,
+        "errors": errors,
+    }
 
 
 def sync_marine(spot: WaterSpot, *, dry_run: bool = False) -> dict:
@@ -104,6 +124,19 @@ def sync_marine(spot: WaterSpot, *, dry_run: bool = False) -> dict:
     changed = apply_fields(condition, payload)
     save_condition(condition, changed)
     return {"obs_code": obs_code, **payload, "saved": True, "changed": changed, "errors": errors}
+
+
+def sync_quality(spot: WaterSpot, *, dry_run: bool = False) -> dict:
+    pt_no = moe_pt_no(spot)
+    if not pt_no:
+        return {"skipped": True, "reason": "no MOE station"}
+    payload = fetch_water_quality(pt_no)
+    if dry_run:
+        return {**payload, "saved": False}
+    condition = working_condition(spot)
+    changed = apply_fields(condition, {"water_quality_grade": payload.get("water_quality_grade")})
+    save_condition(condition, changed)
+    return {**payload, "saved": True, "changed": changed}
 
 
 def sync_tour(spot: WaterSpot, *, dry_run: bool = False) -> dict:

@@ -62,13 +62,25 @@ def _as_list(value: Any) -> list:
 
 SUCCESS_CODES = {"00", "0000", "0", "NORMAL", "NORMAL_SERVICE"}
 HINTS = {
+    "01": "APPLICATION_ERROR. data.go.kr에서 해당 API 활용신청이 되어 있는지 확인하세요.",
     "12": "오픈API 서비스가 없거나 폐기되었습니다. TourAPI는 KorService2를 사용합니다.",
     "30": "data.go.kr에서 해당 API 활용신청이 되어 있지 않습니다.",
     "41": "해당 관측 항목이 일시적으로 없습니다.",
 }
 
 
+def _unwrap_service(payload: dict) -> dict:
+    if any(key in payload for key in ("response", "OpenAPI_ServiceResponse", "header", "body", "result")):
+        return payload
+    if len(payload) == 1:
+        inner = next(iter(payload.values()))
+        if isinstance(inner, dict) and any(key in inner for key in ("header", "item", "items", "body")):
+            return inner
+    return payload
+
+
 def _header_from(payload: dict) -> dict:
+    payload = _unwrap_service(payload)
     openapi = payload.get("OpenAPI_ServiceResponse")
     if isinstance(openapi, dict) and isinstance(openapi.get("cmmMsgHeader"), dict):
         return openapi["cmmMsgHeader"]
@@ -99,6 +111,7 @@ def _header_message(payload: Any) -> str:
         header.get("returnAuthMsg")
         or header.get("resultMsg")
         or header.get("errMsg")
+        or header.get("message")
         or payload.get("resultMsg")
         or payload.get("errMsg")
         or ""
@@ -108,10 +121,12 @@ def _header_message(payload: Any) -> str:
 def result_code(payload: Any) -> str | None:
     if not isinstance(payload, dict):
         return None
+    payload = _unwrap_service(payload)
     header = _header_from(payload)
     code = (
         header.get("returnReasonCode")
         or header.get("resultCode")
+        or header.get("code")
         or header.get("returnAuthMsg")
     )
     if code is not None:
@@ -132,6 +147,8 @@ def iter_records(payload: Any) -> list[dict]:
         return [row for row in payload if isinstance(row, dict)]
     if not isinstance(payload, dict):
         return []
+
+    payload = _unwrap_service(payload)
 
     response = payload.get("response")
     if isinstance(response, dict):

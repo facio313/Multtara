@@ -31,11 +31,16 @@ const SpotDetailPage = () => {
   const user = useAuthStore((state) => state.user);
   const passport = useAuthStore((state) => state.passport);
   const checkin = useAuthStore((state) => state.checkin);
+  const saveSafetyCard = useAuthStore((state) => state.saveSafetyCard);
+  const safetyCards = useAuthStore((state) => state.safetyCards);
   const [spot, setSpot] = useState(null);
   const [forecast, setForecast] = useState([]);
   const [loading, setLoading] = useState(true);
   const [checkinMessage, setCheckinMessage] = useState('');
   const [checkingIn, setCheckingIn] = useState(false);
+  const [cardMessage, setCardMessage] = useState('');
+  const [savingCard, setSavingCard] = useState(false);
+  const [shareWith, setShareWith] = useState('');
 
   useEffect(() => {
     const fetchSpot = async () => {
@@ -77,6 +82,7 @@ const SpotDetailPage = () => {
   const safety = spot.safety || {};
   const live = spot.livecam || {};
   const visited = Boolean(passport?.stamps?.some((stamp) => String(stamp.spot_id) === String(spot.id)));
+  const savedCard = safetyCards.find((row) => String(row.spot_id) === String(spot.id));
 
   const submitCheckin = async () => {
     setCheckingIn(true);
@@ -84,6 +90,19 @@ const SpotDetailPage = () => {
     const result = await checkin(spot.id);
     setCheckingIn(false);
     setCheckinMessage(result.ok ? '방문 인증을 남겼습니다.' : result.message);
+  };
+
+  const submitSafetyCard = async () => {
+    setSavingCard(true);
+    setCardMessage('');
+    const names = shareWith.split(',').map((value) => value.trim()).filter(Boolean);
+    const result = await saveSafetyCard(spot.id, names);
+    setSavingCard(false);
+    if (result.ok) {
+      navigate(`/safety/${result.data.id}`);
+      return;
+    }
+    setCardMessage(result.message);
   };
 
   return (
@@ -128,7 +147,7 @@ const SpotDetailPage = () => {
             <button type="button" className="auth-submit" onClick={submitCheckin} disabled={checkingIn}>
               {checkingIn ? '인증 중' : '방문 인증'}
             </button>
-            <p className="muted">지금은 위치 확인 없이 인증합니다.</p>
+            <p className="muted">장소 5km 안에서만 인증됩니다. 위치 권한이 필요합니다.</p>
           </>
         )}
         {checkinMessage && <p className={checkinMessage.includes('남겼') ? 'muted' : 'auth-error'}>{checkinMessage}</p>}
@@ -141,6 +160,30 @@ const SpotDetailPage = () => {
             <strong>{safety.label}</strong>
             {(safety.reasons || []).join(' · ')}
           </p>
+          {!user && (
+            <p className="muted">
+              <Link to="/profile">로그인</Link>하면 오프라인 안전 카드를 저장할 수 있습니다.
+            </p>
+          )}
+          {user && (
+            <div className="safety-card-save">
+              <label>
+                공유할 사람 (선택)
+                <input
+                  value={shareWith}
+                  onChange={(event) => setShareWith(event.target.value)}
+                  placeholder="가족, 친구"
+                />
+              </label>
+              <button type="button" className="auth-submit" onClick={submitSafetyCard} disabled={savingCard}>
+                {savingCard ? '저장 중' : '안전 카드 저장'}
+              </button>
+              {savedCard && (
+                <Link to={`/safety/${savedCard.id}`}>저장한 카드 보기</Link>
+              )}
+              {cardMessage && <p className="auth-error">{cardMessage}</p>}
+            </div>
+          )}
         </section>
       )}
 

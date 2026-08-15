@@ -7,13 +7,14 @@ from django.utils import timezone
 
 from apps.conditions.models import WaterCondition
 from apps.spots.models import WaterSpot
-from services.conditions_sync import sync_marine, sync_weather
+from services.conditions_sync import sync_marine, sync_quality, sync_weather
 from services.grid_converter import latlon_to_grid
 from services.marine import fetch_tide_schedule, fetch_water_temperature
 from services.public_data import PublicDataError, get_json, iter_records, result_code
 from services.tourapi import search_spot
 from services.water_forecast import upsert_forecast_for_spot
-from services.weather import fetch_ultra_short_observation
+from services.water_quality import fetch_water_quality, grade_from_bod, grade_from_row
+from services.weather import fetch_ultra_short_observation, fetch_uv_index, uv_from_row
 
 
 def _kma_items(*pairs):
@@ -87,6 +88,32 @@ class PublicDataParseTests(TestCase):
             with self.assertRaises(PublicDataError) as raised:
                 get_json("https://example.test", {}, service_key="abc")
         self.assertIn("30", str(raised.exception))
+        self.assertIn("활용신청", str(raised.exception))
+
+    def test_nier_operation_envelope(self):
+        payload = {
+            "getWaterMeasuringList": {
+                "header": {"code": "00", "message": "NORMAL SERVICE"},
+                "item": [{"ITEM_BOD": "3.2", "WMCYMD": "2026.07.01"}],
+            }
+        }
+        self.assertEqual(result_code(payload), "00")
+        self.assertEqual(iter_records(payload)[0]["ITEM_BOD"], "3.2")
+
+    def test_application_error_mentions_registration(self):
+        payload = {
+            "response": {
+                "header": {"resultCode": "01", "resultMsg": "APPLICATION_ERROR"},
+            }
+        }
+        with patch("services.public_data.requests.get") as mocked:
+            mocked.return_value.status_code = 200
+            mocked.return_value.ok = True
+            mocked.return_value.json.return_value = payload
+            with self.assertRaises(PublicDataError) as raised:
+                get_json("https://example.test", {}, service_key="abc")
+        self.assertIn("01", str(raised.exception))
+        self.assertIn("APPLICATION_ERROR", str(raised.exception))
         self.assertIn("활용신청", str(raised.exception))
 
 
@@ -181,6 +208,42 @@ class WeatherMarineTourParseTests(TestCase):
         self.assertEqual(data["image_url"], "http://example.com/haeundae.jpg")
         self.assertIn("해수욕장", data["description"])
 
+    @patch("services.weather._service_key", return_value="test-key")
+    @patch("services.weather.get_json")
+    def test_uv_index_reads_today_or_hourly(self, mocked, _key):
+        mocked.return_value = {
+            "response": {
+                "header": {"resultCode": "00"},
+                "body": {"items": {"item": {"today": "8", "h0": "3"}}},
+            }
+        }
+        self.assertEqual(fetch_uv_index("2600000000"), 8.0)
+        self.assertEqual(uv_from_row({"h12": "7", "h6": "9"}), 9.0)
+
+    @patch("services.water_quality._service_key", return_value="test-key")
+    @patch("services.water_quality.get_json")
+    def test_water_quality_grade_from_bod(self, mocked, _key):
+        self.assertEqual(grade_from_bod(1.2), "1")
+        self.assertEqual(grade_from_bod(4.0), "2")
+        self.assertEqual(grade_from_row({"itemBod": "9.5"}), "4")
+        self.assertEqual(grade_from_row({"ITEM_BOD": "         0.9"}), "1")
+        mocked.return_value = {
+            "response": {
+                "header": {"resultCode": "00"},
+                "body": {
+                    "items": {
+                        "item": [
+                            {"PT_NO": "1001A75", "WMCYMD": "2025.01.01", "ITEM_BOD": "9.5"},
+                            {"PT_NO": "1001A75", "WMCYMD": "2026.06.29", "ITEM_BOD": "         3.2"},
+                        ]
+                    }
+                },
+            }
+        }
+        data = fetch_water_quality("1001A75")
+        self.assertEqual(data["water_quality_grade"], "2")
+        self.assertEqual(data["bod"], 3.2)
+
 
 class ForecastFromOutlookTests(TestCase):
     def setUp(self):
@@ -237,15 +300,34 @@ class ForecastFromOutlookTests(TestCase):
         self.assertEqual(len(rows), 7)
         self.assertEqual(rows[0].predicted_factors["source"], "stored")
 
+    @patch("services.conditions_sync.fetch_uv_index", return_value=7.0)
     @patch("services.conditions_sync.seven_day_outlook")
     @patch("services.conditions_sync.fetch_ultra_short_observation")
-    def test_sync_weather_updates_temperature(self, observation, outlook):
+    def test_sync_weather_updates_temperature(self, observation, outlook, uv):
         observation.return_value = {"air_temp": 21.0, "wind_speed": 1.2, "rainfall_recent": 0}
         outlook.return_value = []
         sync_weather(self.spot)
         latest = WaterCondition.objects.filter(spot=self.spot).order_by("-fetched_at").first()
         self.assertEqual(latest.air_temp, 21.0)
         self.assertEqual(latest.wind_speed, 1.2)
+        self.assertEqual(latest.uv_index, 7.0)
+
+    @patch("services.conditions_sync.fetch_water_quality")
+    def test_sync_quality_writes_grade(self, mocked):
+        inland = WaterSpot.objects.create(
+            type="riverside",
+            name="동강 래프팅",
+            lat=37.283,
+            lng=128.655,
+            region="강원",
+            address="영월",
+        )
+        WaterCondition.objects.create(spot=inland, water_quality_grade="1")
+        mocked.return_value = {"water_quality_grade": "2", "bod": 3.1, "pt_no": "1003A05"}
+        result = sync_quality(inland)
+        self.assertIn("water_quality_grade", result["changed"])
+        latest = WaterCondition.objects.filter(spot=inland).order_by("-fetched_at").first()
+        self.assertEqual(latest.water_quality_grade, "2")
 
     @patch("services.conditions_sync.fetch_tide_schedule")
     @patch("services.conditions_sync.fetch_water_temperature")

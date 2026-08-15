@@ -81,6 +81,40 @@ CACHE_TTL = {
     "marine_temp": 60 * 60,
     "marine_tide": 60 * 60 * 6,
     "tour_spot_detail": 60 * 60 * 24,
+    "water_quality": 60 * 60 * 24,
+    "uv_index": 60 * 60 * 6,
+}
+
+# KMA living-weather UV areaNo (10-digit administrative codes).
+REGION_UV_AREA = {
+    "서울": "1100000000",
+    "부산": "2600000000",
+    "대구": "2700000000",
+    "인천": "2800000000",
+    "광주": "2900000000",
+    "대전": "3000000000",
+    "울산": "3100000000",
+    "세종": "3611000000",
+    "경기": "4100000000",
+    "강원": "4200000000",
+    "충북": "4300000000",
+    "충남": "4400000000",
+    "전북": "4500000000",
+    "전남": "4600000000",
+    "경북": "4700000000",
+    "경남": "4800000000",
+    "제주": "5000000000",
+}
+
+# Nearest NIER 물환경 수질측정망 station (ptNo), verified via getWaterMeasuringList.
+SPOT_MOE_PT = {
+    "동강 래프팅": "1001A75",  # 동강2
+    "가평 용추계곡": "1015A20",  # 조종천1
+    "명지계곡": "1013A70",  # 가평천1
+    "청평호": "1015B30",  # 청평댐1
+    "충주호": "1003B40",  # 충주댐1
+    "지리산 뱀사골": "2018A20",  # 람천1
+    "설악산 천불동계곡": "1011A10",  # 북천
 }
 
 
@@ -102,3 +136,11 @@ def khoa_obs_code(spot: WaterSpot) -> str:
     if getattr(spot, "khoa_obs_code", ""):
         return spot.khoa_obs_code
     return SPOT_KHOA_OBS.get(spot.name, "")
+
+
+def uv_area_no(spot: WaterSpot) -> str:
+    return REGION_UV_AREA.get(spot.region, "")
+
+
+def moe_pt_no(spot: WaterSpot) -> str:
+    return SPOT_MOE_PT.get(spot.name, "")

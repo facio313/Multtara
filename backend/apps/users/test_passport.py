@@ -50,18 +50,30 @@ class PassportApiTests(TestCase):
         token = self.csrf()
         denied = self.client.post(
             "/api/v1/passport/checkin/",
-            {"spot_id": self.sea.id},
+            {"spot_id": self.sea.id, "lat": 35.16, "lng": 129.16},
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )
         self.assertEqual(denied.status_code, 401)
+
+    def test_checkin_requires_location(self):
+        self.login()
+        token = self.csrf()
+        missing = self.client.post(
+            "/api/v1/passport/checkin/",
+            {"spot_id": self.sea.id},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(missing.status_code, 400)
+        self.assertEqual(Passport.objects.count(), 0)
 
     def test_checkin_awards_badges_and_blocks_duplicate(self):
         self.login()
         token = self.csrf()
         created = self.client.post(
             "/api/v1/passport/checkin/",
-            {"spot_id": self.sea.id},
+            {"spot_id": self.sea.id, "lat": 35.16, "lng": 129.16},
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )
@@ -74,7 +86,7 @@ class PassportApiTests(TestCase):
         token = self.csrf()
         duplicate = self.client.post(
             "/api/v1/passport/checkin/",
-            {"spot_id": self.sea.id},
+            {"spot_id": self.sea.id, "lat": 35.16, "lng": 129.16},
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )
@@ -84,7 +96,7 @@ class PassportApiTests(TestCase):
         token = self.csrf()
         valley = self.client.post(
             "/api/v1/passport/checkin/",
-            {"spot_id": self.valley.id},
+            {"spot_id": self.valley.id, "lat": 37.83, "lng": 127.51},
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )

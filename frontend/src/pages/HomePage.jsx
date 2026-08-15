@@ -22,6 +22,8 @@ const HomePage = () => {
   const [firstSwim, setFirstSwim] = useState([]);
   const [tides, setTides] = useState([]);
   const [radar, setRadar] = useState([]);
+  const [recs, setRecs] = useState([]);
+  const [recReason, setRecReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const position = useGeolocation();
@@ -58,6 +60,17 @@ const HomePage = () => {
       .get('/spots/safety-radar/')
       .then((response) => setRadar(Array.isArray(response.data) ? response.data.slice(0, 6) : []))
       .catch(() => setRadar([]));
+
+    api
+      .get('/spots/recommend/', { params: { page_size: 6 } })
+      .then((response) => {
+        setRecs(unwrapList(response.data));
+        setRecReason(response.data.reason || '');
+      })
+      .catch(() => {
+        setRecs([]);
+        setRecReason('');
+      });
   }, []);
 
   useEffect(() => {
@@ -165,6 +178,30 @@ const HomePage = () => {
 
       {!loading && !featured && !error && (
         <p className="empty">이 활동에 맞는 장소가 없습니다.</p>
+      )}
+
+      {recs.length > 0 && (
+        <section>
+          <h3 className="section-title">AI 추천</h3>
+          {recReason && <p className="muted home-note">{recReason}</p>}
+          <ul className="rank-list">
+            {recs.map((spot) => (
+              <li key={spot.id}>
+                <Link to={`/spot/${spot.id}`} className="rank-row">
+                  <span className="rank-copy">
+                    <strong>{spot.name}</strong>
+                    <em>
+                      {spot.region} · {spotTypeLabel(spot.type)}
+                    </em>
+                  </span>
+                  <span className={`score is-${scoreTone(spot.water_index)}`}>
+                    {spot.water_index ?? '-'}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {forecast.length > 0 && (

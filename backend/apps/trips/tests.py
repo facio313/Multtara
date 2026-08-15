@@ -34,6 +34,6 @@ class TripModelTests(TestCase):
         card = SafetyCard.objects.create(
             user=self.user,
             spot=self.spot,
-            risk_factors='High waves'
+            risk_factors=["High waves"],
         )
-        self.assertEqual(card.risk_factors, 'High waves')
+        self.assertEqual(card.risk_factors, ["High waves"])

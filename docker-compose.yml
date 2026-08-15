@@ -58,7 +58,10 @@ services:
     command: python manage.py refresh_conditions --skip-tour --loop --interval ${REFRESH_INTERVAL_SECONDS:-10800}
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_KAKAO_MAP_KEY: ${VITE_KAKAO_MAP_KEY:-}
     restart: unless-stopped
     depends_on:
       - backend

@@ -238,3 +238,66 @@ def seven_day_outlook(
             }
         )
     return rows
+
+
+def _uv_time_candidates(now: datetime | None = None) -> list[str]:
+    current = now or _now()
+    today = current.strftime("%Y%m%d")
+    yesterday = (current - timedelta(days=1)).strftime("%Y%m%d")
+    if current.hour >= 6:
+        return [f"{today}06", f"{today}18"]
+    return [f"{yesterday}06", f"{yesterday}18"]
+
+
+def uv_from_row(row: dict[str, Any]) -> float | None:
+    values: list[float] = []
+    for key in ("today", "uv", "uvIndex"):
+        parsed = _to_float(row.get(key))
+        if parsed is not None:
+            values.append(parsed)
+    for hour in range(0, 13, 3):
+        parsed = _to_float(row.get(f"h{hour}"))
+        if parsed is not None:
+            values.append(parsed)
+    if values:
+        return max(values)
+    return None
+
+
+def fetch_uv_index(area_no: str) -> float | None:
+    if not area_no:
+        raise PublicDataError("UV area code is missing.")
+    last_error: PublicDataError | None = None
+    fallback: float | None = None
+    for time_token in _uv_time_candidates():
+        try:
+            payload = get_json(
+                "https://apis.data.go.kr/1360000/LivingWthrIdxServiceV5/getUVIdxV5",
+                {
+                    "pageNo": 1,
+                    "numOfRows": 10,
+                    "dataType": "JSON",
+                    "areaNo": area_no,
+                    "time": time_token,
+                },
+                service_key=_service_key(),
+                cache_key=f"kma:uv:{area_no}:{time_token}",
+                ttl=CACHE_TTL["uv_index"],
+            )
+        except PublicDataError as exc:
+            last_error = exc
+            continue
+        rows = iter_records(payload)
+        if not rows:
+            continue
+        value = uv_from_row(rows[0])
+        if value is None:
+            continue
+        if value > 0:
+            return value
+        fallback = value
+    if fallback is not None:
+        return fallback
+    if last_error is not None:
+        raise last_error
+    return None
