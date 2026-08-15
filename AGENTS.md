@@ -67,6 +67,7 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 공공데이터: `DATA_GO_KR_SERVICE_KEY` (TourAPI / 기상청 / 해양조사원 / 환경부 수질측정망).  
 갱신: `python manage.py refresh_conditions --skip-tour` 또는 Compose `refresher` 서비스(`--loop`, 기본 3시간). `fetch_quality`는 수질만.  
 수질: NIER `WaterQualityService/getWaterMeasuringList` → `WaterCondition.water_quality_grade`. 자외선: 기상청 `LivingWthrIdxServiceV5/getUVIdxV5` → `WaterCondition.uv_index`. 기존 Water Index 가중치 슬롯에만 반영.  
+KHOA 추가(바다누리 후속, **무료**, API별 활용신청): 해수욕지수 `fcstBeachv2` · 이안류 `ripCurrent` · 실측파랑 `noonWave` · 서핑 `fcstSurfingv2` · 갯벌 `fcstMudflatv2` → `wave_height` / `rip_current_risk` / `marine_indices`. 미신청(error 30)은 건너뜀. 구 oceangrid OpenAPI는 2026-04-01 종료.  
 지도: Kakao Maps JS SDK (`VITE_KAKAO_MAP_KEY`). 키가 없거나 SDK 로드 실패 시 Leaflet.  
 추천: `GET /api/v1/spots/recommend/` — 로그인 시 `persona_type` / `mood_state` / `home_region` + Water Index 규칙 랭킹. 비로그인 시 일반 지수 순. LLM 없음.  
 컨시어지: `GET /api/v1/spots/concierge/?q=` — 키워드 규칙 랭킹, LLM 없음.  

@@ -75,11 +75,37 @@ SPOT_KHOA_OBS = {
     "무창포 갯벌": "DT_0004",
 }
 
+# Rip-current beaches published by KHOA (sample code DAECHON).
+SPOT_RIP_BEACH = {
+    "해운대 해수욕장": "HAEUNDAE",
+    "송정 해수욕장": "SONGJEONG",
+    "중문 색달 해변": "JUNGMUN",
+    "대천 해수욕장": "DAECHON",
+    "경포 해수욕장": "GYEONGPO",
+    "속초 해수욕장": "SOKCHO",
+    "양양 설악비치": "NAKSAN",
+}
+
+# Optional noonWave buoy codes. Beach/surf index wave height is preferred.
+SPOT_WAVE_OBS = {}
+
+PLACE_ALIASES = {
+    "양양 설악비치": ("낙산", "설악"),
+    "중문 색달 해변": ("중문", "색달"),
+    "동막 해수욕장 갯벌": ("동막",),
+    "선재도 갯벌": ("선재",),
+    "무창포 갯벌": ("무창포",),
+    "광안리 해수욕장": ("광안",),
+}
+
 CACHE_TTL = {
     "weather_current": 60 * 30,
     "weather_forecast": 60 * 180,
     "marine_temp": 60 * 60,
     "marine_tide": 60 * 60 * 6,
+    "marine_index": 60 * 60 * 3,
+    "marine_rip": 60 * 30,
+    "marine_wave": 60 * 60,
     "tour_spot_detail": 60 * 60 * 24,
     "water_quality": 60 * 60 * 24,
     "uv_index": 60 * 60 * 6,
@@ -144,3 +170,41 @@ def uv_area_no(spot: WaterSpot) -> str:
 
 def moe_pt_no(spot: WaterSpot) -> str:
     return SPOT_MOE_PT.get(spot.name, "")
+
+
+def rip_beach_code(spot: WaterSpot) -> str:
+    return SPOT_RIP_BEACH.get(spot.name, "")
+
+
+def wave_obs_code(spot: WaterSpot) -> str:
+    return SPOT_WAVE_OBS.get(spot.name, "")
+
+
+def place_tokens(spot_name: str) -> list[str]:
+    tokens = [spot_name.replace(" ", "")]
+    for extra in PLACE_ALIASES.get(spot_name, ()):
+        tokens.append(extra)
+    for suffix in ("해수욕장", "해변", "갯벌", "비치"):
+        if spot_name.endswith(suffix):
+            tokens.append(spot_name[: -len(suffix)].strip())
+    return [token for token in tokens if token]
+
+
+def row_matches_spot(spot_name: str, row: dict) -> bool:
+    haystack = " ".join(
+        str(row.get(key) or "")
+        for key in (
+            "plcNm",
+            "placeNm",
+            "placeName",
+            "beachNm",
+            "obsName",
+            "staNm",
+            "name",
+            "title",
+        )
+    )
+    compact = haystack.replace(" ", "")
+    if not compact:
+        return False
+    return any(token.replace(" ", "") in compact for token in place_tokens(spot_name))

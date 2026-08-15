@@ -17,6 +17,7 @@ class WaterCondition(models.Model):
     rip_current_risk = models.CharField(max_length=50, blank=True)
     uv_index = models.FloatField(null=True, blank=True)
     weather_alert = models.CharField(max_length=200, blank=True)
+    marine_indices = models.JSONField(default=dict, blank=True)
     fetched_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

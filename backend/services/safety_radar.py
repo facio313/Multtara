@@ -61,9 +61,9 @@ def assess_safety(spot_type: str, condition: Any = None, crowd: Any = None) -> d
             reasons.append("호우·수위 특이사항 없음")
 
     elif spot_type == "sea":
-        if rip in {"high", "danger"}:
+        if rip in {"high", "danger", "위험", "경계"}:
             bump("danger", "이안류 위험 높음")
-        elif rip in {"medium", "caution"}:
+        elif rip in {"medium", "caution", "주의"}:
             bump("caution", "이안류 주의")
         if wave is not None and wave >= 2:
             bump("danger", f"파고 {wave}m")

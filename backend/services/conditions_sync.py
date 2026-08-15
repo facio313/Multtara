@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from apps.conditions.models import WaterCondition
 from apps.spots.models import WaterSpot
-from services.marine import fetch_tide_schedule, fetch_water_temperature
+from services.marine import fetch_marine_extras, fetch_tide_schedule, fetch_water_temperature
 from services.public_data import PublicDataError
 from services.stations import CACHE_TTL, khoa_obs_code, mid_land_id, mid_ta_id, moe_pt_no, uv_area_no
 from services.tourapi import search_spot
@@ -23,6 +23,8 @@ CONDITION_FIELDS = {
     "tide_schedule",
     "uv_index",
     "water_quality_grade",
+    "rip_current_risk",
+    "marine_indices",
 }
 
 
@@ -45,6 +47,9 @@ def apply_fields(condition: WaterCondition, fields: dict) -> list[str]:
                 continue
         if key == "water_quality_grade" and value == "":
             continue
+        if key == "marine_indices":
+            if not isinstance(value, dict) or not value:
+                continue
         setattr(condition, key, value)
         changed.append(key)
     return changed
@@ -112,11 +117,24 @@ def sync_marine(spot: WaterSpot, *, dry_run: bool = False) -> dict:
     except PublicDataError as exc:
         errors.append(str(exc))
 
-    has_tide = bool(tide_schedule and (tide_schedule.get("low_tide") or tide_schedule.get("high_tide")))
-    if water_temp is None and not has_tide and errors:
-        raise PublicDataError(errors[0])
+    extras: dict = {}
+    try:
+        extras = fetch_marine_extras(spot)
+    except PublicDataError as exc:
+        errors.append(str(exc))
 
-    payload = {"water_temp": water_temp, "tide_schedule": tide_schedule}
+    water_temp = water_temp if water_temp is not None else extras.get("water_temp")
+    payload = {
+        "water_temp": water_temp,
+        "tide_schedule": tide_schedule,
+        "wave_height": extras.get("wave_height"),
+        "rip_current_risk": extras.get("rip_current_risk"),
+        "marine_indices": extras.get("marine_indices"),
+    }
+    has_tide = bool(tide_schedule and (tide_schedule.get("low_tide") or tide_schedule.get("high_tide")))
+    has_extra = any(payload.get(key) for key in ("wave_height", "rip_current_risk", "marine_indices"))
+    if water_temp is None and not has_tide and not has_extra and errors:
+        raise PublicDataError(errors[0])
     if dry_run:
         return {"obs_code": obs_code, **payload, "saved": False, "errors": errors}
 

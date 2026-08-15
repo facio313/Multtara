@@ -39,6 +39,10 @@ class SafetyRadarTests(TestCase):
         result = assess_safety("sea", {"rip_current_risk": "high", "wave_height": 0.4})
         self.assertEqual(result["level"], "danger")
 
+    def test_sea_korean_caution_rip(self):
+        result = assess_safety("sea", {"rip_current_risk": "주의", "wave_height": 0.4})
+        self.assertEqual(result["level"], "caution")
+
     def test_calm_sea_is_safe(self):
         result = assess_safety("sea", {"rip_current_risk": "low", "wave_height": 0.4})
         self.assertEqual(result["level"], "safe")

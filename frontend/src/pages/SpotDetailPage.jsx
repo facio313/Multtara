@@ -19,6 +19,7 @@ function formatValue(value, unit) {
 
 const QUALITY_LABELS = { 1: '좋음', 2: '보통', 3: '나쁨' };
 const RISK_LABELS = { low: '낮음', medium: '보통', high: '높음' };
+const MARINE_INDEX_LABELS = { beach: '해수욕', surf: '서핑', mudflat: '갯벌', rip: '이안류' };
 const CROWD_LABELS = { high: '혼잡', medium: '보통', low: '여유' };
 const SOUND_LABELS = { wave: '파도', valley: '계곡', waterfall: '폭포', tidal: '갯벌', rain: '비' };
 
@@ -247,6 +248,20 @@ const SpotDetailPage = () => {
         </dl>
         {condition.weather_alert ? <p className="muted tide">{condition.weather_alert}</p> : null}
       </section>
+
+      {condition.marine_indices && Object.keys(condition.marine_indices).length > 0 && (
+        <section>
+          <h2 className="section-title">바다누리</h2>
+          <dl className="facts">
+            {Object.entries(condition.marine_indices).map(([key, row]) => (
+              <div key={key}>
+                <dt>{MARINE_INDEX_LABELS[key] || key}</dt>
+                <dd>{row?.grade || row?.score || '-'}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
 
       {spot.crowd?.predicted_level && (
         <section>

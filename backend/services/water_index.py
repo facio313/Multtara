@@ -199,9 +199,9 @@ def _score_rip(risk: str | None) -> float | None:
     if not risk:
         return None
     token = str(risk).strip().lower()
-    if token in {"none", "low", "safe", "없음", "낮음"}:
+    if token in {"none", "low", "safe", "없음", "낮음", "관심", "attention", "interest", "1"}:
         return 100.0
-    if token in {"medium", "moderate", "caution", "보통"}:
+    if token in {"medium", "moderate", "caution", "보통", "주의", "2"}:
         return 55.0
     return 15.0
 

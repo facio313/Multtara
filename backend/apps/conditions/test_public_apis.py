@@ -9,7 +9,13 @@ from apps.conditions.models import WaterCondition
 from apps.spots.models import WaterSpot
 from services.conditions_sync import sync_marine, sync_quality, sync_weather
 from services.grid_converter import latlon_to_grid
-from services.marine import fetch_tide_schedule, fetch_water_temperature
+from services.marine import (
+    fetch_marine_extras,
+    fetch_rip_current,
+    fetch_tide_schedule,
+    fetch_water_temperature,
+    normalize_rip_level,
+)
 from services.public_data import PublicDataError, get_json, iter_records, result_code
 from services.tourapi import search_spot
 from services.water_forecast import upsert_forecast_for_spot
@@ -177,6 +183,51 @@ class WeatherMarineTourParseTests(TestCase):
         self.assertEqual(live_tide["low_tide"], ["03:35", "15:53"])
         self.assertEqual(live_tide["high_tide"], ["10:05", "22:15"])
 
+    def test_rip_level_from_korean_grade(self):
+        self.assertEqual(normalize_rip_level("관심"), "low")
+        self.assertEqual(normalize_rip_level("주의"), "medium")
+        self.assertEqual(normalize_rip_level("위험"), "high")
+
+    @patch("services.marine._service_key", return_value="test-key")
+    @patch("services.marine.get_json")
+    def test_rip_and_beach_index(self, mocked, _key):
+        mocked.return_value = {
+            "header": {"resultCode": "00", "resultMsg": "NORMAL_SERVICE"},
+            "body": {
+                "items": {
+                    "item": [
+                        {"beachNm": "대천해수욕장", "idxCn": "관심", "wh": "0.6", "wtem": "24.2"},
+                    ]
+                }
+            },
+        }
+        rip = fetch_rip_current("DAECHON")
+        self.assertEqual(rip["level"], "low")
+        self.assertEqual(rip["wave_height"], 0.6)
+
+        mocked.return_value = {
+            "header": {"resultCode": "00"},
+            "body": {
+                "items": {
+                    "item": [
+                        {"plcNm": "광안리해수욕장", "grdCn": "보통", "maxWh": "0.4"},
+                        {"plcNm": "해운대해수욕장", "grdCn": "좋음", "maxWh": "0.8", "wtem": "26.1"},
+                    ]
+                }
+            },
+        }
+        spot = type("Spot", (), {"name": "해운대 해수욕장", "type": "sea"})()
+        extras = fetch_marine_extras(spot)
+        self.assertEqual(extras["wave_height"], 0.8)
+        self.assertEqual(extras["marine_indices"]["beach"]["grade"], "좋음")
+
+    @patch("services.marine._service_key", return_value="test-key")
+    @patch("services.marine.get_json")
+    def test_unregistered_index_is_skipped(self, mocked, _key):
+        mocked.side_effect = PublicDataError("API error 30 for x: 등록되지 않은 서비스키", code="30")
+        spot = type("Spot", (), {"name": "해운대 해수욕장", "type": "sea"})()
+        self.assertEqual(fetch_marine_extras(spot), {})
+
     @patch("services.tourapi._service_key", return_value="test-key")
     @patch("services.tourapi.get_json")
     def test_search_spot_uses_first_image(self, mocked, _key):
@@ -329,15 +380,35 @@ class ForecastFromOutlookTests(TestCase):
         latest = WaterCondition.objects.filter(spot=inland).order_by("-fetched_at").first()
         self.assertEqual(latest.water_quality_grade, "2")
 
+    @patch("services.conditions_sync.fetch_marine_extras", return_value={})
     @patch("services.conditions_sync.fetch_tide_schedule")
     @patch("services.conditions_sync.fetch_water_temperature")
-    def test_marine_keeps_tide_when_temp_fails(self, temp, tide):
+    def test_marine_keeps_tide_when_temp_fails(self, temp, tide, _extras):
         temp.side_effect = PublicDataError("API error 41")
         tide.return_value = {"low_tide": ["03:35"], "high_tide": ["10:05"]}
         result = sync_marine(self.spot)
         self.assertIn("tide_schedule", result["changed"])
         latest = WaterCondition.objects.filter(spot=self.spot).order_by("-fetched_at").first()
         self.assertEqual(latest.tide_schedule["low_tide"], ["03:35"])
+
+    @patch("services.conditions_sync.fetch_marine_extras")
+    @patch("services.conditions_sync.fetch_tide_schedule")
+    @patch("services.conditions_sync.fetch_water_temperature")
+    def test_marine_writes_wave_and_rip(self, temp, tide, extras):
+        temp.return_value = 24.0
+        tide.return_value = {"low_tide": ["03:35"], "high_tide": ["10:05"]}
+        extras.return_value = {
+            "wave_height": 0.9,
+            "rip_current_risk": "low",
+            "marine_indices": {"beach": {"kind": "beach", "grade": "좋음"}},
+        }
+        result = sync_marine(self.spot)
+        self.assertIn("wave_height", result["changed"])
+        self.assertIn("rip_current_risk", result["changed"])
+        latest = WaterCondition.objects.filter(spot=self.spot).order_by("-fetched_at").first()
+        self.assertEqual(latest.wave_height, 0.9)
+        self.assertEqual(latest.rip_current_risk, "low")
+        self.assertEqual(latest.marine_indices["beach"]["grade"], "좋음")
 
     def test_missing_key_is_explicit(self):
         with patch("services.public_data.resolve_service_key", return_value=""):
