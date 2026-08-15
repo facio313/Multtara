@@ -53,4 +53,4 @@ class ForecastViewSetTests(TestCase):
         viewset = WaterForecastViewSet()
         queryset = viewset.get_queryset()
         self.assertEqual(queryset.count(), 1)
-        self.assertIn('select_related', str(queryset.query))
+        self.assertIn('JOIN', str(queryset.query).upper())

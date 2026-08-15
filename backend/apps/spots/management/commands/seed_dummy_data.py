@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand
 
 from apps.conditions.models import CrowdLevel, WaterCondition
 from apps.spots.models import WaterSpot
+from services.stations import REGION_MID_LAND, SPOT_KHOA_OBS, SPOT_MID_LAND
 from services.water_forecast import upsert_forecast_for_spot
 from services.water_index import upsert_scores_for_spot
 
@@ -548,6 +549,8 @@ class Command(BaseCommand):
                 image_url=image,
                 livecam_url=image if item.get("livecam") else "",
                 description=item["description"],
+                khoa_obs_code=SPOT_KHOA_OBS.get(item["name"], ""),
+                kma_mid_reg_id=SPOT_MID_LAND.get(item["name"]) or REGION_MID_LAND.get(item["region"], ""),
             )
             WaterCondition.objects.create(spot=spot, **item["condition"])
             CrowdLevel.objects.create(

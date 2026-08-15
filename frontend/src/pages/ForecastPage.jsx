@@ -11,6 +11,7 @@ const ForecastPage = () => {
   const [weeklyData, setWeeklyData] = useState([]);
   const [message, setMessage] = useState('');
   const [bestDate, setBestDate] = useState('');
+  const [source, setSource] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,10 +33,12 @@ const ForecastPage = () => {
         setWeeklyData(days);
         setMessage(response.data.message || '');
         setBestDate(response.data.best_date || '');
+        setSource(response.data.source || '');
       } catch (error) {
         console.error('Failed to load forecast', error);
         setWeeklyData([]);
         setMessage('예보를 불러오지 못했습니다.');
+        setSource('');
       } finally {
         setLoading(false);
       }
@@ -47,7 +50,11 @@ const ForecastPage = () => {
     <div className="page forecast-page">
       <header className="page-head">
         <h1>7일 예보</h1>
-        <p>저장된 컨디션으로 계산한 값입니다. 기상청 중기예보는 아직 없습니다.</p>
+        <p>
+          {source === 'kma'
+            ? '기상청 단기·중기예보로 계산한 값입니다.'
+            : '저장된 컨디션으로 계산한 값입니다. 공공API를 갱신하면 기상청 예보가 반영됩니다.'}
+        </p>
       </header>
 
       <div className="chip-row">

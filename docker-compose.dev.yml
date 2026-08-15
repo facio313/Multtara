@@ -16,6 +16,10 @@ services:
       - DJANGO_SETTINGS_MODULE=config.settings.dev
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-not-for-production}
       - DEBUG=True
+      - DATA_GO_KR_SERVICE_KEY=${DATA_GO_KR_SERVICE_KEY:-}
+      - TOUR_API_KEY=${TOUR_API_KEY:-}
+      - KMA_API_KEY=${KMA_API_KEY:-}
+      - KHOA_API_KEY=${KHOA_API_KEY:-}
     ports:
       - "8000:8000"
 

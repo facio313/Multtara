@@ -64,3 +64,9 @@ class SpotApiTests(TestCase):
         response = self.client.get("/api/v1/spots/livecams/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["count"], 1)
+
+    def test_forecast_summary_reports_stored_source(self):
+        response = self.client.get("/api/v1/spots/forecast-summary/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["days"]), 7)
+        self.assertEqual(response.data["source"], "stored")

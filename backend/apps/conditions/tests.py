@@ -61,4 +61,4 @@ class ConditionViewSetTests(TestCase):
         self.assertEqual(queryset.first().activity, 'swimming')
         
         # Test that spot is fetched (using _prefetched_objects_cache or similar is hard, but we know select_related is in the query)
-        self.assertIn('select_related', str(queryset.query))
+        self.assertIn('JOIN', str(queryset.query).upper())

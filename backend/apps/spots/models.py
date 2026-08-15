@@ -25,6 +25,8 @@ class WaterSpot(models.Model):
     address = models.CharField(max_length=255)
     image_url = models.URLField(blank=True)
     description = models.TextField(blank=True)
+    khoa_obs_code = models.CharField(max_length=20, blank=True)
+    kma_mid_reg_id = models.CharField(max_length=20, blank=True)
 
     class Meta:
         ordering = ["id"]

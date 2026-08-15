@@ -150,7 +150,15 @@ class WaterSpotViewSet(viewsets.ReadOnlyModelViewSet):
                     "predicted_index": round(row["predicted_index"] or 0),
                 }
             )
-        return Response({"days": payload, "message": message, "best_date": best["forecast_date"]})
+        source = "kma" if rows.filter(predicted_factors__source="kma").exists() else "stored"
+        return Response(
+            {
+                "days": payload,
+                "message": message,
+                "best_date": best["forecast_date"],
+                "source": source,
+            }
+        )
 
     @action(detail=False, methods=["get"])
     def livecams(self, request):

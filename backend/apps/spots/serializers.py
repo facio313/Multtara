@@ -27,6 +27,8 @@ class WaterSpotSerializer(serializers.ModelSerializer):
             "address",
             "image_url",
             "description",
+            "khoa_obs_code",
+            "kma_mid_reg_id",
             "scores",
             "water_index",
             "condition",

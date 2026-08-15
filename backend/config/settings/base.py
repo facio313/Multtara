@@ -110,4 +110,11 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "pongdang",
+    }
+}
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

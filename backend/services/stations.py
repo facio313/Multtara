@@ -1,0 +1,104 @@
+"""
+Station and mid-forecast region codes for the 26 seed spots.
+
+KHOA codes are nearest tide stations, not per-beach sensors.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from apps.spots.models import WaterSpot
+
+# getMidLandFcst regId
+REGION_MID_LAND = {
+    "서울": "11B00000",
+    "인천": "11B00000",
+    "경기": "11B00000",
+    "강원": "11D20000",
+    "충북": "11C10000",
+    "충남": "11C20000",
+    "대전": "11C20000",
+    "전북": "11F10000",
+    "전남": "11F20000",
+    "광주": "11F20000",
+    "대구": "11H10000",
+    "경북": "11H10000",
+    "부산": "11H20000",
+    "울산": "11H20000",
+    "경남": "11H20000",
+    "제주": "11G00000",
+}
+
+# getMidTa city codes
+REGION_MID_TA = {
+    "서울": "11B10101",
+    "인천": "11B20201",
+    "경기": "11B20601",
+    "강원": "11D20501",
+    "충북": "11C10301",
+    "충남": "11C20101",
+    "전북": "11F10201",
+    "경북": "11H10201",
+    "부산": "11H20201",
+    "제주": "11G00201",
+}
+
+SPOT_MID_LAND = {
+    "동강 래프팅": "11D10000",
+    "설악산 천불동계곡": "11D20000",
+}
+
+SPOT_MID_TA = {
+    "동강 래프팅": "11D10401",
+    "설악산 천불동계곡": "11D20401",
+    "속초 해수욕장": "11D20401",
+    "양양 설악비치": "11D20401",
+    "덕구 온천": "11H10101",
+}
+
+# Nearest KHOA tide station for coastal / mudflat spots.
+SPOT_KHOA_OBS = {
+    "해운대 해수욕장": "DT_0005",
+    "광안리 해수욕장": "DT_0005",
+    "송정 해수욕장": "DT_0005",
+    "경포 해수욕장": "DT_0026",
+    "속초 해수욕장": "DT_0012",
+    "양양 설악비치": "DT_0012",
+    "을왕리 해수욕장": "DT_0001",
+    "대천 해수욕장": "DT_0004",
+    "협재 해수욕장": "DT_0023",
+    "중문 색달 해변": "DT_0023",
+    "동막 해수욕장 갯벌": "DT_0001",
+    "선재도 갯벌": "DT_0001",
+    "무창포 갯벌": "DT_0004",
+}
+
+CACHE_TTL = {
+    "weather_current": 60 * 30,
+    "weather_forecast": 60 * 180,
+    "marine_temp": 60 * 60,
+    "marine_tide": 60 * 60 * 6,
+    "tour_spot_detail": 60 * 60 * 24,
+}
+
+
+def mid_land_id(spot: WaterSpot) -> str:
+    if getattr(spot, "kma_mid_reg_id", ""):
+        return spot.kma_mid_reg_id
+    if spot.name in SPOT_MID_LAND:
+        return SPOT_MID_LAND[spot.name]
+    return REGION_MID_LAND.get(spot.region, "")
+
+
+def mid_ta_id(spot: WaterSpot) -> str:
+    if spot.name in SPOT_MID_TA:
+        return SPOT_MID_TA[spot.name]
+    return REGION_MID_TA.get(spot.region, "")
+
+
+def khoa_obs_code(spot: WaterSpot) -> str:
+    if getattr(spot, "khoa_obs_code", ""):
+        return spot.khoa_obs_code
+    return SPOT_KHOA_OBS.get(spot.name, "")

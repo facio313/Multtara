@@ -34,6 +34,10 @@ services:
       - DJANGO_SETTINGS_MODULE=config.settings.prod
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-*}
+      - DATA_GO_KR_SERVICE_KEY=${DATA_GO_KR_SERVICE_KEY:-}
+      - TOUR_API_KEY=${TOUR_API_KEY:-}
+      - KMA_API_KEY=${KMA_API_KEY:-}
+      - KHOA_API_KEY=${KHOA_API_KEY:-}
     ports:
       - "8000:8000"
 
