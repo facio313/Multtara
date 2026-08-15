@@ -1105,3 +1105,331 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Auditable Water Index overlay */
+.detail-image-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, #0d5657, #72cbbb);
+  font-size: clamp(5rem, 16vw, 12rem);
+}
+
+.detail-badges > span.demo.state-live,
+.freshness-pill.state-live {
+  color: #063e33;
+  background: #7de8c1;
+}
+
+.detail-badges > span.demo.state-stale,
+.freshness-pill.state-stale {
+  color: #513a0f;
+  background: #f1ce75;
+}
+
+.detail-badges > span.demo.state-missing,
+.freshness-pill.state-missing {
+  color: #474f4d;
+  background: #dce3e1;
+}
+
+.detail-badges > span.demo.state-error,
+.freshness-pill.state-error {
+  color: #652920;
+  background: #f3aaa0;
+}
+
+.detail-data-status {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 18px;
+  border: 1px solid #d5e5df;
+  border-radius: 18px;
+  color: #335e56;
+  background: #f0f7f4;
+}
+
+.detail-data-status.state-error {
+  color: #7c3b32;
+  border-color: #efcbc5;
+  background: #fff3f0;
+}
+
+.detail-data-status.state-empty {
+  color: #6f571f;
+  border-color: #e8d9ad;
+  background: #fff9e9;
+}
+
+.detail-data-status > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-data-status strong {
+  font-size: 0.76rem;
+}
+
+.detail-data-status span {
+  color: var(--color-text-muted);
+  font-size: 0.67rem;
+}
+
+.detail-data-status button {
+  min-height: 35px;
+  padding: 0 11px;
+  border: 1px solid #e0b4ad;
+  border-radius: 9px;
+  color: #803d34;
+  background: #fff;
+  font: inherit;
+  font-size: 0.65rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.safety-banner.safety-clear {
+  border-color: #cce9df;
+  background: #eff9f5;
+}
+
+.safety-banner.safety-stop,
+.safety-banner.safety-unknown {
+  border-color: #edc7c0;
+  background: #fff1ee;
+}
+
+.safety-banner.safety-demo {
+  border-color: #e8d7a9;
+  background: #fff9e8;
+}
+
+.safety-stop .safety-icon,
+.safety-unknown .safety-icon {
+  color: #a4493e;
+  background: #f7d7d1;
+}
+
+.safety-demo .safety-icon {
+  color: #8a691e;
+  background: #f4e4b7;
+}
+
+.safety-stop > div:nth-child(2) > span,
+.safety-unknown > div:nth-child(2) > span {
+  color: #9c463b;
+}
+
+.safety-demo > div:nth-child(2) > span {
+  color: #7d611e;
+}
+
+.activity-score-grid > button,
+.activity-score-grid > div {
+  display: flex;
+  min-height: 150px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 12px;
+  border: 0;
+  border-right: 1px solid var(--color-line);
+  color: inherit;
+  background: #fafbf8;
+  font: inherit;
+}
+
+.activity-score-grid > button {
+  cursor: pointer;
+}
+
+.activity-score-grid > button:hover {
+  background: #f0f6f2;
+}
+
+.activity-score-grid > button:last-child,
+.activity-score-grid > div:last-child {
+  border-right: 0;
+}
+
+.activity-score-grid > button.primary-score,
+.activity-score-grid > div.primary-score {
+  color: #effaf7;
+  background: #0b3b3d;
+}
+
+.score-empty {
+  grid-column: 1 / -1;
+  gap: 5px;
+}
+
+.score-confidence-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.score-confidence-row > span {
+  padding: 7px 9px;
+  border-radius: 9px;
+  color: #687b77;
+  background: #f1f5f2;
+  font-size: 0.62rem;
+}
+
+.score-confidence-row strong {
+  color: #244b46;
+}
+
+.score-reasons code {
+  padding: 3px 5px;
+  border-radius: 5px;
+  color: #755048;
+  background: #f6eae7;
+  font-size: 0.58rem;
+}
+
+.score-reasons em {
+  color: #83631d;
+  font-size: 0.54rem;
+  font-style: normal;
+  font-weight: 820;
+}
+
+.provenance-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.provenance-grid > div {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  background: #fafbf8;
+}
+
+.provenance-grid dt,
+.evidence-lists > div > span,
+.contribution-list > span {
+  color: var(--color-text-faint);
+  font-size: 0.61rem;
+  font-weight: 780;
+}
+
+.provenance-grid dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  color: #284b47;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.evidence-lists {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.evidence-lists > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #f3f6f3;
+}
+
+.evidence-lists strong,
+.evidence-lists small {
+  overflow-wrap: anywhere;
+  color: #435f5a;
+  font-size: 0.66rem;
+  line-height: 1.45;
+}
+
+.contribution-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 18px;
+}
+
+.contribution-list > span {
+  grid-column: 1 / -1;
+}
+
+.contribution-list > div {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  font-size: 0.65rem;
+}
+
+.contribution-list > div span {
+  flex: 0 0 auto;
+  color: var(--color-brand);
+}
+
+.sidebar-score.score-unknown {
+  background: conic-gradient(#9ba8a4 100%, #e5ece8 0);
+}
+
+.sidebar-score.score-unknown strong {
+  font-size: 3rem;
+}
+
+.sidebar-index-card.state-stale,
+.source-card.state-stale {
+  border-color: #e7d29a;
+}
+
+.sidebar-index-card.state-missing,
+.sidebar-index-card.state-error,
+.source-card.state-missing,
+.source-card.state-error {
+  border-color: #ecc9c2;
+}
+
+@media (max-width: 760px) {
+  .detail-data-status {
+    grid-template-columns: auto 1fr;
+  }
+
+  .detail-data-status button {
+    grid-column: 1 / -1;
+  }
+
+  .activity-score-grid > button,
+  .activity-score-grid > div {
+    min-height: 125px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .provenance-grid,
+  .evidence-lists {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .provenance-grid,
+  .evidence-lists,
+  .contribution-list {
+    grid-template-columns: 1fr;
+  }
+}

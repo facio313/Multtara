@@ -10,7 +10,9 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import LocaleSelector from '../components/layout/LocaleSelector';
 import { personas } from '../data/pongdangData';
+import { useI18n } from '../i18n';
 import './OnboardingPage.css';
 
 const PREFERENCE_STORAGE_KEY = 'pongdang:persona-preference';
@@ -67,73 +69,10 @@ const personaAliases = {
   stay: ['stay', 'indoor', 'resort', '스테이', '실내'],
 };
 
-const questionBank = [
-  {
-    id: 'scene',
-    eyebrow: '첫 장면',
-    title: '지금 가장 마음이 가는 물의 장면은?',
-    description: '정답은 없어요. 오늘의 기분에 가장 가까운 하나를 골라주세요.',
-    options: [
-      { persona: 'active', label: '파도를 가르는 순간', detail: '서핑과 래프팅처럼 온몸으로 즐기기' },
-      { persona: 'family', label: '아이의 첫 물놀이', detail: '얕고 안전한 물에서 함께 웃기' },
-      { persona: 'wellness', label: '고요한 온천의 김', detail: '조용한 풍경 속에서 천천히 쉬기' },
-      { persona: 'local', label: '낯선 동네의 물길', detail: '숨은 계곡과 오래된 마을을 발견하기' },
-      { persona: 'stay', label: '창밖으로 이어진 풀', detail: '숙소 안에서 여유롭게 머물기' },
-    ],
-  },
-  {
-    id: 'priority',
-    eyebrow: '선택 기준',
-    title: '여행지를 고를 때 가장 먼저 보는 것은?',
-    description: '퐁당이 추천 순서를 조정할 때 가장 중요한 기준이 돼요.',
-    options: [
-      { persona: 'active', label: '오늘의 파도와 유속', detail: '활동하기 좋은 컨디션인지 확인해요' },
-      { persona: 'family', label: '안전과 편의시설', detail: '주차, 화장실, 얕은 수심을 살펴요' },
-      { persona: 'wellness', label: '한적함과 풍경', detail: '머무는 동안 편안할지를 생각해요' },
-      { persona: 'local', label: '그곳만의 이야기', detail: '로컬 문화와 음식까지 궁금해요' },
-      { persona: 'stay', label: '쾌적한 실내 동선', detail: '날씨와 이동 피로를 줄이고 싶어요' },
-    ],
-  },
-  {
-    id: 'companion',
-    eyebrow: '동행',
-    title: '이번 물 여행은 누구와 함께하나요?',
-    description: '동행에 따라 필요한 안전 정보와 여행의 속도가 달라져요.',
-    options: [
-      { persona: 'active', label: '도전을 즐기는 친구', detail: '같이 움직이고 기록할 크루와 떠나요' },
-      { persona: 'family', label: '아이 또는 부모님', detail: '모두가 무리 없는 하루를 만들어요' },
-      { persona: 'wellness', label: '나 자신 또는 가까운 한 사람', detail: '대화와 쉼에 집중하고 싶어요' },
-      { persona: 'local', label: '호기심 많은 여행 메이트', detail: '계획 밖의 발견도 함께 즐겨요' },
-      { persona: 'stay', label: '편하게 쉬고 싶은 일행', detail: '한 공간에서 각자의 휴식을 누려요' },
-    ],
-  },
-  {
-    id: 'pace',
-    eyebrow: '여행의 속도',
-    title: '가장 이상적인 하루의 리듬은?',
-    description: '선호하는 속도에 맞춰 스팟과 주변 동선을 큐레이션해요.',
-    options: [
-      { persona: 'active', label: '해 뜰 때부터 꽉 채우기', detail: '여러 활동을 이어서 경험해요' },
-      { persona: 'family', label: '쉬는 시간을 넉넉하게', detail: '돌발 상황에도 여유 있는 일정이 좋아요' },
-      { persona: 'wellness', label: '한 곳에서 오래 머물기', detail: '시간표보다 감각을 따라가요' },
-      { persona: 'local', label: '골목마다 잠시 멈추기', detail: '현지인의 추천에 일정을 열어둬요' },
-      { persona: 'stay', label: '체크인부터 온전히 쉬기', detail: '숙소 안 경험에 집중하고 싶어요' },
-    ],
-  },
-  {
-    id: 'weather',
-    eyebrow: '플랜 B',
-    title: '비가 예보된 날, 나는 어떻게 할까요?',
-    description: '날씨가 바뀌어도 취향에 맞는 대안을 찾을 수 있어요.',
-    options: [
-      { persona: 'active', label: '안전한 종목으로 바꿔 계속', detail: '컨디션을 읽고 새로운 도전을 찾아요' },
-      { persona: 'family', label: '가족이 편한 곳으로 변경', detail: '실내외를 오가기 쉬운 장소를 골라요' },
-      { persona: 'wellness', label: '빗소리 좋은 온천으로', detail: '날씨까지 쉼의 분위기로 즐겨요' },
-      { persona: 'local', label: '시장과 물길 산책으로', detail: '비가 만든 동네의 표정을 발견해요' },
-      { persona: 'stay', label: '실내 풀에서 느긋하게', detail: '이동 없이 완성되는 하루가 좋아요' },
-    ],
-  },
-];
+const questionBank = ['scene', 'priority', 'companion', 'pace', 'weather'].map((id) => ({
+  id,
+  options: PERSONA_KEYS.map((persona) => ({ persona })),
+}));
 
 function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -174,6 +113,7 @@ function savePreference(personaId) {
 
 function OnboardingPage() {
   const navigate = useNavigate();
+  const { locale, t } = useI18n();
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState(() => Array(questionBank.length).fill(null));
   const [resultKey, setResultKey] = useState(null);
@@ -247,35 +187,32 @@ function OnboardingPage() {
           <strong>퐁당</strong>
           <small>PONGDANG</small>
         </button>
-        <button className="onboarding-skip" type="button" onClick={() => navigate('/')}>
-          건너뛰고 둘러보기
-          <ArrowRight size={16} aria-hidden="true" />
-        </button>
+        <div className="onboarding-topbar-actions">
+          <LocaleSelector className="onboarding-locale-selector" />
+          <button className="onboarding-skip" type="button" onClick={() => navigate('/')}>
+            {t('onboarding.skip')}
+            <ArrowRight size={16} aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       <div className="onboarding-layout">
         <section className="onboarding-intro" aria-labelledby="onboarding-intro-title">
           <p className="onboarding-kicker"><Sparkles size={15} /> TASTE FINDER</p>
-          <h1 id="onboarding-intro-title">
-            물을 즐기는 방식은<br />
-            <span>모두 다르니까.</span>
-          </h1>
-          <p>
-            다섯 번의 가벼운 선택으로 지금의 여행 취향을 찾아드려요.
-            이름, 연락처, 위치는 묻지 않아요.
-          </p>
+          <h1 id="onboarding-intro-title">{t('onboarding.hero.title')}</h1>
+          <p>{t('onboarding.hero.description')}</p>
 
           <div className="onboarding-privacy-note">
             <div><Check size={16} aria-hidden="true" /></div>
             <span>
-              <strong>취향만, 이 기기에</strong>
-              최종 결과 한 가지만 브라우저에 저장됩니다.
+              <strong>{t('onboarding.privacy.title')}</strong>
+              {t('onboarding.privacy.description')}
             </span>
           </div>
 
-          <div className="onboarding-persona-preview" aria-label="분석 가능한 다섯 가지 물 여행 취향">
+          <div className="onboarding-persona-preview" aria-label={t('onboarding.preview')}>
             {PERSONA_KEYS.map((key) => (
-              <span key={key} title={personaByKey[key].title}>
+              <span key={key} title={t(`persona.${key === 'stay' ? 'indoor' : key}.title`)}>
                 {typeof personaByKey[key].icon === 'string' ? personaByKey[key].icon : fallbackPersonas[key].icon}
               </span>
             ))}
@@ -284,15 +221,15 @@ function OnboardingPage() {
 
         <section className="onboarding-card" aria-live="polite">
           <div className="onboarding-progress-row">
-            <button className="onboarding-back" type="button" onClick={goBack} aria-label="이전 단계">
+            <button className="onboarding-back" type="button" onClick={goBack} aria-label={t('onboarding.back')}>
               <ChevronLeft size={19} aria-hidden="true" />
             </button>
             <div className="onboarding-progress-copy">
-              <span>{resultKey ? '분석 완료' : `${step + 1} / ${questionBank.length}`}</span>
+              <span>{resultKey ? t('onboarding.complete') : `${step + 1} / ${questionBank.length}`}</span>
               <div
                 className="onboarding-progress-track"
                 role="progressbar"
-                aria-label="취향 분석 진행률"
+                aria-label={t('onboarding.progress')}
                 aria-valuemin="0"
                 aria-valuemax="100"
                 aria-valuenow={Math.round(progress)}
@@ -307,26 +244,29 @@ function OnboardingPage() {
               <div className="onboarding-result-mark" aria-hidden="true">
                 {typeof selectedPersona.icon === 'string' ? selectedPersona.icon : fallbackPersonas[resultKey].icon}
               </div>
-              <p className="onboarding-result-label">당신의 물 여행 취향</p>
-              <h2>{selectedPersona.title}</h2>
-              <p className="onboarding-result-subtitle">{selectedPersona.subtitle}</p>
-              <p className="onboarding-result-description">{selectedPersona.description}</p>
+              <p className="onboarding-result-label">{t('onboarding.result.label')}</p>
+              <h2>{t(`persona.${resultKey === 'stay' ? 'indoor' : resultKey}.title`)}</h2>
+              <p className="onboarding-result-subtitle">{t(`persona.${resultKey === 'stay' ? 'indoor' : resultKey}.subtitle`)}</p>
+              <p className="onboarding-result-description">{t(`persona.${resultKey === 'stay' ? 'indoor' : resultKey}.description`)}</p>
 
-              <div className="onboarding-result-tags" aria-label="추천 취향 태그">
-                {(Array.isArray(selectedPersona.tags) ? selectedPersona.tags : []).slice(0, 4).map((tag) => (
+              <div className="onboarding-result-tags" aria-label={t('onboarding.result.tags')}>
+                {(locale === 'ko'
+                  ? (Array.isArray(selectedPersona.tags) ? selectedPersona.tags : []).slice(0, 4)
+                  : [t(`persona.${resultKey === 'stay' ? 'indoor' : resultKey}.subtitle`)]
+                ).map((tag) => (
                   <span key={tag}>#{tag}</span>
                 ))}
               </div>
 
               <div className={`onboarding-save-state is-${saveState}`} role="status">
                 {saveState === 'saved'
-                  ? '이 기기에 취향을 저장했어요. 언제든 MY 퐁당에서 지울 수 있어요.'
-                  : '브라우저 저장소를 사용할 수 없어 이번 화면에서만 결과를 보여드려요.'}
+                  ? t('onboarding.save.saved')
+                  : t('onboarding.save.unavailable')}
               </div>
 
               <div className="onboarding-result-actions">
                 <button className="onboarding-primary-button" type="button" onClick={() => navigate('/')}>
-                  맞춤 홈으로 가기
+                  {t('onboarding.cta.home')}
                   <ArrowRight size={17} aria-hidden="true" />
                 </button>
                 <button
@@ -335,28 +275,29 @@ function OnboardingPage() {
                   onClick={() => navigate('/concierge', { state: { personaId: selectedPersona.id } })}
                 >
                   <Compass size={17} aria-hidden="true" />
-                  AI 컨시어지와 여행 짜기
+                  {t('onboarding.cta.concierge')}
                 </button>
               </div>
 
               <button className="onboarding-restart" type="button" onClick={restart}>
                 <RotateCcw size={15} aria-hidden="true" />
-                다시 선택하기
+                {t('onboarding.cta.restart')}
               </button>
             </div>
           ) : (
             <form className="onboarding-question" onSubmit={(event) => { event.preventDefault(); goForward(); }}>
               <fieldset>
                 <legend>
-                  <span>{currentQuestion.eyebrow}</span>
-                  {currentQuestion.title}
+                  <span>{t(`onboarding.question.${currentQuestion.id}.eyebrow`)}</span>
+                  {t(`onboarding.question.${currentQuestion.id}.title`)}
                 </legend>
-                <p className="onboarding-question-description">{currentQuestion.description}</p>
+                <p className="onboarding-question-description">{t(`onboarding.question.${currentQuestion.id}.description`)}</p>
 
                 <div className="onboarding-options">
                   {currentQuestion.options.map((option) => {
                     const isSelected = currentAnswer === option.persona;
                     const optionId = `${currentQuestion.id}-${option.persona}`;
+                    const optionMessageKey = `onboarding.option.${currentQuestion.id}.${option.persona}`;
 
                     return (
                       <label className={`onboarding-option${isSelected ? ' is-selected' : ''}`} htmlFor={optionId} key={option.persona}>
@@ -374,8 +315,8 @@ function OnboardingPage() {
                             : fallbackPersonas[option.persona].icon}
                         </span>
                         <span className="onboarding-option-copy">
-                          <strong>{option.label}</strong>
-                          <small>{option.detail}</small>
+                          <strong>{t(`${optionMessageKey}.label`)}</strong>
+                          <small>{t(`${optionMessageKey}.detail`)}</small>
                         </span>
                         <span className="onboarding-option-check" aria-hidden="true">
                           <Check size={15} />
@@ -389,10 +330,10 @@ function OnboardingPage() {
               <div className="onboarding-controls">
                 <button className="onboarding-previous-button" type="button" onClick={goBack}>
                   <ArrowLeft size={16} aria-hidden="true" />
-                  {step === 0 ? '나가기' : '이전'}
+                  {step === 0 ? t('onboarding.cta.exit') : t('onboarding.cta.previous')}
                 </button>
                 <button className="onboarding-next-button" type="submit" disabled={!currentAnswer}>
-                  {step === questionBank.length - 1 ? '내 취향 확인하기' : '다음 질문'}
+                  {step === questionBank.length - 1 ? t('onboarding.cta.result') : t('onboarding.cta.next')}
                   <ArrowRight size={16} aria-hidden="true" />
                 </button>
               </div>

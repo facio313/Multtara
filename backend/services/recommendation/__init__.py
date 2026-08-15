@@ -1,0 +1,62 @@
+"""Pure, deterministic recommendation primitives for PongDang."""
+
+from .diversity import MMRPolicy, MMRSelector, jaccard_similarity
+from .domain import (
+    AgePolicy,
+    Candidate,
+    CandidateAssessment,
+    FeatureValue,
+    FeatureVector,
+    GateValue,
+    ItineraryPlan,
+    ItineraryRequest,
+    PartyRequirements,
+    ParticipantSkillLevel,
+    PreferenceTarget,
+    PreferenceVector,
+    RankedRecommendation,
+    RecommendationRequest,
+    ScheduledVisit,
+    ScoreContribution,
+    SkippedCandidate,
+    TimeWindow,
+    TravelTime,
+)
+from .itinerary import (
+    ItineraryInfeasibleError,
+    ItineraryPlanner,
+    TravelTimeMatrix,
+    TravelTimeProvider,
+)
+from .scoring import RecommendationEngine, ScoringPolicy
+
+__all__ = (
+    "AgePolicy",
+    "Candidate",
+    "CandidateAssessment",
+    "FeatureValue",
+    "FeatureVector",
+    "GateValue",
+    "ItineraryInfeasibleError",
+    "ItineraryPlan",
+    "ItineraryPlanner",
+    "ItineraryRequest",
+    "MMRPolicy",
+    "MMRSelector",
+    "PartyRequirements",
+    "ParticipantSkillLevel",
+    "PreferenceTarget",
+    "PreferenceVector",
+    "RankedRecommendation",
+    "RecommendationEngine",
+    "RecommendationRequest",
+    "ScheduledVisit",
+    "ScoreContribution",
+    "ScoringPolicy",
+    "SkippedCandidate",
+    "TimeWindow",
+    "TravelTime",
+    "TravelTimeMatrix",
+    "TravelTimeProvider",
+    "jaccard_similarity",
+)

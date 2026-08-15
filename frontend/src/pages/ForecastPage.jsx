@@ -15,24 +15,14 @@ import {
   Wind,
 } from 'lucide-react';
 import { spots, weeklyForecast } from '../data/pongdangData';
+import { useI18n } from '../i18n';
 import './ForecastPage.css';
 
 const ACTIVITY_OPTIONS = [
-  { id: 'swim', label: '물놀이' },
-  { id: 'surf', label: '서핑' },
-  { id: 'relax', label: '물멍' },
-  { id: 'mudflat', label: '갯벌' },
-  { id: 'onsen', label: '온천' },
-  { id: 'rafting', label: '래프팅' },
+  'swim', 'surf', 'relax', 'mudflat', 'onsen', 'rafting',
 ];
 
-const STATUS_LABELS = {
-  excellent: '최적',
-  good: '좋음',
-  fair: '보통',
-  caution: '주의',
-  unavailable: '미수집',
-};
+const statusLabel = (t, tone) => t(`forecast.status.${tone}`);
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
 
@@ -119,6 +109,7 @@ const resolveFreshnessLabel = (days, recommendedSpot) => {
 };
 
 function ForecastPage() {
+  const { t } = useI18n();
   const [selectedRegion, setSelectedRegion] = useState(REGION_OPTIONS[0]);
   const [selectedActivity, setSelectedActivity] = useState('swim');
   const [selectedDayId, setSelectedDayId] = useState(null);
@@ -145,7 +136,7 @@ function ForecastPage() {
   }, [days]);
 
   const selectedDay = days.find((day) => day.id === selectedDayId) || bestDay || days[0];
-  const activity = ACTIVITY_OPTIONS.find((option) => option.id === selectedActivity);
+  const activityLabel = t(`activity.${selectedActivity}`);
 
   const recommendedSpot = useMemo(() => {
     const scopedSpots = SPOT_DATA.filter((spot) => regionMatches(spot.region, selectedRegion));
@@ -155,7 +146,7 @@ function ForecastPage() {
   }, [selectedActivity, selectedRegion]);
 
   const updateLabel = resolveFreshnessLabel(days, recommendedSpot);
-  const displayRegion = selectedRegion === '전국' ? '전국 데모 지역' : selectedRegion;
+  const displayRegion = selectedRegion;
 
   const resetForecast = () => {
     setSelectedRegion(REGION_OPTIONS[0]);
@@ -171,21 +162,15 @@ function ForecastPage() {
             <span className="forecast-demo-badge">DEMO DATA</span>
             <span>{updateLabel}</span>
           </div>
-          <h1 id="forecast-title">
-            가장 좋은 물의 순간을
-            <span> 7일 먼저 만나요</span>
-          </h1>
-          <p>
-            기온·파고·강수와 물 상태를 함께 읽어, 막연한 예보 대신
-            방문하기 좋은 날을 또렷하게 보여드립니다.
-          </p>
+          <h1 id="forecast-title">{t('forecast.hero.title')}</h1>
+          <p>{t('forecast.hero.description')}</p>
         </div>
 
-        <div className="forecast-hero__signal" aria-label="예보 데이터 안내">
+        <div className="forecast-hero__signal" aria-label={t('forecast.signal.label')}>
           <CalendarDays aria-hidden="true" />
           <div>
-            <strong>문서 기반 고정 예보</strong>
-            <span>실측 데이터가 연결되면 관측 시각과 출처가 여기에 표시됩니다.</span>
+            <strong>{t('forecast.signal.title')}</strong>
+            <span>{t('forecast.signal.description')}</span>
           </div>
         </div>
       </header>
@@ -194,16 +179,16 @@ function ForecastPage() {
         <div className="forecast-controls__heading">
           <div>
             <span className="forecast-eyebrow">MY WATER FORECAST</span>
-            <h2 id="forecast-controls-title">어디서, 무엇을 즐길까요?</h2>
+            <h2 id="forecast-controls-title">{t('forecast.controls.title')}</h2>
           </div>
           <p aria-live="polite">
-            {displayRegion} · {activity?.label} 기준으로 보고 있어요.
+            {t('forecast.controls.viewing', { region: displayRegion, activity: activityLabel })}
           </p>
         </div>
 
         <div className="forecast-control-groups">
           <fieldset className="forecast-choice-group">
-            <legend>지역</legend>
+            <legend>{t('forecast.region')}</legend>
             <div className="forecast-choice-list">
               {REGION_OPTIONS.map((region) => (
                 <button
@@ -223,20 +208,20 @@ function ForecastPage() {
           </fieldset>
 
           <fieldset className="forecast-choice-group">
-            <legend>여행 목적</legend>
+            <legend>{t('forecast.purpose')}</legend>
             <div className="forecast-choice-list forecast-choice-list--activity">
-              {ACTIVITY_OPTIONS.map((option) => (
+              {ACTIVITY_OPTIONS.map((activityId) => (
                 <button
                   type="button"
-                  key={option.id}
-                  className={selectedActivity === option.id ? 'is-active' : ''}
-                  aria-pressed={selectedActivity === option.id}
+                  key={activityId}
+                  className={selectedActivity === activityId ? 'is-active' : ''}
+                  aria-pressed={selectedActivity === activityId}
                   onClick={() => {
-                    setSelectedActivity(option.id);
+                    setSelectedActivity(activityId);
                     setSelectedDayId(null);
                   }}
                 >
-                  {option.label}
+                  {t(`activity.${activityId}`)}
                 </button>
               ))}
             </div>
@@ -251,13 +236,13 @@ function ForecastPage() {
               <div className="forecast-section-heading">
                 <div>
                   <span className="forecast-eyebrow">7-DAY WATER INDEX</span>
-                  <h2 id="forecast-week-title">{displayRegion} 주간 흐름</h2>
+                  <h2 id="forecast-week-title">{t('forecast.week.title', { region: displayRegion })}</h2>
                 </div>
-                <div className="forecast-legend" aria-label="점수 범례">
-                  <span><i className="excellent" />90+ 최적</span>
-                  <span><i className="good" />80+ 좋음</span>
-                  <span><i className="fair" />65+ 보통</span>
-                  <span><i className="caution" />주의</span>
+                <div className="forecast-legend" aria-label={t('forecast.legend')}>
+                  <span><i className="excellent" />90+ {t('forecast.status.excellent')}</span>
+                  <span><i className="good" />80+ {t('forecast.status.good')}</span>
+                  <span><i className="fair" />65+ {t('forecast.status.fair')}</span>
+                  <span><i className="caution" />{t('forecast.status.caution')}</span>
                 </div>
               </div>
 
@@ -272,7 +257,7 @@ function ForecastPage() {
                       className={`forecast-day forecast-day--${day.tone}${isSelected ? ' is-selected' : ''}`}
                       style={{ '--forecast-score': `${day.resolvedScore ?? 0}%` }}
                       aria-pressed={isSelected}
-                      aria-label={`${day.date} ${day.day}, ${activity?.label} 지수 ${day.resolvedScore ?? '미수집'}점, ${STATUS_LABELS[day.tone]}${isBest ? ', 이번 주 추천일' : ''}`}
+                      aria-label={`${day.date} ${day.day}, ${activityLabel} Water Index ${day.resolvedScore ?? t('common.noData')}, ${statusLabel(t, day.tone)}${isBest ? `, ${t('forecast.table.recommended')}` : ''}`}
                       onClick={() => setSelectedDayId(day.id)}
                     >
                       <span className="forecast-day__date">
@@ -286,7 +271,7 @@ function ForecastPage() {
                       <span className="forecast-day__weather">{day.weather}</span>
                       <span className="forecast-day__status">
                         {isBest && <Sparkles size={14} aria-hidden="true" />}
-                        {isBest ? 'BEST' : STATUS_LABELS[day.tone]}
+                        {isBest ? 'BEST' : statusLabel(t, day.tone)}
                       </span>
                     </button>
                   );
@@ -295,30 +280,29 @@ function ForecastPage() {
 
               <p className="forecast-data-note">
                 <Info size={16} aria-hidden="true" />
-                활동별 세부 예보가 없는 날은 지역 종합 Water Index를 사용합니다.
-                점수는 안전 경보를 대신하지 않습니다.
+                {t('forecast.note')}
               </p>
             </section>
 
             <aside className="forecast-best-card" aria-labelledby="forecast-best-title">
               <span className="forecast-best-card__label">
-                <Sparkles size={16} aria-hidden="true" /> 이번 주의 퐁당 타이밍
+                <Sparkles size={16} aria-hidden="true" /> {t('forecast.best.label')}
               </span>
               <div className="forecast-best-card__score" aria-hidden="true">
                 <span>{bestDay?.resolvedScore ?? '—'}</span>
                 <small>/ 100</small>
               </div>
               <h2 id="forecast-best-title">
-                {bestDay?.day}요일, {activity?.label}하기 가장 좋아요
+                {t('forecast.best.title', { day: bestDay?.day, activity: activityLabel })}
               </h2>
               <p>
-                {bestDay?.label || `${bestDay?.date} 예보 가운데 Water Index가 가장 높습니다.`}
+                {bestDay?.label || t('forecast.best.description', { date: bestDay?.date })}
               </p>
 
               <ul className="forecast-reason-list">
                 {(bestDay?.factors.length
                   ? bestDay.factors
-                  : ['선택한 기간의 최고 Water Index', `${bestDay?.weather || '날씨 정보 확인 중'} 예보 반영`]
+                  : [t('forecast.best.factor'), t('forecast.best.weatherFactor', { weather: bestDay?.weather || t('common.loading') })]
                 ).slice(0, 3).map((factor) => (
                   <li key={factor}>
                     <Check size={16} aria-hidden="true" />
@@ -329,16 +313,16 @@ function ForecastPage() {
 
               {recommendedSpot && (
                 <div className="forecast-spot-pick">
-                  <span>이 지역 추천 스팟</span>
+                  <span>{t('forecast.spot.label')}</span>
                   <strong>{recommendedSpot.name}</strong>
                   <small>
                     {recommendedSpot.typeLabel || recommendedSpot.type}
                     {recommendedSpot.activityScore !== null && recommendedSpot.activityScore !== undefined
-                      ? ` · 현재 ${activity?.label} ${recommendedSpot.activityScore}점`
+                      ? ` · ${t('forecast.spot.current', { activity: activityLabel, score: recommendedSpot.activityScore })}`
                       : ''}
                   </small>
                   <Link to={`/spot/${recommendedSpot.id}`}>
-                    스팟 자세히 보기 <ArrowUpRight size={15} aria-hidden="true" />
+                    {t('forecast.spot.cta')} <ArrowUpRight size={15} aria-hidden="true" />
                   </Link>
                 </div>
               )}
@@ -351,26 +335,26 @@ function ForecastPage() {
                 <span className="forecast-eyebrow">SELECTED DAY</span>
                 <h2 id="forecast-detail-title">{selectedDay.date} · {selectedDay.day}요일</h2>
                 <p>
-                  {selectedDay.label || `${selectedDay.weather} 예보를 반영한 문서 기반 데모입니다.`}
+                  {selectedDay.label || t('forecast.detail.demo', { weather: selectedDay.weather })}
                 </p>
               </div>
 
               <dl className="forecast-metric-grid">
                 <div>
-                  <dt><ThermometerSun aria-hidden="true" /> 기온</dt>
-                  <dd>{formatMetric(selectedDay.temperature, '°C')}</dd>
+                  <dt><ThermometerSun aria-hidden="true" /> {t('metric.airTemp')}</dt>
+                  <dd>{formatMetric(selectedDay.temperature, '°C', t('common.noData'))}</dd>
                 </div>
                 <div>
-                  <dt><Waves aria-hidden="true" /> 파고</dt>
-                  <dd>{formatMetric(selectedDay.waveHeight, 'm')}</dd>
+                  <dt><Waves aria-hidden="true" /> {t('metric.waveHeight')}</dt>
+                  <dd>{formatMetric(selectedDay.waveHeight, 'm', t('common.noData'))}</dd>
                 </div>
                 <div>
-                  <dt><CloudRain aria-hidden="true" /> 강수 확률</dt>
-                  <dd>{formatMetric(selectedDay.rainChance, '%')}</dd>
+                  <dt><CloudRain aria-hidden="true" /> {t('metric.rainChance')}</dt>
+                  <dd>{formatMetric(selectedDay.rainChance, '%', t('common.noData'))}</dd>
                 </div>
                 <div>
-                  <dt><Wind aria-hidden="true" /> 상태</dt>
-                  <dd>{STATUS_LABELS[getTone(selectedDay.resolvedScore)]}</dd>
+                  <dt><Wind aria-hidden="true" /> {t('metric.status')}</dt>
+                  <dd>{statusLabel(t, getTone(selectedDay.resolvedScore))}</dd>
                 </div>
               </dl>
             </section>
@@ -379,22 +363,22 @@ function ForecastPage() {
           <details className="forecast-table-panel">
             <summary>
               <span>
-                <TableProperties aria-hidden="true" /> 표로 자세히 보기
+                <TableProperties aria-hidden="true" /> {t('forecast.table.open')}
               </span>
-              <small>차트와 같은 데이터를 읽기 쉬운 표로 제공합니다.</small>
+              <small>{t('forecast.table.description')}</small>
             </summary>
             <div className="forecast-table-wrap">
               <table>
-                <caption>{displayRegion} {activity?.label} 7일 예보</caption>
+                <caption>{displayRegion} · {activityLabel} · 7-day Water Index</caption>
                 <thead>
                   <tr>
-                    <th scope="col">날짜</th>
-                    <th scope="col">날씨</th>
-                    <th scope="col">기온</th>
-                    <th scope="col">파고</th>
-                    <th scope="col">강수</th>
+                    <th scope="col">{t('forecast.table.date')}</th>
+                    <th scope="col">{t('forecast.table.weather')}</th>
+                    <th scope="col">{t('metric.airTemp')}</th>
+                    <th scope="col">{t('metric.waveHeight')}</th>
+                    <th scope="col">{t('forecast.table.rain')}</th>
                     <th scope="col">Water Index</th>
-                    <th scope="col">판정</th>
+                    <th scope="col">{t('forecast.table.decision')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -402,11 +386,11 @@ function ForecastPage() {
                     <tr key={`table-${day.id}`}>
                       <th scope="row">{day.date} {day.day}</th>
                       <td>{day.weather}</td>
-                      <td>{formatMetric(day.temperature, '°C')}</td>
-                      <td>{formatMetric(day.waveHeight, 'm')}</td>
-                      <td>{formatMetric(day.rainChance, '%')}</td>
-                      <td>{day.resolvedScore ?? '미수집'}</td>
-                      <td>{STATUS_LABELS[day.tone]}{bestDay?.id === day.id ? ' · 추천일' : ''}</td>
+                      <td>{formatMetric(day.temperature, '°C', t('common.noData'))}</td>
+                      <td>{formatMetric(day.waveHeight, 'm', t('common.noData'))}</td>
+                      <td>{formatMetric(day.rainChance, '%', t('common.noData'))}</td>
+                      <td>{day.resolvedScore ?? t('common.noData')}</td>
+                      <td>{statusLabel(t, day.tone)}{bestDay?.id === day.id ? ` · ${t('forecast.table.recommended')}` : ''}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -417,20 +401,17 @@ function ForecastPage() {
           <footer className="forecast-source-note">
             <BarChart3 aria-hidden="true" />
             <div>
-              <strong>데이터를 솔직하게 보여드려요</strong>
-              <p>
-                현재 화면은 고정 데모 데이터입니다. 실제 연동 이후에는 기상청·해양 관측 데이터의
-                출처, 관측 시각, 누락 여부를 각 지표에 함께 표시합니다.
-              </p>
+              <strong>{t('forecast.source.title')}</strong>
+              <p>{t('forecast.source.description')}</p>
             </div>
           </footer>
         </>
       ) : (
         <section className="forecast-empty" role="status">
           <MapPin aria-hidden="true" />
-          <h2>{selectedRegion} 예보를 준비하고 있어요</h2>
-          <p>현재 제공 가능한 지역을 선택하거나 기본 데모 예보로 돌아가세요.</p>
-          <button type="button" onClick={resetForecast}>기본 예보 보기</button>
+          <h2>{t('forecast.empty.title', { region: selectedRegion })}</h2>
+          <p>{t('forecast.empty.description')}</p>
+          <button type="button" onClick={resetForecast}>{t('forecast.empty.cta')}</button>
         </section>
       )}
     </div>

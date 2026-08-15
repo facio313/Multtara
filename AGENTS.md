@@ -59,10 +59,38 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 | 영역 | 선택 |
 |---|---|
 | 웹 | React (Vite) · React Router · Zustand · Axios |
-| 서버 | Python 3.11+ · Django · Django REST Framework |
+| 서버 | Python 3.11+ (운영 3.12) · Django 5.2 LTS · Django REST Framework 3.17 |
 | DB | PostgreSQL 15 |
 | 인프라 | Docker · Docker Compose · Nginx |
 | 배포 | Raspberry Pi 5 (ARM64) |
+
+## Water Index & Recommendation Contract
+
+- Methodology source of truth: [`docs/water-index-methodology.md`](docs/water-index-methodology.md).
+- `suitability_score`, `safety_status`, and `confidence` are separate fields. A
+  suitability score is never a safety probability.
+- Official closure/evacuation, activity-specific hazards, or a required safety
+  input that is missing/stale/conflicting must prevent recommendation. `STOP`
+  and `UNKNOWN` must never be converted into a low or zero "safe" score.
+- Preserve KHOA activity results, provider timestamps, spatial scope, and source.
+  Do not interpolate an official score to an unsupported site or label a fallback
+  score as official.
+- Use the 2026 national-core KHOA APIs (`fcstBeachv2`, `fcstSurfingv2`,
+  `fcstMudflatv2`, `ripCurrent`), not the retired legacy oceangrid endpoints.
+- Use KMA `VilageFcstInfoService_2.0` for typed weather observations/forecasts
+  and TourAPI `*Service2` gateways for tourism POIs. A weather forecast must not
+  be interpreted as a warning, lightning clearance, or official access state.
+- Where no verified nationwide machine feed exists, trusted operators may use
+  `record_operational_observation` only with an approved source class, public
+  HTTPS evidence, explicit observation/expiry times, and source-allowed metric
+  names. Never store adult-supervision session context as a global observation.
+- HCI:Beach may be shown only as coastal climate comfort. Hot-spring scores are
+  facility fit, not medical efficacy. Rafting/valley scores require versioned,
+  site-specific hydraulic thresholds; never hardcode one nationwide flow limit.
+- Recommendation order is: hard safety/operation/accessibility constraints,
+  explainable multi-criteria ranking, diversity reranking, then time-window
+  itinerary optimization. LLM output may verbalize structured reasons but must
+  not invent safety decisions, scores, sources, or routes.
 
 ---
 
@@ -116,7 +144,7 @@ anthropic/feat-name ─┘
 ## Critical Constraints
 
 - **`.env` 커밋 금지**. API 키·DB 비밀번호·`SECRET_KEY` 하드코딩 금지.
-- 운영 설정은 50자 이상의 무작위 `SECRET_KEY`, 명시적 `ALLOWED_HOSTS`, DB 비밀번호가 없으면 기동하지 않는다. `ALLOWED_HOSTS=*` 금지.
+- 운영 설정은 50자 이상의 무작위 `SECRET_KEY`, 명시적 `ALLOWED_HOSTS`, PostgreSQL `NAME`/`USER`/`PASSWORD`/`HOST`가 없으면 기동하지 않는다. `ALLOWED_HOSTS=*`와 비-PostgreSQL 운영 DB는 금지한다.
 - 사용자 응답 **한국어**. 코드·식별자·커밋은 **영문**.
 - 요청 범위만 구현. 모호하면 구현 전 질문.
 
@@ -125,6 +153,17 @@ anthropic/feat-name ─┘
 - `DATA_GO_KR_SERVICE_KEY`, `TOUR_API_KEY`, `KMA_API_KEY`, `KHOA_API_KEY`, `MOE_API_KEY`, DB credentials, and Django `SECRET_KEY` are **server-only**. They must be read by Django and must never appear in frontend source, browser bundles, logs, or API payloads.
 - `VITE_KAKAO_MAP_KEY` is the Kakao Maps **public JavaScript key**. Restrict its allowed domains in Kakao Developers. Do not reuse it as a server REST key.
 - `VITE_API_BASE_URL` defaults to `/api/v1/`; same-origin production traffic is proxied by Nginx. A separate absolute origin is allowed only for split deployments.
+- Production CORS is same-origin by default (`CORS_ALLOWED_ORIGINS` is empty). A
+  split deployment may opt in only exact HTTPS origins without userinfo, paths,
+  queries, fragments, or wildcards; invalid entries must fail startup.
 - `frontend/npm run build` remains the Docker/Nginx build. `frontend/npm run build:sites` is the separate Cloudflare Worker-compatible private preview build; keep `.openai/hosting.json` limited to the Sites `project_id` and optional logical bindings, never secrets.
+- Production Compose binds frontend Nginx to host loopback by default. Only a trusted HTTPS termination proxy may reach it and supply `X-Forwarded-Proto`; never expose that origin port while trusting client-supplied forwarding headers.
+- Production Compose runs `run_condition_pipeline` as a separate non-root collector. Missing/failed providers must not extend stale evidence; preserve provider issue cadence and quota-aware defaults when changing its intervals.
+- Recommendation requests accept at most 20 preference targets. `party.participant_skill_level` is one of `beginner|intermediate|advanced|unspecified`; adult beginner swimming uses the conservative family profile, and surfing suitability remains unknown unless an explicit skill matches an authoritative KHOA `GrdCn` shape. Unfiltered nationwide candidate sets above the bounded pool require a region.
+- Anonymous API throttling uses the connection peer, never caller-supplied forwarding headers. Nginx applies an additional origin-wide limit and a stricter recommendation limit; per-client limits belong at the trusted HTTPS edge.
 - The first curated experience is Gangneung-focused, while route and data shapes remain nationwide-ready.
 - When a provider or credential is unavailable, keep static tourism content usable and label fallback values as demo/missing data. Never present fixtures as live observations or infer `safe` from absent safety data.
+- The legacy `WaterForecast` table may remain available to development, tests,
+  and admin workflows, but its read API is fail-closed in production: list
+  requests expose no rows and detail requests expose no records. It must never
+  be presented as evidence-backed or `LIVE` forecast data.

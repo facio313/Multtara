@@ -1,7 +1,11 @@
 __pycache__
 *.pyc
-.env
+.env*
 venv
+.venv
 .git
 node_modules
 *.sqlite3
+staticfiles
+media
+mediafiles

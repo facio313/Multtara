@@ -55,6 +55,22 @@
   margin: 0 auto;
 }
 
+.onboarding-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.onboarding-locale-selector {
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #effaf7;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.onboarding-locale-selector select {
+  color: inherit;
+}
+
 .onboarding-brand,
 .onboarding-skip,
 .onboarding-back,

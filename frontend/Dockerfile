@@ -1,5 +1,5 @@
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 ARG VITE_API_BASE_URL=/api/v1/
 ARG VITE_KAKAO_MAP_KEY=

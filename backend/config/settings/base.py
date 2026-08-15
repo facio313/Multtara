@@ -68,7 +68,7 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
     "default": dj_database_url.config(
-        default="postgres://pongdang:pongdang@localhost:5432/pongdang",
+        default="sqlite:///" + str(BASE_DIR / "db.sqlite3"),
         conn_max_age=600,
     ),
 }
@@ -88,6 +88,13 @@ REST_FRAMEWORK = {
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "apps.trips.throttles.RemoteAddressAnonRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "120/minute",
+        "recommendations": "10/minute",
+    },
 }
 
 CORS_ALLOWED_ORIGINS = [
@@ -108,3 +115,9 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Public JSON endpoints accept small structured requests only. Keep an
+# application-level bound as well as the reverse proxy limit so development or
+# a direct internal request cannot allocate an unbounded request body.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 1_000

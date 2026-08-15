@@ -1,19 +1,22 @@
-from django.test import TestCase
-from django.utils import timezone
 import datetime
-from apps.spots.models import WaterSpot
+
+from django.test import TestCase, override_settings
+from rest_framework.test import APIRequestFactory
+
 from apps.forecasts.models import WaterForecast, GoldenMoment
 from apps.forecasts.views import WaterForecastViewSet
+from apps.spots.models import WaterSpot
+
 
 class ForecastModelTests(TestCase):
     def setUp(self):
         self.spot = WaterSpot.objects.create(
-            type='valley',
-            name='Test Valley',
+            type="valley",
+            name="Test Valley",
             lat=38.0,
             lng=128.0,
-            region='Jeju',
-            address='789 Test Rd'
+            region="Jeju",
+            address="789 Test Rd",
         )
 
     def test_water_forecast_creation(self):
@@ -29,19 +32,20 @@ class ForecastModelTests(TestCase):
             spot=self.spot,
             date=datetime.date.today(),
             time=datetime.time(6, 0),
-            type='sunrise'
+            type="sunrise",
         )
-        self.assertEqual(moment.type, 'sunrise')
+        self.assertEqual(moment.type, "sunrise")
+
 
 class ForecastViewSetTests(TestCase):
     def setUp(self):
         self.spot = WaterSpot.objects.create(
-            type='valley',
-            name='Test Valley API',
+            type="valley",
+            name="Test Valley API",
             lat=38.0,
             lng=128.0,
-            region='Jeju',
-            address='789 Test Rd'
+            region="Jeju",
+            address="789 Test Rd",
         )
         self.forecast = WaterForecast.objects.create(
             spot=self.spot,
@@ -56,4 +60,27 @@ class ForecastViewSetTests(TestCase):
 
         with self.assertNumQueries(1):
             forecast = queryset.get()
-            self.assertEqual(forecast.spot.name, 'Test Valley API')
+            self.assertEqual(forecast.spot.name, "Test Valley API")
+
+    @override_settings(PUBLIC_LEGACY_WATER_FORECASTS=False)
+    def test_production_gate_returns_an_empty_list_even_when_rows_exist(self):
+        request = APIRequestFactory().get("/api/v1/forecasts/")
+
+        response = WaterForecastViewSet.as_view({"get": "list"})(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
+
+    @override_settings(PUBLIC_LEGACY_WATER_FORECASTS=False)
+    def test_production_gate_hides_existing_detail_rows(self):
+        request = APIRequestFactory().get(
+            f"/api/v1/forecasts/{self.forecast.pk}/"
+        )
+
+        response = WaterForecastViewSet.as_view({"get": "retrieve"})(
+            request,
+            pk=self.forecast.pk,
+        )
+
+        self.assertEqual(response.status_code, 404)

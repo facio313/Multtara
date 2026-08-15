@@ -1,131 +1,674 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
+  Accessibility,
+  AlertTriangle,
   ArrowRight,
-  CalendarPlus,
-  Car,
+  CalendarClock,
   Check,
   Clock3,
   Compass,
+  Database,
+  LoaderCircle,
   MapPin,
   MessageCircleMore,
+  PawPrint,
   Send,
+  ShieldAlert,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
+  Users,
   WandSparkles,
+  Waves,
 } from 'lucide-react';
 import { personas } from '../data/pongdangData';
+import { useI18n } from '../i18n';
+import {
+  buildRecommendationPayload,
+  getRecommendationError,
+  isRecommendationRequestCanceled,
+  requestRecommendations,
+  requiresAdultSupervision,
+} from '../services/recommendations';
 import './ConciergePage.css';
 
-const promptSuggestions = [
-  '이번 주말 연인과 드라이브하며 물을 보고 싶어요',
-  '아이와 안전하게 놀 수 있는 얕은 바다를 찾아줘',
-  '비 오는 날에도 좋은 따뜻한 온천 코스가 필요해',
-  '사람 적고 파도 좋은 서핑 스팟을 추천해줘',
+const MAX_EVIDENCE_AGE_MS = 15 * 60 * 1000;
+const SKILL_LEVELS = ['unspecified', 'beginner', 'intermediate', 'advanced'];
+
+const activityOptions = [
+  { value: 'swim', icon: '🏊' },
+  { value: 'surf', icon: '🏄' },
+  { value: 'relax', icon: '🌊' },
+  { value: 'mudflat', icon: '🦀' },
+  { value: 'onsen', icon: '♨️' },
+  { value: 'rafting', icon: '🛶' },
 ];
 
-const recommendationSets = {
+const promptSuggestions = [
+  { key: 'concierge.suggestion.drive', preset: { activity: 'relax', quiet: 86, activityLevel: 20, ages: '30, 30' } },
+  { key: 'concierge.suggestion.family', preset: { activity: 'swim', quiet: 64, activityLevel: 30, ages: '8, 38', participantSkillLevel: 'beginner' } },
+  { key: 'concierge.suggestion.onsen', preset: { activity: 'onsen', quiet: 86, activityLevel: 12 } },
+  { key: 'concierge.suggestion.surf', preset: { activity: 'surf', quiet: 84, activityLevel: 92 } },
+];
+
+const personaPresets = {
+  active: { activity: 'surf', quiet: 25, activityLevel: 90, ages: '30' },
+  family: { activity: 'swim', quiet: 62, activityLevel: 32, ages: '8, 38', participantSkillLevel: 'beginner' },
+  wellness: { activity: 'onsen', quiet: 88, activityLevel: 12, ages: '35' },
+  local: { activity: 'relax', quiet: 78, activityLevel: 28, ages: '30' },
+  indoor: { activity: 'onsen', quiet: 72, activityLevel: 18, ages: '30' },
+  stay: { activity: 'onsen', quiet: 72, activityLevel: 18, ages: '30' },
+};
+
+const defaultForm = {
+  activity: 'relax',
+  quiet: 72,
+  activityLevel: 28,
+  ages: '30',
+  requiresAccessibility: false,
+  bringingPet: false,
+  adultSupervisionConfirmed: null,
+  participantSkillLevel: 'unspecified',
+};
+
+const demoRecommendations = {
   family: [
-    { id: 'gyeongpo-beach', name: '경포해변', region: '강원 강릉', score: 91, type: '패밀리', reason: '얕은 수심 · 안전요원 · 샤워장 가까움', safety: '데모 안전 정보' },
-    { id: 'yeongok-beach', name: '연곡해변', region: '강원 강릉', score: 88, type: '한적한 바다', reason: '완만한 모래사장 · 비교적 여유로운 혼잡도', safety: '데모 안전 정보' },
-    { id: 'geumjin-hotspring', name: '금진온천', region: '강원 강릉', score: 84, type: '실내 대안', reason: '날씨 영향이 적고 휴식 동선으로 전환하기 쉬움', safety: '운영 전 재확인' },
+    { id: 'demo-gyeongpo', name: '경포해변', region: '강원 강릉', type: '가족형 해변', reason: '얕은 물과 편의시설을 먼저 살펴보는 화면 구성 예시예요.' },
+    { id: 'demo-yeongok', name: '연곡해변', region: '강원 강릉', type: '한적한 해변', reason: '한적함과 짧은 이동 부담을 반영하는 고정 예시예요.' },
+    { id: 'demo-geumjin', name: '금진 온수 자원', region: '강원 강릉', type: '실내 대안', reason: '날씨가 나쁠 때 검증된 실내 대안을 찾는 경험 예시예요.' },
   ],
   wellness: [
-    { id: 'geumjin-hotspring', name: '금진온천', region: '강원 강릉', score: 93, type: '웰니스', reason: '해수 온천 · 조용한 시간대 · 바다 전망 동선', safety: '운영 전 재확인' },
-    { id: 'anmok-beach', name: '안목해변', region: '강원 강릉', score: 90, type: '물멍', reason: '잔잔한 파도 · 카페거리 · 일몰 전 산책', safety: '데모 해안 정보' },
-    { id: 'gyeongpo-lake', name: '경포호수', region: '강원 강릉', score: 87, type: '호수 산책', reason: '고요한 수면 · 무장애 산책로 · 낮은 혼잡도', safety: '산책로 정보' },
+    { id: 'demo-geumjin', name: '금진 온수 자원', region: '강원 강릉', type: '웰니스', reason: '조용함과 실내 체류를 우선하는 화면 구성 예시예요.' },
+    { id: 'demo-anmok', name: '안목해변', region: '강원 강릉', type: '물멍', reason: '바다 산책과 주변 체류를 연결하는 고정 예시예요.' },
+    { id: 'demo-gyeongpo-lake', name: '경포호', region: '강원 강릉', type: '호수 산책', reason: '낮은 활동 강도와 긴 체류를 반영하는 경험 예시예요.' },
   ],
   active: [
-    { id: 'sacheonjin-beach', name: '사천진해변', region: '강원 강릉', score: 92, type: '서핑', reason: '데모 기준의 파도 · 풍속 · 장비 접근성을 반영', safety: '현장 파고 재확인' },
-    { id: 'jeongdongjin-beach', name: '정동진해변', region: '강원 강릉', score: 89, type: '패들보드', reason: '오전 바람과 입수 동선을 기준으로 추천', safety: '공식 특보 재확인' },
-    { id: 'yeongok-beach', name: '연곡해변', region: '강원 강릉', score: 86, type: '카약', reason: '차량 접근과 활동 가능 시간대를 기준으로 추천', safety: '주의 구간 재확인' },
+    { id: 'demo-sacheonjin', name: '사천진해변', region: '강원 강릉', type: '서핑', reason: '높은 활동 강도와 장비 접근성을 비교하는 화면 예시예요.' },
+    { id: 'demo-jeongdongjin', name: '정동진해변', region: '강원 강릉', type: '해안 활동', reason: '활동 시간과 바람 근거가 연결될 때의 카드 예시예요.' },
+    { id: 'demo-yeongok', name: '연곡해변', region: '강원 강릉', type: '해안 탐험', reason: '혼잡을 피한 활동형 장소 탐색의 고정 예시예요.' },
   ],
 };
 
-const itinerary = [
-  { time: '09:30', title: '강릉역에서 출발', meta: '차량 18분', icon: Car },
-  { time: '10:00', title: '첫 번째 추천 스팟', meta: '물 컨디션 확인 후 2시간', icon: Compass },
-  { time: '12:20', title: '물놀이 후 로컬 한 끼', meta: '젖은 상태 이동 7분', icon: MapPin },
-  { time: '14:10', title: '오션뷰 카페와 산책', meta: '실내 대체 가능', icon: Clock3 },
-];
-
-function getIntent(query) {
-  if (/아이|가족|얕|안전/.test(query)) return 'family';
-  if (/온천|힐링|지친|조용|비 |비가|실내|물멍/.test(query)) return 'wellness';
-  return 'active';
-}
+const spotTypeMessageKeys = {
+  beach: 'map.type.sea',
+  valley: 'map.type.valley',
+  hotspring: 'map.type.hotspring',
+  lake: 'map.type.lake',
+  mudflat: 'map.type.tidal_flat',
+};
 
 function readPersonaId() {
   try {
-    return localStorage.getItem('pongdang:persona-preference');
+    return window.localStorage.getItem('pongdang:persona-preference');
   } catch {
     return null;
   }
 }
 
-function getPersonaIntent(personaId) {
-  if (personaId === 'family') return 'family';
-  if (['wellness', 'local', 'indoor'].includes(personaId)) return 'wellness';
+function buildInitialForm(personaId) {
+  const preset = personaPresets[personaId] || {};
+  return { ...defaultForm, ...preset };
+}
+
+function inferFormFromQuery(text, currentForm, { suggestion = false } = {}) {
+  const next = { ...currentForm };
+
+  if (/서핑|파도/.test(text)) {
+    next.activity = 'surf';
+    next.activityLevel = 92;
+    next.quiet = /사람 적|한적/.test(text) ? 84 : 34;
+  } else if (/온천|스파|따뜻|실내|비 오는|비가/.test(text)) {
+    next.activity = 'onsen';
+    next.activityLevel = 12;
+    next.quiet = 86;
+  } else if (/아이|가족|얕|물놀이|수영/.test(text)) {
+    next.activity = 'swim';
+    next.activityLevel = 30;
+    next.quiet = 64;
+  } else if (/물멍|산책|드라이브|조용|힐링/.test(text)) {
+    next.activity = 'relax';
+    next.activityLevel = 20;
+    next.quiet = 86;
+  } else if (/갯벌/.test(text)) {
+    next.activity = 'mudflat';
+    next.activityLevel = 55;
+  } else if (/래프팅|급류/.test(text)) {
+    next.activity = 'rafting';
+    next.activityLevel = 95;
+    next.quiet = 18;
+  }
+
+  if (/아이/.test(text) && (suggestion || currentForm.ages.trim() === '30')) {
+    next.ages = '8, 38';
+  } else if (/연인/.test(text) && suggestion) {
+    next.ages = '30, 30';
+  }
+
+  if (
+    next.activity !== currentForm.activity
+    || next.ages !== currentForm.ages
+    || next.participantSkillLevel !== currentForm.participantSkillLevel
+  ) {
+    next.adultSupervisionConfirmed = null;
+  }
+
+  return next;
+}
+
+function parseAges(value) {
+  const tokens = String(value)
+    .split(/[\s,/]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0 || tokens.length > 12) {
+    return { ages: null, errorKey: 'concierge.age.count' };
+  }
+
+  const ages = tokens.map(Number);
+  if (ages.some((age) => !Number.isInteger(age) || age < 0 || age > 120)) {
+    return { ages: null, errorKey: 'concierge.age.range' };
+  }
+
+  return { ages, errorKey: null };
+}
+
+function toFiniteNumber(value) {
+  if (
+    value === null
+    || value === undefined
+    || typeof value === 'boolean'
+    || (typeof value === 'string' && value.trim() === '')
+  ) {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function evidenceFreshness(evaluatedAt, generatedAt, t) {
+  const evaluatedTime = Date.parse(evaluatedAt);
+  const generatedTime = Date.parse(generatedAt);
+  if (!Number.isFinite(evaluatedTime) || !Number.isFinite(generatedTime)) {
+    return { isCurrent: false, label: t('concierge.freshness.unknown') };
+  }
+
+  const age = generatedTime - evaluatedTime;
+  if (age < -2 * 60 * 1000 || age > MAX_EVIDENCE_AGE_MS) {
+    return { isCurrent: false, label: age > 0 ? t('concierge.freshness.stale') : t('concierge.freshness.conflict') };
+  }
+
+  const minutes = Math.max(0, Math.floor(age / 60000));
+  return { isCurrent: true, label: minutes < 1 ? t('concierge.freshness.now') : t('concierge.freshness.minutes', { minutes }) };
+}
+
+function normalizeExcludedSummary(summary) {
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return {};
+  return Object.fromEntries(
+    Object.entries(summary)
+      .map(([code, value]) => [String(code), Math.max(0, Math.floor(Number(value)))])
+      .filter(([, value]) => Number.isFinite(value) && value > 0),
+  );
+}
+
+function normalizeLiveResponse(payload, t) {
+  const recommendations = Array.isArray(payload?.recommendations) ? payload.recommendations : [];
+  const accepted = [];
+  const clientExcluded = {};
+  const backendExcluded = normalizeExcludedSummary(payload?.excluded_summary);
+  const exclude = (code) => {
+    clientExcluded[code] = (clientExcluded[code] || 0) + 1;
+  };
+
+  recommendations.forEach((item) => {
+    const waterIndex = item?.water_index || {};
+    const safetyStatus = String(waterIndex.safety_status || 'unknown').toLowerCase();
+    const spotId = item?.spot?.id;
+    const spotName = typeof item?.spot?.name === 'string' ? item.spot.name.trim() : '';
+    const fitScore = toFiniteNumber(item?.score);
+    const suitabilityScore = toFiniteNumber(waterIndex.suitability_score);
+    const waterConfidence = toFiniteNumber(waterIndex.confidence);
+    const evidenceConfidence = toFiniteNumber(item?.evidence_confidence);
+    const decision = String(waterIndex.decision || 'unknown').toLowerCase();
+    const methodologyVersion = String(waterIndex.methodology_version || '').trim();
+    const sources = Array.isArray(waterIndex.sources)
+      ? [...new Set(waterIndex.sources.filter((source) => typeof source === 'string' && source.trim()).map((source) => source.trim()))]
+      : [];
+    const freshness = evidenceFreshness(waterIndex.evaluated_at, payload?.generated_at, t);
+
+    if (safetyStatus !== 'clear') {
+      exclude('CLIENT_SAFETY_REJECTED');
+      return;
+    }
+    if (!freshness.isCurrent) {
+      exclude('CLIENT_FRESHNESS_REJECTED');
+      return;
+    }
+    if (sources.length === 0) {
+      exclude('CLIENT_PROVENANCE_REJECTED');
+      return;
+    }
+    if (
+      spotId === null
+      || spotId === undefined
+      || !spotName
+      || fitScore === null
+      || fitScore < 0
+      || fitScore > 100
+      || suitabilityScore === null
+      || suitabilityScore < 0
+      || suitabilityScore > 100
+      || waterConfidence === null
+      || waterConfidence < 0
+      || waterConfidence > 1
+      || evidenceConfidence === null
+      || evidenceConfidence < 0
+      || evidenceConfidence > 1
+      || !['recommended', 'consider', 'not_recommended'].includes(decision)
+      || !methodologyVersion.startsWith('water-index-v')
+    ) {
+      exclude('CLIENT_PAYLOAD_REJECTED');
+      return;
+    }
+
+    const contributions = Array.isArray(item?.contributions) ? item.contributions : [];
+    accepted.push({
+      id: String(spotId),
+      rank: Number.isInteger(item?.rank) ? item.rank : accepted.length + 1,
+      name: spotName,
+      type: spotTypeMessageKeys[item?.spot?.type]
+        ? t(spotTypeMessageKeys[item.spot.type])
+        : String(item?.spot?.type || t('concierge.card.destination')),
+      region: String(item?.spot?.region || item?.spot?.address || t('concierge.card.regionUnknown')),
+      address: String(item?.spot?.address || ''),
+      fitScore,
+      safetyStatus,
+      suitabilityScore,
+      decision,
+      confidence: waterConfidence,
+      methodologyVersion,
+      freshness: freshness.label,
+      evaluatedAt: waterIndex.evaluated_at,
+      sources,
+      reasonCodes: Array.isArray(item?.reason_codes) ? item.reason_codes.map(String) : [],
+      contributions: contributions
+        .filter((contribution) => contribution && typeof contribution.feature === 'string')
+        .map((contribution) => ({
+          feature: contribution.feature,
+          candidateValue: toFiniteNumber(contribution.candidate_value),
+          similarity: toFiniteNumber(contribution.similarity),
+          weightedPoints: toFiniteNumber(contribution.weighted_points),
+        })),
+      evidenceConfidence,
+    });
+  });
+
+  return {
+    recommendations: accepted,
+    excluded: {
+      ...backendExcluded,
+      ...Object.fromEntries(
+        Object.entries(clientExcluded).map(([code, count]) => [
+          code,
+          count + (backendExcluded[code] || 0),
+        ]),
+      ),
+    },
+    meta: {
+      generatedAt: payload?.generated_at || null,
+      candidateCount: toFiniteNumber(payload?.candidate_count) ?? 0,
+      evaluatedCount: toFiniteNumber(payload?.candidate_pool_evaluated) ?? 0,
+      truncated: Boolean(payload?.candidate_pool_truncated),
+      method: String(payload?.method || t('concierge.method.unknown')),
+    },
+  };
+}
+
+function getDemoIntent(form) {
+  if (form.activity === 'swim' && /(^|[\s,])(?:[0-9]|1[0-2])(?:$|[\s,])/.test(form.ages)) return 'family';
+  if (form.activity === 'onsen' || form.activity === 'relax' || form.quiet >= 70) return 'wellness';
   return 'active';
+}
+
+function contributionReason(item, t) {
+  const strongest = [...item.contributions]
+    .filter((contribution) => contribution.weightedPoints !== null)
+    .sort((left, right) => right.weightedPoints - left.weightedPoints)
+    .slice(0, 2)
+    .map((contribution) => {
+      const label = t(`concierge.feature.${contribution.feature}`);
+      const match = Math.round((contribution.similarity ?? 0) * 100);
+      return t('concierge.feature.match', { label, match });
+    });
+
+  return strongest.length > 0
+    ? strongest.join(' · ')
+    : t('concierge.feature.default');
+}
+
+function formatGeneratedAt(value, locale, fallback) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat(locale, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function ResultStatus({ requestState, intlLocale, t }) {
+  if (requestState.kind === 'loading') {
+    return (
+      <div className="concierge-state-card is-loading" role="status">
+        <LoaderCircle size={21} aria-hidden="true" />
+        <div>
+          <strong>{t('concierge.loading.title')}</strong>
+          <span>{t('concierge.loading.description')}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (requestState.kind === 'demo' && requestState.error) {
+    return (
+      <div className="concierge-state-card is-error" role="alert">
+        <AlertTriangle size={21} aria-hidden="true" />
+        <div>
+          <strong>{t('concierge.error.title')}</strong>
+          <span>{t('concierge.error.description', { error: t(requestState.error.messageKey) })}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (requestState.kind === 'demo') {
+    return (
+      <div className="concierge-state-card is-empty" role="status">
+        <ShieldAlert size={21} aria-hidden="true" />
+        <div>
+          <strong>{t('concierge.noEligible.title')}</strong>
+          <span>{t('concierge.noEligible.description')}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (requestState.kind === 'live') {
+    return (
+      <div className="concierge-state-card is-live" role="status">
+        <ShieldCheck size={21} aria-hidden="true" />
+        <div>
+          <strong>{t('concierge.live.title')}</strong>
+          <span>{t('concierge.live.description', { time: formatGeneratedAt(requestState.meta.generatedAt, intlLocale, t('concierge.freshness.unknown')) })}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function ExclusionSummary({ excluded, meta, t }) {
+  const entries = Object.entries(excluded || {}).filter(([, count]) => count > 0);
+  if (entries.length === 0 && !meta) return null;
+
+  return (
+    <aside className="exclusion-summary" aria-labelledby="exclusion-title">
+      <div className="exclusion-heading">
+        <div>
+          <span>FAIL-CLOSED REPORT</span>
+          <h3 id="exclusion-title">{t('concierge.excluded.title')}</h3>
+        </div>
+        {meta ? <small>{t('concierge.excluded.count', { candidates: Math.round(meta.candidateCount), evaluated: Math.round(meta.evaluatedCount) })}</small> : null}
+      </div>
+      {entries.length > 0 ? (
+        <ul>
+          {entries.map(([code, count]) => (
+            <li key={code}>
+              <span>{t(`concierge.exclusion.${code}`) === `concierge.exclusion.${code}` ? code : t(`concierge.exclusion.${code}`)}</span>
+              <strong>{count}</strong>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p>{t('concierge.excluded.none')}</p>
+      )}
+      {meta?.truncated ? <p className="exclusion-note">{t('concierge.excluded.truncated')}</p> : null}
+    </aside>
+  );
+}
+
+function LiveRecommendationCard({ item, index, t }) {
+  const displayedRank = Number.isFinite(item.rank) ? item.rank : index + 1;
+  const decision = t(`concierge.decision.${item.decision}`);
+
+  return (
+    <article className={`recommendation-card rank-${Math.min(index + 1, 3)} is-live`}>
+      <div className="recommendation-rank">
+        <span>{String(displayedRank).padStart(2, '0')}</span>
+        <span>LIVE · {item.type}</span>
+      </div>
+
+      <div className="recommendation-score" aria-label={`${t('concierge.card.fit')} ${Math.round(item.fitScore)}`}>
+        <strong>{Math.round(item.fitScore)}</strong>
+        <small>{t('concierge.card.fit')}</small>
+      </div>
+
+      <h3>{item.name}</h3>
+      <p className="recommendation-region"><MapPin size={14} aria-hidden="true" /> {item.region}</p>
+      <p className="recommendation-reason">{contributionReason(item, t)}</p>
+
+      <div className="water-index-panel">
+        <div className="water-index-heading">
+          <ShieldCheck size={17} aria-hidden="true" />
+          <div>
+            <span>Water Index {Math.round(item.suitabilityScore)}</span>
+            <strong>CLEAR · {decision}</strong>
+          </div>
+        </div>
+        <dl>
+          <div>
+            <dt>{t('concierge.card.source')}</dt>
+            <dd>{item.sources.slice(0, 3).join(' · ')}</dd>
+          </div>
+          <div>
+            <dt>{t('concierge.card.freshness')}</dt>
+            <dd>{item.freshness}</dd>
+          </div>
+          <div>
+            <dt>{t('concierge.card.wiConfidence')}</dt>
+            <dd>{Math.round(item.confidence * 100)}%</dd>
+          </div>
+          <div>
+            <dt>{t('concierge.card.evidence')}</dt>
+            <dd>{Math.round(item.evidenceConfidence * 100)}%</dd>
+          </div>
+        </dl>
+        <small>{item.methodologyVersion} · {t('concierge.card.scoreDisclaimer')}</small>
+      </div>
+
+      <Link to={`/spot/${encodeURIComponent(item.id)}`}>
+        {t('concierge.card.details')} <ArrowRight size={16} aria-hidden="true" />
+      </Link>
+    </article>
+  );
+}
+
+function DemoRecommendationCard({ item, index, locale, t }) {
+  return (
+    <article className="recommendation-card is-demo">
+      <div className="recommendation-rank">
+        <span>{String(index + 1).padStart(2, '0')}</span>
+        <span>DEMO · {locale === 'ko' ? item.type : t('concierge.demo.type')}</span>
+      </div>
+
+      <div className="recommendation-score is-unavailable" aria-label={t('concierge.card.noLiveScore')}>
+        <strong>--</strong>
+        <small>{t('concierge.card.noLiveScore')}</small>
+      </div>
+
+      <h3>{item.name}</h3>
+      <p className="recommendation-region"><MapPin size={14} aria-hidden="true" /> {item.region}</p>
+      <p className="recommendation-reason">{locale === 'ko' ? item.reason : t('concierge.demo.reason')}</p>
+
+      <div className="water-index-panel is-unknown">
+        <div className="water-index-heading">
+          <ShieldAlert size={17} aria-hidden="true" />
+          <div>
+            <span>{t('concierge.card.demoUnlinked')}</span>
+            <strong>{t('concierge.card.unknown')}</strong>
+          </div>
+        </div>
+        <p>{t('concierge.card.demoDescription')}</p>
+      </div>
+
+      <button type="button" className="demo-detail-button" disabled>
+        {t('concierge.card.demoDisabled')}
+      </button>
+    </article>
+  );
 }
 
 function ConciergePage() {
   const location = useLocation();
-  const personaId = location.state?.personaId || readPersonaId();
+  const { intlLocale, locale, t } = useI18n();
+  const locationPersonaId = typeof location.state?.personaId === 'string'
+    ? location.state.personaId
+    : null;
+  const [storedPersonaId] = useState(readPersonaId);
+  const personaId = locationPersonaId || storedPersonaId;
   const persona = personas.find((item) => item.id === personaId) ?? null;
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
-  const [itinerarySaved, setItinerarySaved] = useState(false);
-  const intent = useMemo(
-    () => (submittedQuery ? getIntent(submittedQuery) : getPersonaIntent(persona?.id)),
-    [persona?.id, submittedQuery],
-  );
-  const results = recommendationSets[intent];
+  const [form, setForm] = useState(() => buildInitialForm(personaId));
+  const [ageError, setAgeError] = useState('');
+  const [requestState, setRequestState] = useState({ kind: 'idle' });
+  const activeRequest = useRef(null);
+
+  useEffect(() => () => activeRequest.current?.abort(), []);
+
+  const activity = activityOptions.find((item) => item.value === form.activity) || activityOptions[0];
+  const demoResults = useMemo(() => demoRecommendations[getDemoIntent(form)], [form]);
+  const isLoading = requestState.kind === 'loading';
+  const controlAges = parseAges(form.ages).ages || [];
+  const supervisionRequired = requiresAdultSupervision(form, controlAges);
+
+  const runRecommendation = async (nextForm, nextQuery) => {
+    const parsed = parseAges(nextForm.ages);
+    if (parsed.errorKey) {
+      setAgeError(parsed.errorKey);
+      return;
+    }
+
+    setAgeError('');
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    setRequestState({ kind: 'loading' });
+
+    try {
+      const payload = buildRecommendationPayload(nextForm, parsed.ages, persona?.title || '');
+      const response = await requestRecommendations(payload, { signal: controller.signal });
+      if (activeRequest.current !== controller) return;
+      const normalized = normalizeLiveResponse(response, t);
+
+      setSubmittedQuery(nextQuery);
+      if (normalized.recommendations.length > 0) {
+        setRequestState({
+          kind: 'live',
+          recommendations: normalized.recommendations,
+          excluded: normalized.excluded,
+          meta: normalized.meta,
+        });
+      } else {
+        setRequestState({
+          kind: 'demo',
+          reason: 'empty',
+          excluded: normalized.excluded,
+          meta: normalized.meta,
+        });
+      }
+    } catch (error) {
+      if (isRecommendationRequestCanceled(error)) return;
+      if (activeRequest.current !== controller) return;
+      setSubmittedQuery(nextQuery);
+      setRequestState({
+        kind: 'demo',
+        reason: 'error',
+        error: getRecommendationError(error),
+        excluded: {},
+        meta: null,
+      });
+    } finally {
+      if (activeRequest.current === controller) activeRequest.current = null;
+    }
+  };
 
   const submitQuery = (event) => {
-    event?.preventDefault();
+    event.preventDefault();
     const trimmed = query.trim();
-    if (trimmed) {
-      setSubmittedQuery(trimmed);
-      setItinerarySaved(false);
-    }
+    const inferred = inferFormFromQuery(trimmed, form);
+    setForm(inferred);
+    void runRecommendation(inferred, trimmed);
   };
 
   const chooseSuggestion = (suggestion) => {
-    setQuery(suggestion);
-    setSubmittedQuery(suggestion);
-    setItinerarySaved(false);
+    const suggestionText = t(suggestion.key);
+    const inferred = {
+      ...form,
+      ...suggestion.preset,
+      adultSupervisionConfirmed: null,
+    };
+    setQuery(suggestionText);
+    setForm(inferred);
+    void runRecommendation(inferred, suggestionText);
   };
 
-  const saveItinerary = () => {
-    try {
-      localStorage.setItem('pongdang:demo-itinerary', JSON.stringify({ intent, spotId: results[0].id }));
-    } catch {
-      // The confirmation remains useful for this session if storage is blocked.
-    }
-    setItinerarySaved(true);
+  const updateForm = (field, value) => {
+    activeRequest.current?.abort();
+    activeRequest.current = null;
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      if (
+        field !== 'adultSupervisionConfirmed'
+        && ['activity', 'participantSkillLevel', 'ages'].includes(field)
+        && current[field] !== value
+      ) {
+        next.adultSupervisionConfirmed = null;
+      }
+      return next;
+    });
+    setRequestState({ kind: 'idle' });
+    setSubmittedQuery('');
+    if (field === 'ages') setAgeError('');
   };
+
+  const resultTitle = submittedQuery
+    ? `“${submittedQuery}”`
+    : t('concierge.results.defaultTitle', { activity: t(`activity.${activity.value}`) });
+  const visibleResults = requestState.kind === 'live'
+    ? requestState.recommendations
+    : demoResults;
 
   return (
     <div className="concierge-page">
       <header className="concierge-hero">
         <div className="concierge-heading">
-          <span className="concierge-kicker"><WandSparkles size={15} /> AI WATER CONCIERGE</span>
-          <h1>가고 싶은 기분만<br />말해 주세요.</h1>
-          <p>
-            물 상태 데모, 이동 시간, 혼잡도와 안전 항목을 엮어
-            취향에 맞는 강릉 물 여행의 구조를 미리 보여드려요.
-          </p>
+          <span className="concierge-kicker"><WandSparkles size={15} aria-hidden="true" /> EVIDENCE-FIRST WATER CONCIERGE</span>
+          <h1>{t('concierge.hero.title')}</h1>
+          <p>{t('concierge.hero.description')}</p>
           <div className="concierge-proof">
-            <span><Check size={14} /> 데모 컨디션 반영</span>
-            <span><Check size={14} /> 악천후 실내 대안</span>
-            <span><Check size={14} /> 물놀이 전후 동선</span>
+            <span><ShieldCheck size={14} aria-hidden="true" /> {t('concierge.hero.proofGate')}</span>
+            <span><Database size={14} aria-hidden="true" /> {t('concierge.hero.proofSource')}</span>
+            <span><Check size={14} aria-hidden="true" /> {t('concierge.hero.proofUnknown')}</span>
           </div>
         </div>
 
         <div className="concierge-orb" aria-hidden="true">
           <Sparkles size={34} />
-          <span>오늘의 물을<br />읽는 중</span>
+          <span>{t('concierge.hero.orb')}</span>
         </div>
       </header>
 
@@ -133,105 +676,219 @@ function ConciergePage() {
         <section className="concierge-composer" aria-labelledby="composer-title">
           <div className="composer-title-row">
             <div>
-              <span>STEP 01</span>
-              <h2 id="composer-title">어떤 하루를 원하세요?</h2>
+              <span>STEP 01 · CONDITIONS</span>
+              <h2 id="composer-title">{t('concierge.form.title')}</h2>
             </div>
-            <span className="demo-label">{persona ? `${persona.title} 맞춤` : '데모 추천'}</span>
+            <span className={`runtime-label is-${requestState.kind}`}>
+              {requestState.kind === 'live' && t('concierge.state.live')}
+              {requestState.kind === 'loading' && t('concierge.state.loading')}
+              {requestState.kind === 'demo' && (requestState.error ? t('concierge.state.demoError') : t('concierge.state.demoEmpty'))}
+              {requestState.kind === 'idle' && (persona ? `${t(`persona.${persona.id}.title`)} · preset` : t('concierge.state.idle'))}
+            </span>
           </div>
 
-          <form onSubmit={submitQuery} className="concierge-input-wrap">
-            <MessageCircleMore size={22} aria-hidden="true" />
-            <label className="sr-only" htmlFor="concierge-query">여행 요청 입력</label>
-            <textarea
-              id="concierge-query"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="예: 이번 주말 연인과 드라이브하며 조용히 물을 보고 싶어요"
-              rows="3"
-            />
-            <button type="submit" disabled={!query.trim()}>
-              <Send size={18} />
-              추천받기
-            </button>
-          </form>
-
-          <div className="prompt-suggestions" aria-label="추천 질문">
-            {promptSuggestions.map((suggestion) => (
-              <button key={suggestion} type="button" onClick={() => chooseSuggestion(suggestion)}>
-                {suggestion}
-                <ArrowRight size={14} />
+          <form onSubmit={submitQuery} noValidate>
+            <div className="concierge-input-wrap">
+              <MessageCircleMore size={22} aria-hidden="true" />
+              <label className="sr-only" htmlFor="concierge-query">{t('concierge.query.label')}</label>
+              <textarea
+                id="concierge-query"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t('concierge.query.placeholder')}
+                rows="3"
+                maxLength="300"
+              />
+              <button type="submit" disabled={isLoading}>
+                {isLoading ? <LoaderCircle className="button-spinner" size={18} aria-hidden="true" /> : <Send size={18} aria-hidden="true" />}
+                {isLoading ? t('common.loading') : t('concierge.query.submit')}
               </button>
-            ))}
-          </div>
-        </section>
-
-        {submittedQuery || persona ? (
-          <section className="concierge-results" aria-live="polite">
-            <div className="result-context">
-              <span><Sparkles size={16} /> 퐁당의 답변</span>
-              <h2>{submittedQuery ? `“${submittedQuery}”` : `${persona.title} 취향으로 골랐어요.`}</h2>
-              <p>
-                {intent === 'family' && '안전과 편의시설을 가장 먼저 보고, 이동 부담이 적은 순서로 골랐어요.'}
-                {intent === 'wellness' && '고요한 분위기와 실내 대안, 물멍 동선을 중심으로 골랐어요.'}
-                {intent === 'active' && '파도와 바람이 안정적인 시간, 장비 접근성을 중심으로 골랐어요.'}
-              </p>
             </div>
 
-            <div className="recommendation-grid">
-              {results.map((spot, index) => (
-                <article className={`recommendation-card rank-${index + 1}`} key={spot.id}>
-                  <div className="recommendation-rank">
-                    <span>0{index + 1}</span>
-                    <span>{spot.type}</span>
-                  </div>
-                  <div className="recommendation-score" aria-label={`워터 인덱스 ${spot.score}점`}>
-                    <strong>{spot.score}</strong>
-                    <small>INDEX</small>
-                  </div>
-                  <h3>{spot.name}</h3>
-                  <p className="recommendation-region"><MapPin size={14} /> {spot.region}</p>
-                  <p className="recommendation-reason">{spot.reason}</p>
-                  <div className="recommendation-safety"><ShieldCheck size={15} /> {spot.safety}</div>
-                  <Link to={`/spot/${spot.id}`}>
-                    상세 보기 <ArrowRight size={16} />
-                  </Link>
-                </article>
+            <div className="prompt-suggestions" aria-label={t('concierge.query.suggestions')}>
+              {promptSuggestions.map((suggestion) => (
+                <button key={suggestion.key} type="button" onClick={() => chooseSuggestion(suggestion)} disabled={isLoading}>
+                  {t(suggestion.key)}
+                  <ArrowRight size={14} aria-hidden="true" />
+                </button>
               ))}
             </div>
 
-            <div className="itinerary-preview">
-              <div className="itinerary-copy">
-                <span>STEP 02</span>
-                <h2>이대로 하루 코스를 만들까요?</h2>
-                <p>추천 장소와 젖은 상태의 이동 반경, 식사와 실내 대안까지 이어드려요.</p>
-                <button
-                  className={itinerarySaved ? 'is-saved' : ''}
-                  type="button"
-                  onClick={saveItinerary}
-                  aria-pressed={itinerarySaved}
-                >
-                  {itinerarySaved ? <Check size={18} /> : <CalendarPlus size={18} />}
-                  {itinerarySaved ? '이 기기에 저장됨' : '데모 일정 저장하기'}
-                </button>
+            <div className="condition-panel">
+              <div className="condition-panel-heading">
+                <SlidersHorizontal size={18} aria-hidden="true" />
+                <div>
+                  <h3>{t('concierge.controls.title')}</h3>
+                  <p>{t('concierge.controls.description')}</p>
+                </div>
               </div>
-              <ol className="itinerary-timeline">
-                {itinerary.map(({ time, title, meta, icon: Icon }, index) => (
-                  <li key={time}>
-                    <div className="timeline-icon"><Icon size={17} /></div>
-                    <div>
-                      <span>{time}</span>
-                      <strong>{index === 1 ? results[0].name : title}</strong>
-                      <small>{meta}</small>
-                    </div>
-                  </li>
-                ))}
-              </ol>
+
+              <div className="condition-grid">
+                <label className="condition-field">
+                  <span><Waves size={16} aria-hidden="true" /> {t('concierge.controls.activity')}</span>
+                  <select value={form.activity} onChange={(event) => updateForm('activity', event.target.value)}>
+                    {activityOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.icon} {t(`activity.${option.value}`)}</option>
+                    ))}
+                  </select>
+                </label>
+
+                {['surf', 'swim'].includes(form.activity) && (
+                  <label className="condition-field">
+                    <span><ShieldCheck size={16} aria-hidden="true" /> {t('concierge.controls.skill')}</span>
+                    <select
+                      value={form.participantSkillLevel}
+                      onChange={(event) => updateForm('participantSkillLevel', event.target.value)}
+                    >
+                      {SKILL_LEVELS.map((level) => (
+                        <option key={level} value={level}>{t(`concierge.skill.${level}`)}</option>
+                      ))}
+                    </select>
+                    <small>{t(form.activity === 'surf' ? 'concierge.skill.surfHelp' : 'concierge.skill.swimHelp')}</small>
+                  </label>
+                )}
+
+                <label className="condition-field">
+                  <span><Users size={16} aria-hidden="true" /> {t('concierge.controls.ages')}</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.ages}
+                    onChange={(event) => updateForm('ages', event.target.value)}
+                    placeholder={t('concierge.controls.agesPlaceholder')}
+                    aria-describedby={ageError ? 'ages-help ages-error' : 'ages-help'}
+                    aria-invalid={Boolean(ageError)}
+                  />
+                  <small id="ages-help">{t('concierge.controls.agesHelp')}</small>
+                  {ageError ? <strong id="ages-error" className="field-error" role="alert">{t(ageError)}</strong> : null}
+                </label>
+
+                {supervisionRequired && (
+                  <label className="condition-field">
+                    <span><ShieldAlert size={16} aria-hidden="true" /> {t('concierge.controls.supervision')}</span>
+                    <select
+                      value={typeof form.adultSupervisionConfirmed === 'boolean'
+                        ? String(form.adultSupervisionConfirmed)
+                        : ''}
+                      onChange={(event) => updateForm(
+                        'adultSupervisionConfirmed',
+                        event.target.value === '' ? null : event.target.value === 'true',
+                      )}
+                    >
+                      <option value="">{t('concierge.supervision.unselected')}</option>
+                      <option value="true">{t('concierge.supervision.yes')}</option>
+                      <option value="false">{t('concierge.supervision.no')}</option>
+                    </select>
+                    <small>{t('concierge.supervision.help')}</small>
+                  </label>
+                )}
+
+                <label className="range-field">
+                  <span>{t('concierge.controls.quiet')} <output>{form.quiet}%</output></span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={form.quiet}
+                    onChange={(event) => updateForm('quiet', Number(event.target.value))}
+                    aria-label={t('concierge.controls.quiet')}
+                  />
+                  <small><span>{t('concierge.controls.quietLow')}</span><span>{t('concierge.controls.quietHigh')}</span></small>
+                </label>
+
+                <label className="range-field">
+                  <span>{t('concierge.controls.intensity')} <output>{form.activityLevel}%</output></span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={form.activityLevel}
+                    onChange={(event) => updateForm('activityLevel', Number(event.target.value))}
+                    aria-label={t('concierge.controls.intensity')}
+                  />
+                  <small><span>{t('concierge.controls.intensityLow')}</span><span>{t('concierge.controls.intensityHigh')}</span></small>
+                </label>
+              </div>
+
+              <fieldset className="party-options">
+                <legend>{t('concierge.controls.party')}</legend>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.requiresAccessibility}
+                    onChange={(event) => updateForm('requiresAccessibility', event.target.checked)}
+                  />
+                  <span className="option-icon"><Accessibility size={18} aria-hidden="true" /></span>
+                  <span><strong>{t('concierge.controls.accessibility')}</strong><small>{t('concierge.controls.accessibilityHelp')}</small></span>
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.bringingPet}
+                    onChange={(event) => updateForm('bringingPet', event.target.checked)}
+                  />
+                  <span className="option-icon"><PawPrint size={18} aria-hidden="true" /></span>
+                  <span><strong>{t('concierge.controls.pet')}</strong><small>{t('concierge.controls.petHelp')}</small></span>
+                </label>
+              </fieldset>
+            </div>
+          </form>
+        </section>
+
+        {requestState.kind === 'idle' ? (
+          <section className="concierge-empty" aria-labelledby="empty-title">
+            <div className="empty-graphic"><Compass size={24} aria-hidden="true" /></div>
+            <div>
+              <span>READY WHEN YOU ARE</span>
+              <h2 id="empty-title">{t('concierge.empty.title')}</h2>
+              <p>{t('concierge.empty.description')}</p>
             </div>
           </section>
         ) : (
-          <section className="concierge-empty">
-            <Sparkles size={20} />
-            <p>한 문장만 들려주면 추천 이유와 반나절 동선을 함께 보여드릴게요.</p>
+          <section className="concierge-results" aria-live="polite" aria-busy={isLoading}>
+            <ResultStatus requestState={requestState} intlLocale={intlLocale} t={t} />
+
+            {requestState.kind !== 'loading' ? (
+              <>
+                <div className="result-context">
+                  <span><Sparkles size={16} aria-hidden="true" /> {t('concierge.results.label')}</span>
+                  <h2>{resultTitle}</h2>
+                  <p>
+                    {requestState.kind === 'live'
+                      ? t('concierge.results.liveDescription', { activity: t(`activity.${activity.value}`) })
+                      : t('concierge.results.demoDescription')}
+                  </p>
+                </div>
+
+                <div className="recommendation-grid">
+                  {visibleResults.map((item, index) => (
+                    requestState.kind === 'live'
+                      ? <LiveRecommendationCard key={item.id} item={item} index={index} t={t} />
+                      : <DemoRecommendationCard key={item.id} item={item} index={index} locale={locale} t={t} />
+                  ))}
+                </div>
+
+                <ExclusionSummary excluded={requestState.excluded} meta={requestState.meta} t={t} />
+
+                <div className="itinerary-preview">
+                  <div className="itinerary-copy">
+                    <span>STEP 02 · READY LATER</span>
+                    <h2>{t('concierge.itinerary.title')}</h2>
+                    <p>{t('concierge.itinerary.description')}</p>
+                    <button type="button" disabled title={t('concierge.itinerary.pending')}>
+                      <CalendarClock size={18} aria-hidden="true" /> {t('concierge.itinerary.pending')}
+                    </button>
+                  </div>
+                  <div className="itinerary-rules" aria-label={t('concierge.itinerary.rules')}>
+                    <div><Clock3 size={18} aria-hidden="true" /><span><strong>{t('concierge.itinerary.hours')}</strong><small>{t('concierge.itinerary.hoursDetail')}</small></span></div>
+                    <div><MapPin size={18} aria-hidden="true" /><span><strong>{t('concierge.itinerary.matrix')}</strong><small>{t('concierge.itinerary.matrixDetail')}</small></span></div>
+                    <div><ShieldCheck size={18} aria-hidden="true" /><span><strong>{t('concierge.itinerary.weather')}</strong><small>{t('concierge.itinerary.weatherDetail')}</small></span></div>
+                  </div>
+                </div>
+              </>
+            ) : null}
           </section>
         )}
       </div>

@@ -18,13 +18,11 @@ import {
   X,
 } from 'lucide-react';
 import { livecams, spots } from '../data/pongdangData';
+import { localizedSafety, useI18n } from '../i18n';
 import './LivecamPage.css';
 
-const STATUS_FILTERS = [
-  { id: 'all', label: '전체' },
-  { id: 'official', label: '공식 라이브' },
-  { id: 'poster', label: '정적·데모' },
-];
+const STATUS_FILTERS = ['all', 'official', 'poster'];
+const ALL_REGIONS = '__all__';
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
 
@@ -51,37 +49,31 @@ const getIndexTone = (score) => {
   return 'caution';
 };
 
-const getIndexLabel = (score) => {
+const getIndexLabel = (t, score) => {
   const tone = getIndexTone(score);
-  return {
-    excellent: '최적',
-    good: '좋음',
-    fair: '보통',
-    caution: '주의',
-    unknown: '미수집',
-  }[tone];
+  return tone === 'unknown' ? t('common.noData') : t(`forecast.status.${tone}`);
 };
 
-const getStatusMeta = (cam) => {
+const getStatusMeta = (cam, t) => {
   const status = String(cam.status || '').toLowerCase();
   if (cam.isLive) {
     return {
       tone: 'official',
-      label: '공식 라이브 링크',
-      description: '페이지에서는 소리 없는 포스터로 미리 보고, 공식 제공처에서 영상을 엽니다.',
+      label: t('livecam.status.official.label'),
+      description: t('livecam.status.official.description'),
     };
   }
   if (status.includes('offline') || status.includes('중단') || status.includes('오프라인')) {
     return {
       tone: 'offline',
-      label: '현재 오프라인',
-      description: '현재 영상 상태를 확인할 수 없어 마지막 정적 포스터를 보여드립니다.',
+      label: t('livecam.status.offline.label'),
+      description: t('livecam.status.offline.description'),
     };
   }
   return {
     tone: 'demo',
-    label: '데모 포스터',
-    description: '실시간 스트림이 아닌 문서 기반 고정 이미지입니다.',
+    label: t('livecam.status.demo.label'),
+    description: t('livecam.status.demo.description'),
   };
 };
 
@@ -108,15 +100,15 @@ const CAM_DATA = toArray(livecams).map((cam, index) => {
     updatedLabel: String(cam?.updatedLabel || spot?.freshness?.updatedLabel || '고정 데모'),
     officialUrl: safeOfficialUrl(cam?.officialUrl),
     spot,
-    statusMeta: getStatusMeta(cam || {}),
   };
 });
 
-const REGION_OPTIONS = ['전체 지역', ...new Set(CAM_DATA.map((cam) => cam.region).filter(Boolean))];
+const REGION_OPTIONS = [...new Set(CAM_DATA.map((cam) => cam.region).filter(Boolean))];
 
 function LivecamPage() {
+  const { t } = useI18n();
   const [statusFilter, setStatusFilter] = useState('all');
-  const [regionFilter, setRegionFilter] = useState('전체 지역');
+  const [regionFilter, setRegionFilter] = useState(ALL_REGIONS);
   const [query, setQuery] = useState('');
   const [focusedId, setFocusedId] = useState(null);
   const [failedPosters, setFailedPosters] = useState([]);
@@ -130,7 +122,7 @@ function LivecamPage() {
       const statusMatches = statusFilter === 'all'
         || (statusFilter === 'official' && cam.isLive)
         || (statusFilter === 'poster' && !cam.isLive);
-      const regionMatches = regionFilter === '전체 지역' || cam.region === regionFilter;
+      const regionMatches = regionFilter === ALL_REGIONS || cam.region === regionFilter;
       const searchableText = [cam.name, cam.region, cam.spot?.typeLabel, ...cam.tags]
         .filter(Boolean)
         .join(' ')
@@ -197,7 +189,7 @@ function LivecamPage() {
 
   const resetFilters = () => {
     setStatusFilter('all');
-    setRegionFilter('전체 지역');
+    setRegionFilter(ALL_REGIONS);
     setQuery('');
   };
 
@@ -206,27 +198,21 @@ function LivecamPage() {
       <header className="livecam-hero" aria-labelledby="livecam-title">
         <div className="livecam-hero__copy">
           <span className="livecam-eyebrow">WATER WINDOW</span>
-          <h1 id="livecam-title">
-            떠나기 전,
-            <span> 물의 표정을 먼저 보세요</span>
-          </h1>
-          <p>
-            공개 제공처가 있는 장소는 공식 링크로 연결하고, 그렇지 않은 곳은
-            정적 데모 포스터임을 분명히 표시합니다. 이 페이지에서 영상이나 소리는 자동 재생되지 않습니다.
-          </p>
+          <h1 id="livecam-title">{t('livecam.hero.title')}</h1>
+          <p>{t('livecam.hero.description')}</p>
         </div>
 
-        <dl className="livecam-hero__stats" aria-label="라이브캠 현황">
+        <dl className="livecam-hero__stats" aria-label={t('livecam.stats.label')}>
           <div>
-            <dt>등록 뷰</dt>
+            <dt>{t('livecam.stats.registered')}</dt>
             <dd>{CAM_DATA.length}</dd>
           </div>
           <div>
-            <dt>공식 링크</dt>
+            <dt>{t('livecam.stats.official')}</dt>
             <dd>{officialCount}</dd>
           </div>
           <div>
-            <dt>자동 재생</dt>
+            <dt>{t('livecam.stats.autoplay')}</dt>
             <dd>OFF</dd>
           </div>
         </dl>
@@ -236,34 +222,35 @@ function LivecamPage() {
         <div className="livecam-toolbar__heading">
           <div>
             <span className="livecam-eyebrow">LIVE &amp; POSTER VIEW</span>
-            <h2 id="livecam-filter-title">보고 싶은 물을 골라보세요</h2>
+            <h2 id="livecam-filter-title">{t('livecam.filters.title')}</h2>
           </div>
           <span className="livecam-result-count" aria-live="polite">
-            {filteredCams.length}개의 뷰
+            {t('common.countViews', { count: filteredCams.length })}
           </span>
         </div>
 
         <div className="livecam-filter-row">
           <fieldset className="livecam-status-filter">
-            <legend>제공 상태</legend>
+            <legend>{t('livecam.filters.status')}</legend>
             <div>
-              {STATUS_FILTERS.map((filter) => (
+              {STATUS_FILTERS.map((filterId) => (
                 <button
                   type="button"
-                  key={filter.id}
-                  className={statusFilter === filter.id ? 'is-active' : ''}
-                  aria-pressed={statusFilter === filter.id}
-                  onClick={() => setStatusFilter(filter.id)}
+                  key={filterId}
+                  className={statusFilter === filterId ? 'is-active' : ''}
+                  aria-pressed={statusFilter === filterId}
+                  onClick={() => setStatusFilter(filterId)}
                 >
-                  {filter.label}
+                  {t(`livecam.filters.${filterId}`)}
                 </button>
               ))}
             </div>
           </fieldset>
 
           <label className="livecam-region-filter">
-            <span>지역</span>
+            <span>{t('livecam.filters.region')}</span>
             <select value={regionFilter} onChange={(event) => setRegionFilter(event.target.value)}>
+              <option value={ALL_REGIONS}>{t('livecam.filters.allRegions')}</option>
               {REGION_OPTIONS.map((region) => (
                 <option key={region} value={region}>{region}</option>
               ))}
@@ -271,13 +258,13 @@ function LivecamPage() {
           </label>
 
           <label className="livecam-search">
-            <span className="sr-only">라이브캠 검색</span>
+            <span className="sr-only">{t('livecam.search.label')}</span>
             <Search aria-hidden="true" />
             <input
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="장소, 지역, 태그 검색"
+              placeholder={t('livecam.search.placeholder')}
               autoComplete="off"
             />
           </label>
@@ -288,11 +275,11 @@ function LivecamPage() {
         <div className="livecam-results__heading">
           <div>
             <span className="livecam-eyebrow">CURATED WATER VIEWS</span>
-            <h2 id="livecam-results-title">지금 열어볼 물 풍경</h2>
+            <h2 id="livecam-results-title">{t('livecam.results.title')}</h2>
           </div>
           <p>
             <Info aria-hidden="true" />
-            빨간 LIVE 배지를 흉내 내지 않습니다. 제공 상태와 갱신 기준을 카드마다 확인하세요.
+            {t('livecam.results.policy')}
           </p>
         </div>
 
@@ -306,6 +293,7 @@ function LivecamPage() {
               const waveHeight = formatCondition(conditions.waveHeight, 'm');
               const crowd = formatCondition(conditions.crowd);
               const indexTone = getIndexTone(cam.waterIndex);
+              const statusMeta = getStatusMeta(cam, t);
 
               return (
                 <article
@@ -317,21 +305,21 @@ function LivecamPage() {
                     {cam.poster && !posterFailed ? (
                       <img
                         src={cam.poster}
-                        alt={`${cam.name} 정적 미리보기`}
+                        alt={t('livecam.poster.staticAlt', { name: cam.name })}
                         loading="lazy"
                         onError={() => markPosterFailed(cam.id)}
                       />
                     ) : (
-                      <div className="livecam-poster-fallback" role="img" aria-label={`${cam.name} 포스터 준비 중`}>
+                      <div className="livecam-poster-fallback" role="img" aria-label={`${cam.name} ${t('livecam.poster.pending')}`}>
                         <Waves aria-hidden="true" />
-                        <span>포스터 준비 중</span>
+                        <span>{t('livecam.poster.pending')}</span>
                       </div>
                     )}
 
                     <div className="livecam-card__overlay">
-                      <span className={`livecam-state-badge livecam-state-badge--${cam.statusMeta.tone}`}>
+                      <span className={`livecam-state-badge livecam-state-badge--${statusMeta.tone}`}>
                         {cam.isLive ? <Radio aria-hidden="true" /> : <Camera aria-hidden="true" />}
-                        {cam.statusMeta.label}
+                        {statusMeta.label}
                       </span>
                       <span className={`livecam-index-badge livecam-index-badge--${indexTone}`}>
                         <small>INDEX</small>
@@ -342,13 +330,13 @@ function LivecamPage() {
                     <button
                       type="button"
                       className="livecam-focus-button"
-                      aria-label={`${cam.name} 집중 보기 열기`}
+                      aria-label={`${cam.name} ${t('livecam.focus.open')}`}
                       aria-haspopup="dialog"
                       aria-expanded={focusedId === cam.id}
                       onClick={(event) => openFocusMode(cam.id, event.currentTarget)}
                     >
                       <Maximize2 aria-hidden="true" />
-                      <span>집중 보기</span>
+                      <span>{t('livecam.focus.open')}</span>
                     </button>
                   </div>
 
@@ -359,34 +347,34 @@ function LivecamPage() {
                         <h3>{cam.name}</h3>
                       </div>
                       <span className={`livecam-index-label livecam-index-label--${indexTone}`}>
-                        {getIndexLabel(cam.waterIndex)}
+                        {getIndexLabel(t, cam.waterIndex)}
                       </span>
                     </div>
 
-                    <p className="livecam-status-description">{cam.statusMeta.description}</p>
+                    <p className="livecam-status-description">{statusMeta.description}</p>
 
                     <dl className="livecam-condition-list">
                       <div>
-                        <dt>수온</dt>
-                        <dd>{waterTemp || '미수집'}</dd>
+                        <dt>{t('metric.waterTemp')}</dt>
+                        <dd>{waterTemp || t('common.noData')}</dd>
                       </div>
                       <div>
-                        <dt>파고</dt>
-                        <dd>{waveHeight || '미수집'}</dd>
+                        <dt>{t('metric.waveHeight')}</dt>
+                        <dd>{waveHeight || t('common.noData')}</dd>
                       </div>
                       <div>
-                        <dt>혼잡</dt>
-                        <dd>{crowd || '미수집'}</dd>
+                        <dt>{t('metric.crowd')}</dt>
+                        <dd>{crowd || t('common.noData')}</dd>
                       </div>
                     </dl>
 
                     <div className="livecam-safety-row">
                       <ShieldCheck aria-hidden="true" />
-                      <span>{safety?.label || '안전 데이터 미수집'}</span>
+                      <span>{safety?.level ? localizedSafety(t, safety.level).label : t('livecam.safety.missing')}</span>
                     </div>
 
                     {cam.tags.length > 0 && (
-                      <ul className="livecam-tags" aria-label="장소 태그">
+                      <ul className="livecam-tags" aria-label={t('livecam.tags')}>
                         {cam.tags.slice(0, 4).map((tag) => <li key={tag}>#{tag}</li>)}
                       </ul>
                     )}
@@ -396,15 +384,15 @@ function LivecamPage() {
                       <div>
                         {cam.spot?.id && (
                           <Link to={`/spot/${cam.spot.id}`}>
-                            상세 <ArrowUpRight aria-hidden="true" />
+                            {t('common.details')} <ArrowUpRight aria-hidden="true" />
                           </Link>
                         )}
                         {cam.officialUrl ? (
                           <a href={cam.officialUrl} target="_blank" rel="noreferrer">
-                            공식 링크 <ExternalLink aria-hidden="true" />
+                            {t('livecam.link.official')} <ExternalLink aria-hidden="true" />
                           </a>
                         ) : (
-                          <span className="livecam-link-unavailable">공식 링크 준비 중</span>
+                          <span className="livecam-link-unavailable">{t('livecam.link.pending')}</span>
                         )}
                       </div>
                     </div>
@@ -416,23 +404,20 @@ function LivecamPage() {
         ) : (
           <div className="livecam-empty" role="status">
             <CircleOff aria-hidden="true" />
-            <h3>조건에 맞는 물 풍경이 없어요</h3>
-            <p>검색어를 지우거나 제공 상태와 지역 필터를 초기화해 보세요.</p>
+            <h3>{t('livecam.empty.title')}</h3>
+            <p>{t('livecam.empty.description')}</p>
             <button type="button" onClick={resetFilters}>
-              <RotateCcw aria-hidden="true" /> 필터 초기화
+              <RotateCcw aria-hidden="true" /> {t('common.resetFilters')}
             </button>
           </div>
         )}
       </section>
 
-      <aside className="livecam-integrity-note" aria-label="라이브캠 데이터 원칙">
+      <aside className="livecam-integrity-note" aria-label={t('livecam.integrity.title')}>
         <BadgeCheck aria-hidden="true" />
         <div>
-          <strong>있는 그대로 보여드리는 라이브캠</strong>
-          <p>
-            공식 스트림 여부, 포스터 상태, 갱신 기준을 분리해 표시합니다.
-            연결되지 않은 영상을 재생 중인 것처럼 보이게 하거나 소리를 자동으로 틀지 않습니다.
-          </p>
+          <strong>{t('livecam.integrity.title')}</strong>
+          <p>{t('livecam.integrity.description')}</p>
         </div>
       </aside>
 
@@ -460,7 +445,7 @@ function LivecamPage() {
               onClick={closeFocusMode}
             >
               <X aria-hidden="true" />
-              <span>닫기</span>
+              <span>{t('common.close')}</span>
             </button>
 
             <div
@@ -470,37 +455,37 @@ function LivecamPage() {
               {focusedCam.poster && !failedPosters.includes(focusedCam.id) ? (
                 <img
                   src={focusedCam.poster}
-                  alt={`${focusedCam.name} 집중 보기 정적 포스터`}
+                  alt={t('livecam.poster.focusAlt', { name: focusedCam.name })}
                   onError={() => markPosterFailed(focusedCam.id)}
                 />
               ) : (
-                <div className="livecam-poster-fallback" role="img" aria-label={`${focusedCam.name} 포스터 준비 중`}>
+                <div className="livecam-poster-fallback" role="img" aria-label={`${focusedCam.name} ${t('livecam.poster.pending')}`}>
                   <Waves aria-hidden="true" />
-                  <span>포스터 준비 중</span>
+                  <span>{t('livecam.poster.pending')}</span>
                 </div>
               )}
               <div className="livecam-focus-media__status">
-                <span className={`livecam-state-badge livecam-state-badge--${focusedCam.statusMeta.tone}`}>
+                <span className={`livecam-state-badge livecam-state-badge--${getStatusMeta(focusedCam, t).tone}`}>
                   {focusedCam.isLive ? <Radio aria-hidden="true" /> : <Camera aria-hidden="true" />}
-                  {focusedCam.statusMeta.label}
+                  {getStatusMeta(focusedCam, t).label}
                 </span>
-                <span>소리·영상 자동 재생 없음</span>
+                <span>{t('livecam.autoplay.none')}</span>
               </div>
             </div>
 
             <div className="livecam-focus-copy">
               <span className="livecam-eyebrow">FOCUS WATER VIEW</span>
               <h2 id="livecam-focus-title">{focusedCam.name}</h2>
-              <p id="livecam-focus-description">{focusedCam.statusMeta.description}</p>
+              <p id="livecam-focus-description">{getStatusMeta(focusedCam, t).description}</p>
 
               <div className="livecam-focus-summary">
                 <div>
                   <span>Water Index</span>
                   <strong>{focusedCam.waterIndex ?? '—'}</strong>
-                  <small>{getIndexLabel(focusedCam.waterIndex)}</small>
+                  <small>{getIndexLabel(t, focusedCam.waterIndex)}</small>
                 </div>
                 <div>
-                  <span>지역</span>
+                  <span>{t('livecam.filters.region')}</span>
                   <strong>{focusedCam.region}</strong>
                   <small>{focusedCam.updatedLabel}</small>
                 </div>
@@ -509,15 +494,15 @@ function LivecamPage() {
               <div className="livecam-focus-actions">
                 {focusedCam.spot?.id && (
                   <Link to={`/spot/${focusedCam.spot.id}`} onClick={closeFocusMode}>
-                    장소 상세 보기 <ArrowUpRight aria-hidden="true" />
+                    {t('livecam.place.details')} <ArrowUpRight aria-hidden="true" />
                   </Link>
                 )}
                 {focusedCam.officialUrl ? (
                   <a href={focusedCam.officialUrl} target="_blank" rel="noreferrer">
-                    공식 제공처 열기 <ExternalLink aria-hidden="true" />
+                    {t('livecam.provider.open')} <ExternalLink aria-hidden="true" />
                   </a>
                 ) : (
-                  <span>공식 영상 링크가 아직 연결되지 않았습니다.</span>
+                  <span>{t('livecam.provider.missing')}</span>
                 )}
               </div>
             </div>

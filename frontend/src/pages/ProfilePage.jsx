@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { passportCollections, personas, spots } from '../data/pongdangData';
+import { useI18n } from '../i18n';
 import './ProfilePage.css';
 
 const PREFERENCE_STORAGE_KEY = 'pongdang:persona-preference';
@@ -121,6 +122,7 @@ function EmptyPanel({ icon: Icon, title, description, actionLabel, to }) {
 }
 
 function ProfilePage() {
+  const { t } = useI18n();
   const [localPreference, setLocalPreference] = useState(readLocalPreference);
   const [localItinerary] = useState(readDemoItinerary);
   const [storageMessage, setStorageMessage] = useState('');
@@ -165,10 +167,10 @@ function ProfilePage() {
     try {
       window.localStorage.removeItem(PREFERENCE_STORAGE_KEY);
       setLocalPreference({ id: null, status: 'available' });
-      setStorageMessage('이 기기에 저장된 물 여행 취향을 지웠어요.');
+      setStorageMessage('profile.storage.cleared');
     } catch {
       setLocalPreference((current) => ({ ...current, status: 'unavailable' }));
-      setStorageMessage('브라우저 저장소에 접근할 수 없어 취향을 지우지 못했어요.');
+      setStorageMessage('profile.storage.clearFailed');
     }
   };
 
@@ -183,24 +185,24 @@ function ProfilePage() {
           </div>
           <div className="profile-identity-copy">
             <span className="profile-demo-label"><UserRound size={13} /> GUEST · DEMO</span>
-            <h1 id="profile-title">오늘도 물 좋은 곳을 찾는 여행자</h1>
-            <p>로그인 없이도 퐁당의 컬렉션과 일정 흐름을 미리 둘러볼 수 있어요.</p>
+            <h1 id="profile-title">{t('profile.hero.title')}</h1>
+            <p>{t('profile.hero.description')}</p>
           </div>
         </div>
 
         <div className="profile-hero-actions">
           <Link className="profile-hero-primary" to="/onboarding">
             <Sparkles size={17} aria-hidden="true" />
-            {currentPersona ? '물 취향 다시 찾기' : '내 물 취향 찾기'}
+            {currentPersona ? t('profile.cta.refindTaste') : t('profile.cta.findTaste')}
           </Link>
           <Link className="profile-hero-secondary" to="/concierge">
-            AI 여행 만들기
+            {t('profile.cta.aiTrip')}
             <ArrowRight size={16} aria-hidden="true" />
           </Link>
         </div>
       </section>
 
-      <section className="profile-overview" aria-label="나의 퐁당 요약">
+      <section className="profile-overview" aria-label={t('profile.summary')}>
         <article className="profile-persona-card">
           <div className="profile-card-eyebrow">
             <Sparkles size={14} aria-hidden="true" />
@@ -213,8 +215,8 @@ function ProfilePage() {
                 {typeof currentPersona.icon === 'string' ? currentPersona.icon : '💧'}
               </span>
               <div>
-                <p>{currentPersona.subtitle}</p>
-                <h2>{currentPersona.title}</h2>
+                <p>{t(`persona.${currentPersona.id}.subtitle`)}</p>
+                <h2>{t(`persona.${currentPersona.id}.title`)}</h2>
                 <div className="profile-persona-tags">
                   {(Array.isArray(currentPersona.tags) ? currentPersona.tags : []).slice(0, 3).map((tag) => (
                     <span key={tag}>#{tag}</span>
@@ -225,31 +227,31 @@ function ProfilePage() {
           ) : (
             <EmptyPanel
               icon={Compass}
-              title={localPreference.id ? '저장된 취향을 불러오지 못했어요' : '아직 물 여행 취향이 없어요'}
+              title={localPreference.id ? t('profile.persona.invalid') : t('profile.persona.empty')}
               description={localPreference.id
-                ? '공유 데이터가 바뀌었거나 저장된 값이 오래되었을 수 있어요.'
-                : '다섯 번의 선택으로 나에게 맞는 물 여행 리듬을 찾아보세요.'}
-              actionLabel="취향 찾기"
+                ? t('profile.persona.invalidDescription')
+                : t('profile.persona.emptyDescription')}
+              actionLabel={t('profile.cta.taste')}
               to="/onboarding"
             />
           )}
         </article>
 
-        <div className="profile-stats" aria-label="데모 활동 통계">
+        <div className="profile-stats" aria-label={t('profile.stats.label')}>
           <article>
-            <span>도감 진행률</span>
+            <span>{t('profile.stats.progress')}</span>
             <strong>{passportProgress}<small>%</small></strong>
-            <p>{collectionTotals.current} / {collectionTotals.total || '—'} 스팟</p>
+            <p>{t('profile.stats.spots', { current: collectionTotals.current, total: collectionTotals.total || '—' })}</p>
           </article>
           <article>
-            <span>저장한 일정</span>
-            <strong>{savedTrips.length}<small>개</small></strong>
-            <p>데모 일정 포함</p>
+            <span>{t('profile.stats.saved')}</span>
+            <strong>{savedTrips.length}<small>{t('profile.stats.countUnit')}</small></strong>
+            <p>{t('profile.stats.includesDemo')}</p>
           </article>
           <article>
-            <span>에코 액션</span>
-            <strong>{ecoCompleted}<small>회</small></strong>
-            <p>다음 배지까지 {ecoMilestones.length - ecoCompleted}회</p>
+            <span>{t('profile.stats.eco')}</span>
+            <strong>{ecoCompleted}<small>{t('profile.stats.actionUnit')}</small></strong>
+            <p>{t('profile.stats.nextBadge', { count: ecoMilestones.length - ecoCompleted })}</p>
           </article>
         </div>
       </section>
@@ -259,9 +261,9 @@ function ProfilePage() {
           <div className="profile-section-heading">
             <div>
               <p>WATER PASSPORT</p>
-              <h2 id="passport-title">대한민국의 물을 한 칸씩</h2>
+              <h2 id="passport-title">{t('profile.passport.title')}</h2>
             </div>
-            <span className="profile-section-note">데모 컬렉션</span>
+            <span className="profile-section-note">{t('profile.passport.demo')}</span>
           </div>
 
           {collections.length ? (
@@ -303,9 +305,9 @@ function ProfilePage() {
           ) : (
             <EmptyPanel
               icon={Droplets}
-              title="아직 열린 컬렉션이 없어요"
-              description="첫 방문을 인증하면 이곳에 나만의 물 도감이 시작돼요."
-              actionLabel="워터맵 둘러보기"
+              title={t('profile.passport.empty')}
+              description={t('profile.passport.emptyDescription')}
+              actionLabel={t('profile.passport.emptyCta')}
               to="/map"
             />
           )}
@@ -316,8 +318,8 @@ function ProfilePage() {
             <div className="profile-eco-icon"><Leaf size={25} aria-hidden="true" /></div>
             <div>
               <p>NEXT BADGE</p>
-              <h2 id="eco-title">워터 키퍼</h2>
-              <span>{ecoCompleted} / {ecoMilestones.length} 에코 액션</span>
+              <h2 id="eco-title">{t('profile.eco.title')}</h2>
+              <span>{t('profile.eco.progress', { current: ecoCompleted, total: ecoMilestones.length })}</span>
             </div>
           </div>
 
@@ -335,7 +337,7 @@ function ProfilePage() {
           </ul>
 
           <Link className="profile-inline-link" to="/map">
-            비치코밍 스팟 찾기
+            {t('profile.eco.cta')}
             <ChevronRight size={16} aria-hidden="true" />
           </Link>
         </section>
@@ -345,10 +347,10 @@ function ProfilePage() {
         <div className="profile-section-heading">
           <div>
             <p>SAVED JOURNEYS</p>
-            <h2 id="saved-trips-title">다음 물 여행</h2>
+            <h2 id="saved-trips-title">{t('profile.trips.title')}</h2>
           </div>
           <Link to="/concierge">
-            새 일정 만들기
+            {t('profile.trips.new')}
             <ArrowRight size={15} aria-hidden="true" />
           </Link>
         </div>
@@ -373,9 +375,9 @@ function ProfilePage() {
         ) : (
           <EmptyPanel
             icon={Route}
-            title="저장한 일정이 아직 없어요"
-            description="가고 싶은 물과 동행을 말하면 AI 컨시어지가 첫 일정을 만들어드려요."
-            actionLabel="첫 일정 만들기"
+            title={t('profile.trips.empty')}
+            description={t('profile.trips.emptyDescription')}
+            actionLabel={t('profile.trips.emptyCta')}
             to="/concierge"
           />
         )}
@@ -386,7 +388,7 @@ function ProfilePage() {
           <div className="profile-settings-icon"><ShieldCheck size={22} aria-hidden="true" /></div>
           <div>
             <p>PRIVACY & ACCESS</p>
-            <h2 id="settings-title">가볍고 안전한 게스트 모드</h2>
+            <h2 id="settings-title">{t('profile.settings.title')}</h2>
           </div>
         </div>
 
@@ -394,42 +396,42 @@ function ProfilePage() {
           <article>
             <span className="profile-setting-icon"><Database size={19} aria-hidden="true" /></span>
             <div>
-              <strong>이 기기에만 저장</strong>
+              <strong>{t('profile.settings.local.title')}</strong>
               <p>
                 {localPreference.status === 'available'
-                  ? '취향 ID, 즐겨찾기와 데모 일정의 장소 ID만 이 브라우저에 보관합니다.'
-                  : '현재 브라우저에서는 로컬 저장소를 사용할 수 없습니다.'}
+                  ? t('profile.settings.local.available')
+                  : t('profile.settings.local.unavailable')}
               </p>
             </div>
             <span className={`profile-setting-state is-${localPreference.status}`}>
-              {localPreference.status === 'available' ? '사용 가능' : '사용 불가'}
+              {localPreference.status === 'available' ? t('profile.settings.available') : t('profile.settings.unavailable')}
             </span>
           </article>
 
           <article>
             <span className="profile-setting-icon"><Accessibility size={19} aria-hidden="true" /></span>
             <div>
-              <strong>누구나 탐색 가능</strong>
-              <p>키보드 포커스, 스크린리더 레이블, 모션 감소 설정을 존중해요.</p>
+              <strong>{t('profile.settings.a11y.title')}</strong>
+              <p>{t('profile.settings.a11y.description')}</p>
             </div>
-            <span className="profile-setting-state is-ready">지원됨</span>
+            <span className="profile-setting-state is-ready">{t('profile.settings.supported')}</span>
           </article>
 
           <article>
             <span className="profile-setting-icon"><LockKeyhole size={19} aria-hidden="true" /></span>
             <div>
-              <strong>개인정보 입력 없음</strong>
-              <p>데모 모드에서는 이름, 연락처, 위치 기록을 요구하지 않아요.</p>
+              <strong>{t('profile.settings.privacy.title')}</strong>
+              <p>{t('profile.settings.privacy.description')}</p>
             </div>
-            <span className="profile-setting-state is-ready">비공개</span>
+            <span className="profile-setting-state is-ready">{t('profile.settings.private')}</span>
           </article>
         </div>
 
         <div className="profile-storage-footer">
-          <p role="status">{storageMessage || '저장된 취향은 언제든 직접 삭제할 수 있어요.'}</p>
+          <p role="status">{t(storageMessage || 'profile.storage.default')}</p>
           <button type="button" onClick={clearPreference} disabled={!localPreference.id || localPreference.status !== 'available'}>
             <BadgeCheck size={15} aria-hidden="true" />
-            저장된 취향 지우기
+            {t('profile.storage.clear')}
           </button>
         </div>
       </section>

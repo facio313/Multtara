@@ -21,10 +21,14 @@ import {
 } from 'lucide-react';
 import {
   activityOptions,
-  dataMeta,
-  spots,
   spotTypeOptions,
 } from '../data/pongdangData';
+import { useWaterSpots } from '../hooks/useWaterData';
+import { localizedDataState, localizedSafety, useI18n } from '../i18n';
+import {
+  getSpotActivityView,
+  scoreLabel,
+} from '../services/waterData';
 import './MapPage.css';
 
 const KAKAO_SDK_ID = 'pongdang-kakao-map-sdk';
@@ -75,11 +79,8 @@ function loadKakaoMapsSdk(appKey) {
   return kakaoSdkPromise;
 }
 
-function getActivityScore(spot, activity) {
-  return spot.scores[activity] ?? spot.index;
-}
-
 function getScoreTone(score) {
+  if (score === null) return 'unknown';
   if (score >= 90) return 'excellent';
   if (score >= 84) return 'good';
   if (score >= 76) return 'fair';
@@ -87,25 +88,26 @@ function getScoreTone(score) {
 }
 
 function getStatusIcon(level) {
-  return level === 'safe' ? CheckCircle2 : AlertTriangle;
+  return level === 'clear' ? CheckCircle2 : AlertTriangle;
 }
 
 function MapStatusNotice({ status }) {
+  const { t } = useI18n();
   const messages = {
     loading: {
       icon: Compass,
-      title: '카카오 지도를 연결하고 있어요',
-      description: '로딩 중에도 아래 개념도와 여행지 목록을 탐색할 수 있습니다.',
+      title: t('map.status.loading.title'),
+      description: t('map.status.loading.description'),
     },
     'missing-key': {
       icon: Info,
-      title: '지금은 Water Twin 개념도로 보여드려요',
-      description: 'VITE_KAKAO_MAP_KEY가 설정되면 같은 마커가 실제 카카오 지도 위에 표시됩니다.',
+      title: t('map.status.missing.title'),
+      description: t('map.status.missing.description'),
     },
     error: {
       icon: AlertTriangle,
-      title: '실제 지도를 불러오지 못했어요',
-      description: '네트워크 또는 허용 도메인을 확인해 주세요. 데모 지도와 목록은 계속 사용할 수 있습니다.',
+      title: t('map.status.error.title'),
+      description: t('map.status.error.description'),
     },
   };
 
@@ -125,10 +127,11 @@ function MapStatusNotice({ status }) {
 }
 
 function WaterTwinFallback({ filteredSpots, activity, selectedId, onSelect, dimmed = false }) {
+  const { t } = useI18n();
   return (
     <div
       className={`pd-map-fallback${dimmed ? ' is-dimmed' : ''}`}
-      aria-label="실제 지도를 대신하는 여행지 위치 개념도"
+      aria-label={t('map.explorer')}
     >
       <div className="pd-map-fallback-grid" aria-hidden="true" />
       <div className="pd-map-water-shape pd-map-water-east" aria-hidden="true" />
@@ -141,11 +144,11 @@ function WaterTwinFallback({ filteredSpots, activity, selectedId, onSelect, dimm
       </div>
 
       {filteredSpots.map((spot) => {
-        const score = getActivityScore(spot, activity);
+        const view = getSpotActivityView(spot, activity);
         const isSelected = selectedId === spot.id;
         return (
           <button
-            className={`pd-map-marker pd-map-marker-${getScoreTone(score)} safety-${spot.safety.level}${isSelected ? ' is-selected' : ''}`}
+            className={`pd-map-marker pd-map-marker-${getScoreTone(view.score)} safety-${view.safety.level}${isSelected ? ' is-selected' : ''}`}
             key={spot.id}
             type="button"
             style={{
@@ -153,10 +156,10 @@ function WaterTwinFallback({ filteredSpots, activity, selectedId, onSelect, dimm
               '--marker-y': `${spot.visual.mapPosition.y}%`,
             }}
             aria-pressed={isSelected}
-            aria-label={`${spot.name}, ${score}점, ${spot.safety.label}`}
+            aria-label={`${spot.name}, ${view.score === null ? t('common.scoreMissing') : t('common.points', { score: view.score })}, ${localizedSafety(t, view.safety.level).label}, ${localizedDataState(t, view.dataState)}`}
             onClick={() => onSelect(spot.id)}
           >
-            <span className="pd-map-marker-score">{score}</span>
+            <span className="pd-map-marker-score">{scoreLabel(view)}</span>
             <span className="pd-map-marker-name">{spot.name}</span>
           </button>
         );
@@ -165,7 +168,7 @@ function WaterTwinFallback({ filteredSpots, activity, selectedId, onSelect, dimm
       {filteredSpots.length === 0 && (
         <div className="pd-map-fallback-empty">
           <MapPin size={24} aria-hidden="true" />
-          <span>조건에 맞는 마커가 없습니다.</span>
+          <span>{t('map.empty.title')}</span>
         </div>
       )}
     </div>
@@ -173,6 +176,7 @@ function WaterTwinFallback({ filteredSpots, activity, selectedId, onSelect, dimm
 }
 
 function MapPage() {
+  const { t } = useI18n();
   const [searchParams] = useSearchParams();
   const [scope, setScope] = useState(() => (searchParams.get('q')?.trim() ? 'nationwide' : 'gangneung'));
   const [activeType, setActiveType] = useState('all');
@@ -180,12 +184,17 @@ function MapPage() {
   const [query, setQuery] = useState(() => searchParams.get('q')?.trim() ?? '');
   const [selectedSpotId, setSelectedSpotId] = useState(1);
   const [mapStatus, setMapStatus] = useState(KAKAO_MAP_KEY ? 'loading' : 'missing-key');
+  const {
+    spots,
+    spotStatus,
+    conditionStatus,
+    retryData,
+  } = useWaterSpots(activeActivity);
   const mapCanvasRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const overlaysRef = useRef([]);
 
-  const activeActivityLabel =
-    activityOptions.find((activity) => activity.id === activeActivity)?.label ?? '종합';
+  const activeActivityLabel = t(`activity.${activeActivity}`);
 
   const filteredSpots = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase('ko-KR');
@@ -200,11 +209,21 @@ function MapPage() {
           .toLocaleLowerCase('ko-KR');
         return searchTarget.includes(normalizedQuery);
       })
-      .sort((a, b) => getActivityScore(b, activeActivity) - getActivityScore(a, activeActivity));
-  }, [activeActivity, activeType, query, scope]);
+      .sort((a, b) => {
+        const aScore = getSpotActivityView(a, activeActivity).score;
+        const bScore = getSpotActivityView(b, activeActivity).score;
+        if (aScore === null && bScore === null) return a.name.localeCompare(b.name, 'ko-KR');
+        if (aScore === null) return 1;
+        if (bScore === null) return -1;
+        return bScore - aScore;
+      });
+  }, [activeActivity, activeType, query, scope, spots]);
 
   const selectedSpot =
     filteredSpots.find((spot) => spot.id === selectedSpotId) ?? filteredSpots[0] ?? null;
+  const selectedView = selectedSpot
+    ? getSpotActivityView(selectedSpot, activeActivity)
+    : null;
 
   useEffect(() => {
     if (!KAKAO_MAP_KEY) return undefined;
@@ -255,16 +274,19 @@ function MapPage() {
 
     filteredSpots.forEach((spot) => {
       const position = new maps.LatLng(spot.lat, spot.lng);
-      const score = getActivityScore(spot, activeActivity);
+      const view = getSpotActivityView(spot, activeActivity);
       const button = document.createElement('button');
       const scoreElement = document.createElement('strong');
       const nameElement = document.createElement('span');
       const clickHandler = () => setSelectedSpotId(spot.id);
 
       button.type = 'button';
-      button.className = `pd-kakao-marker pd-kakao-marker-${getScoreTone(score)} safety-${spot.safety.level}`;
-      button.setAttribute('aria-label', `${spot.name}, ${activeActivityLabel} ${score}점, ${spot.safety.label}`);
-      scoreElement.textContent = String(score);
+      button.className = `pd-kakao-marker pd-kakao-marker-${getScoreTone(view.score)} safety-${view.safety.level}`;
+      button.setAttribute(
+        'aria-label',
+        `${spot.name}, ${activeActivityLabel} ${view.score === null ? t('common.scoreMissing') : t('common.points', { score: view.score })}, ${localizedSafety(t, view.safety.level).label}`,
+      );
+      scoreElement.textContent = scoreLabel(view);
       nameElement.textContent = spot.name;
       button.append(scoreElement, nameElement);
       button.addEventListener('click', clickHandler);
@@ -295,13 +317,17 @@ function MapPage() {
       });
       overlaysRef.current = [];
     };
-  }, [activeActivity, activeActivityLabel, filteredSpots, mapStatus, scope]);
+  }, [activeActivity, activeActivityLabel, filteredSpots, mapStatus, scope, t]);
 
   const clearFilters = () => {
     setQuery('');
     setActiveType('all');
     setScope('gangneung');
   };
+  const dataLoading = ['idle', 'loading'].includes(spotStatus)
+    || ['idle', 'loading'].includes(conditionStatus);
+  const dataError = spotStatus === 'error' || conditionStatus === 'error';
+  const dataEmpty = spotStatus === 'empty' || conditionStatus === 'empty';
 
   return (
     <div className="pd-map-page">
@@ -311,47 +337,47 @@ function MapPage() {
             <Sparkles size={14} aria-hidden="true" />
             WATER TWIN · GANGNEUNG FIRST
           </p>
-          <h1>지금 좋은 물을 한눈에.</h1>
-          <p>
-            수온·파고·혼잡도·안전 정보를 활동별 지수로 번역해, 오늘의 선택을 더 가볍게 만들어요.
-          </p>
+          <h1>{t('map.hero.title')}</h1>
+          <p>{t('map.hero.description')}</p>
         </div>
 
-        <div className="pd-map-data-note" role="note">
+        <div className={`pd-map-data-note state-${dataError ? 'error' : dataLoading ? 'loading' : dataEmpty ? 'demo' : 'live'}`} role="status" aria-live="polite">
           <span className="pd-map-demo-badge">
-            <Database size={14} aria-hidden="true" /> DEMO DATA
+            <Database size={14} aria-hidden="true" />
+            {dataError ? 'DEMO FALLBACK' : dataLoading ? 'LOADING' : dataEmpty ? 'DEMO + NO DATA' : 'API + DEMO'}
           </span>
           <div>
-            <strong>{dataMeta.updatedLabel}</strong>
-            <span>실시간 관측값이 아닌 제품 경험용 고정 데이터</span>
+            <strong>{dataError ? t('map.data.error') : dataLoading ? t('map.data.loading') : t('map.data.ready')}</strong>
+            <span>{t('common.unknownStopPolicy')}</span>
           </div>
+          {dataError && <button type="button" onClick={retryData}>{t('common.retry')}</button>}
         </div>
       </header>
 
-      <section className="pd-map-controls" aria-label="지도 필터">
+      <section className="pd-map-controls" aria-label={t('map.filters.label')}>
         <div className="pd-map-search">
           <Search size={18} aria-hidden="true" />
           <label className="sr-only" htmlFor="pd-map-search-input">
-            여행지, 지역, 태그 검색
+            {t('map.search.label')}
           </label>
           <input
             id="pd-map-search-input"
             type="search"
             value={query}
-            placeholder="여행지, 지역, 태그 검색"
+            placeholder={t('map.search.label')}
             autoComplete="off"
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
 
-        <div className="pd-map-scope" aria-label="탐색 범위">
+        <div className="pd-map-scope" aria-label={t('map.scope.label')}>
           <button
             type="button"
             className={scope === 'gangneung' ? 'is-active' : ''}
             aria-pressed={scope === 'gangneung'}
             onClick={() => setScope('gangneung')}
           >
-            강릉 MVP
+            {t('map.scope.gangneung')}
           </button>
           <button
             type="button"
@@ -359,13 +385,13 @@ function MapPage() {
             aria-pressed={scope === 'nationwide'}
             onClick={() => setScope('nationwide')}
           >
-            전국 확장
+            {t('map.scope.nationwide')}
           </button>
         </div>
 
         <label className="pd-map-activity-select" htmlFor="pd-map-activity">
           <SlidersHorizontal size={16} aria-hidden="true" />
-          <span>활동</span>
+          <span>{t('map.activity')}</span>
           <select
             id="pd-map-activity"
             value={activeActivity}
@@ -373,13 +399,13 @@ function MapPage() {
           >
             {activityOptions.map((activity) => (
               <option value={activity.id} key={activity.id}>
-                {activity.icon} {activity.label}
+                {activity.icon} {t(`activity.${activity.id}`)}
               </option>
             ))}
           </select>
         </label>
 
-        <div className="pd-map-type-filters" aria-label="물 여행지 유형">
+        <div className="pd-map-type-filters" aria-label={t('map.types')}>
           {spotTypeOptions.map((type) => (
             <button
               type="button"
@@ -388,20 +414,20 @@ function MapPage() {
               aria-pressed={activeType === type.id}
               onClick={() => setActiveType(type.id)}
             >
-              {type.label}
+              {t(`map.type.${type.id}`)}
             </button>
           ))}
         </div>
       </section>
 
-      <section className="pd-map-explorer" aria-label="Water Twin 지도와 여행지 목록">
+      <section className="pd-map-explorer" aria-label={t('map.explorer')}>
         <div className="pd-map-panel">
           <div className="pd-map-panel-heading">
             <div>
               <span className="pd-map-panel-icon"><Layers3 size={17} aria-hidden="true" /></span>
               <div>
-                <strong>{activeActivityLabel} 지수 레이어</strong>
-                <span>{scope === 'gangneung' ? '강릉 우선 스팟' : '전국 확장 스팟'} {filteredSpots.length}곳</span>
+                <strong>{t('map.layer', { activity: activeActivityLabel })}</strong>
+                <span>{scope === 'gangneung' ? t('map.spots.gangneung') : t('map.spots.nationwide')} · {t('common.countPlaces', { count: filteredSpots.length })}</span>
               </div>
             </div>
             <span className={`pd-map-sdk-state state-${mapStatus}`}>
@@ -417,7 +443,7 @@ function MapPage() {
               <div
                 className="pd-map-kakao-canvas"
                 ref={mapCanvasRef}
-                aria-label="카카오 지도. 여행지 목록에서도 같은 정보를 탐색할 수 있습니다."
+                aria-label={t('map.explorer')}
               />
             ) : (
               <WaterTwinFallback
@@ -435,37 +461,41 @@ function MapPage() {
               </div>
             )}
 
-            <div className="pd-map-legend" aria-label="지도 범례">
-              <span><i className="legend-excellent" /> 90+ 최적</span>
-              <span><i className="legend-good" /> 84+ 추천</span>
-              <span><i className="legend-fair" /> 확인</span>
-              <span><i className="legend-caution" /> 안전 주의</span>
+            <div className="pd-map-legend" aria-label={t('map.legend')}>
+              <span><i className="legend-excellent" /> {t('map.legend.excellent')}</span>
+              <span><i className="legend-good" /> {t('map.legend.good')}</span>
+              <span><i className="legend-fair" /> {t('map.legend.check')}</span>
+              <span><i className="legend-caution" /> {t('map.legend.stop')}</span>
+              <span><i className="legend-unknown" /> {t('map.legend.unknown')}</span>
             </div>
           </div>
         </div>
 
-        <aside className="pd-map-sheet" aria-label="필터링된 여행지">
+        <aside className="pd-map-sheet" aria-label={t('map.results.label')}>
           <div className="pd-map-sheet-handle" aria-hidden="true"><ChevronUp size={18} /></div>
           <div className="pd-map-sheet-header">
             <div>
               <p>CURATED FOR {activeActivityLabel.toUpperCase()}</p>
-              <h2>{filteredSpots.length}개의 물을 찾았어요</h2>
+              <h2>{t('map.results.title', { count: filteredSpots.length })}</h2>
             </div>
-            <span>{scope === 'gangneung' ? '강릉 우선' : '전국 보기'}</span>
+            <span>{scope === 'gangneung' ? t('map.results.gangneung') : t('map.results.nationwide')}</span>
           </div>
 
-          {selectedSpot ? (
+          {selectedSpot && selectedView ? (
             <article className="pd-map-featured" style={{ '--spot-accent': selectedSpot.visual.accent }}>
               <div className="pd-map-featured-top">
                 <div>
                   <span className="pd-map-spot-type">{selectedSpot.typeLabel}</span>
-                  <span className={`pd-map-safety-chip safety-${selectedSpot.safety.level}`}>
-                    {selectedSpot.safety.label}
+                  <span className={`pd-map-safety-chip safety-${selectedView.safety.level}`}>
+                    {localizedSafety(t, selectedView.safety.level).label}
+                  </span>
+                  <span className={`pd-map-data-chip state-${selectedView.dataState}`}>
+                    {localizedDataState(t, selectedView.dataState)}
                   </span>
                 </div>
-                <div className={`pd-map-big-score score-${getScoreTone(getActivityScore(selectedSpot, activeActivity))}`}>
-                  <strong>{getActivityScore(selectedSpot, activeActivity)}</strong>
-                  <span>{selectedSpot.scores[activeActivity] == null ? '종합' : activeActivityLabel}</span>
+                <div className={`pd-map-big-score score-${getScoreTone(selectedView.score)}`}>
+                  <strong>{scoreLabel(selectedView)}</strong>
+                  <span>{selectedView.score === null && selectedView.scoreRange.length === 2 ? t('map.scoreRange') : activeActivityLabel}</span>
                 </div>
               </div>
 
@@ -481,47 +511,55 @@ function MapPage() {
 
               <dl className="pd-map-condition-row">
                 <div>
-                  <dt><Droplets size={14} aria-hidden="true" /> 수온</dt>
-                  <dd>{selectedSpot.conditions.waterTemp}</dd>
+                  <dt><Droplets size={14} aria-hidden="true" /> {t('metric.waterTemp')}</dt>
+                  <dd>{selectedView.conditions.waterTemp}</dd>
                 </div>
                 <div>
-                  <dt><Waves size={14} aria-hidden="true" /> 파고</dt>
-                  <dd>{selectedSpot.conditions.waveHeight}</dd>
+                  <dt><Waves size={14} aria-hidden="true" /> {t('metric.waveHeight')}</dt>
+                  <dd>{selectedView.conditions.waveHeight}</dd>
                 </div>
                 <div>
-                  <dt><Compass size={14} aria-hidden="true" /> 혼잡</dt>
-                  <dd>{selectedSpot.conditions.crowd}</dd>
+                  <dt><Compass size={14} aria-hidden="true" /> {t('metric.crowd')}</dt>
+                  <dd>{selectedView.conditions.crowd}</dd>
                 </div>
               </dl>
 
-              <div className={`pd-map-safety-message safety-${selectedSpot.safety.level}`}>
+              <div className={`pd-map-safety-message safety-${selectedView.safety.level}`}>
                 {(() => {
-                  const SafetyIcon = getStatusIcon(selectedSpot.safety.level);
+                  const SafetyIcon = getStatusIcon(selectedView.safety.level);
                   return <SafetyIcon size={16} aria-hidden="true" />;
                 })()}
-                <span>{selectedSpot.safety.message}</span>
+                <span>{localizedSafety(t, selectedView.safety.level).message}</span>
               </div>
 
+              {selectedView.reasons.length > 0 && (
+                <div className="pd-map-reason-codes" aria-label={t('map.reasons')}>
+                  {selectedView.reasons.slice(0, 3).map((reason) => (
+                    <span title={reason.label} key={reason.code}>{reason.code}</span>
+                  ))}
+                </div>
+              )}
+
               <div className="pd-map-featured-footer">
-                <span><Clock3 size={14} aria-hidden="true" /> {selectedSpot.freshness.updatedLabel}</span>
+                <span><Clock3 size={14} aria-hidden="true" /> {selectedView.provenance.updatedLabel}</span>
                 <Link to={`/spot/${selectedSpot.id}`}>
-                  상세 보기 <ArrowRight size={16} aria-hidden="true" />
+                  {t('common.details')} <ArrowRight size={16} aria-hidden="true" />
                 </Link>
               </div>
             </article>
           ) : (
             <div className="pd-map-no-results" role="status">
               <MapIcon size={30} aria-hidden="true" />
-              <h3>조건에 맞는 물이 아직 없어요.</h3>
-              <p>검색어 또는 장소 유형을 바꾸면 데모 스팟을 다시 볼 수 있습니다.</p>
-              <button type="button" onClick={clearFilters}>필터 초기화</button>
+              <h3>{t('map.empty.title')}</h3>
+              <p>{t('map.empty.description')}</p>
+              <button type="button" onClick={clearFilters}>{t('common.resetFilters')}</button>
             </div>
           )}
 
           {filteredSpots.length > 0 && (
-            <div className="pd-map-result-list" role="list" aria-label="여행지 결과 목록">
+            <div className="pd-map-result-list" role="list" aria-label={t('map.results.label')}>
               {filteredSpots.map((spot, index) => {
-                const score = getActivityScore(spot, activeActivity);
+                const view = getSpotActivityView(spot, activeActivity);
                 const isSelected = selectedSpot?.id === spot.id;
                 return (
                   <article
@@ -538,14 +576,14 @@ function MapPage() {
                       <span className="pd-map-result-rank">{String(index + 1).padStart(2, '0')}</span>
                       <span className="pd-map-result-copy">
                         <strong>{spot.name}</strong>
-                        <small>{spot.region} · {spot.typeLabel}</small>
+                        <small>{spot.region} · {spot.typeLabel} · {localizedDataState(t, view.dataState)}</small>
                       </span>
-                      <span className={`pd-map-result-score score-${getScoreTone(score)}`}>
-                        <strong>{score}</strong>
-                        <small>점</small>
+                      <span className={`pd-map-result-score score-${getScoreTone(view.score)} safety-${view.safety.level}`}>
+                        <strong>{scoreLabel(view)}</strong>
+                        <small>{view.score === null ? localizedSafety(t, view.safety.level).label : t('common.points', { score: '' }).trim()}</small>
                       </span>
                     </button>
-                    <Link to={`/spot/${spot.id}`} aria-label={`${spot.name} 상세 보기`}>
+                    <Link to={`/spot/${spot.id}`} aria-label={`${spot.name} ${t('common.details')}`}>
                       <ArrowRight size={16} aria-hidden="true" />
                     </Link>
                   </article>
@@ -556,7 +594,7 @@ function MapPage() {
 
           <div className="pd-map-sheet-footnote">
             <ShieldCheck size={16} aria-hidden="true" />
-            <span>{dataMeta.disclaimer}</span>
+            <span>{t('map.policy')}</span>
           </div>
         </aside>
       </section>

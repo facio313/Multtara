@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Accessibility,
@@ -28,10 +28,16 @@ import {
   Waves,
   Wind,
 } from 'lucide-react';
-import { activityOptions, dataMeta, livecams, spots, weeklyForecast } from '../data/pongdangData';
+import { activityOptions, livecams, weeklyForecast } from '../data/pongdangData';
+import { useWaterSpot } from '../hooks/useWaterData';
+import { localizedDataState, localizedSafety, useI18n } from '../i18n';
+import {
+  formatMetricName,
+  getSpotActivityView,
+  isRecommendationEligible,
+  scoreLabel,
+} from '../services/waterData';
 import './SpotDetailPage.css';
-
-const activityLabels = Object.fromEntries(activityOptions.map((activity) => [activity.id, activity.label]));
 
 const facilitySets = {
   beach: [
@@ -95,17 +101,41 @@ function writeFavorite(id, value) {
   }
 }
 
+function defaultActivityForSpot(spot) {
+  if (!spot) return 'swim';
+  const preferred = {
+    hotspring: 'onsen',
+    tidal_flat: 'mudflat',
+    valley: 'rafting',
+  }[spot.type] ?? 'swim';
+  if (spot.conditionRecords?.[preferred] || spot.scores?.[preferred] !== null) return preferred;
+  return activityOptions.find((activity) => (
+    spot.conditionRecords?.[activity.id] || spot.scores?.[activity.id] !== null
+  ))?.id ?? preferred;
+}
+
+function formatDateTime(value, locale, fallback) {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
+
 function TypeSpecificPanel({ spot }) {
+  const { t } = useI18n();
   if (spot.type === 'hotspring') {
     return (
       <section className="detail-panel type-panel type-hotspring">
         <div className="detail-section-heading">
-          <div><span>WELLNESS</span><h2>온천 효능과 이용 팁</h2></div>
+          <div><span>FACILITY FIT</span><h2>온천 시설 특성과 이용 팁</h2></div>
           <Sparkles size={21} />
         </div>
         <div className="benefit-grid">
-          <div><span>대표 성분</span><strong>해수 · 나트륨</strong><p>실제 성분표 연결 전 데모 분류</p></div>
-          <div><span>추천 경험</span><strong>피로 회복 · 휴식</strong><p>장시간 입욕보다 충분한 수분 보충</p></div>
+          <div><span>대표 성분</span><strong>해수 · 나트륨</strong><p>실제 시설 성분표 연결 전 데모 분류</p></div>
+          <div><span>WELLNESS</span><strong>REST · WARM WATER</strong><p>{t('spot.type.hotspringDisclaimer')}</p></div>
           <div><span>악천후 대안</span><strong>실내 스테이</strong><p>야외 일정에서 한 번에 전환 가능</p></div>
         </div>
       </section>
@@ -139,7 +169,7 @@ function TypeSpecificPanel({ spot }) {
           <span className="radar-marker" />
         </div>
         <div className="radar-labels"><span>안전</span><strong>주의 · 현장 재확인</strong><span>위험</span></div>
-        <p>계곡은 국지성 강우 직후 급격히 달라집니다. 데모 점수가 아니라 공식 호우특보와 현장 통제가 최우선입니다.</p>
+        <p>{t('spot.type.valleyDisclaimer')}</p>
       </section>
     );
   }
@@ -162,30 +192,60 @@ function TypeSpecificPanel({ spot }) {
 function SpotDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const spot = useMemo(
-    () => spots.find((item) => String(item.id) === id || item.slug === id),
-    [id],
-  );
+  const { intlLocale, t } = useI18n();
+  const {
+    spot,
+    spotStatus,
+    conditionStatus,
+    observationStatus,
+    retryData,
+  } = useWaterSpot(id);
+  const [requestedActivity, setRequestedActivity] = useState(null);
   const [saved, setSaved] = useState(() => readFavorite(id));
   const [planned, setPlanned] = useState(false);
 
   if (!spot) {
+    if (spotStatus === 'idle' || spotStatus === 'loading') {
+      return (
+        <div className="detail-not-found detail-loading" role="status" aria-live="polite">
+          <Droplets size={34} />
+          <h1>{t('spot.loading.title')}</h1>
+          <p>{t('spot.loading.description')}</p>
+        </div>
+      );
+    }
     return (
       <div className="detail-not-found">
         <Droplets size={34} />
-        <h1>이 물 여행지를 찾지 못했어요.</h1>
-        <p>데모 데이터에 포함된 장소인지 확인하거나 워터맵에서 다시 골라보세요.</p>
-        <Link to="/map">워터맵으로 이동 <ArrowRight size={16} /></Link>
+        <h1>{t('spot.notFound.title')}</h1>
+        <p>{t('spot.notFound.description')}</p>
+        <Link to="/map">{t('spot.notFound.cta')} <ArrowRight size={16} /></Link>
       </div>
     );
   }
 
+  const selectedActivity = requestedActivity ?? defaultActivityForSpot(spot);
+  const selectedView = getSpotActivityView(spot, selectedActivity);
+  const selectedSafety = localizedSafety(t, selectedView.safety.level);
   const forecastRegion = resolveForecastRegion(spot.region);
   const forecast = weeklyForecast.filter((day) => day.region === forecastRegion).slice(0, 7);
   const bestForecast = forecast.reduce((best, day) => (day.score > best.score ? day : best));
   const facilities = facilitySets[spot.type] ?? facilitySets.default;
-  const availableScores = Object.entries(spot.scores).filter(([, score]) => score !== null);
+  const availableActivities = activityOptions.filter((activity) => (
+    spot.conditionRecords?.[activity.id] || spot.scores?.[activity.id] !== null
+  ));
   const livecam = livecams.find((cam) => cam.id === spot.livecamId);
+  const detailDataError = spotStatus === 'error'
+    || conditionStatus === 'error'
+    || observationStatus === 'error';
+  const detailDataLoading = !detailDataError && (['idle', 'loading'].includes(spotStatus)
+    || (
+      spot.apiId !== null
+      && (
+        ['idle', 'loading'].includes(conditionStatus)
+        || ['idle', 'loading'].includes(observationStatus)
+      )
+    ));
 
   const toggleSaved = () => {
     const next = !saved;
@@ -195,12 +255,19 @@ function SpotDetailPage() {
 
   const downloadSafetyCard = () => {
     const content = [
-      `퐁당 오프라인 안전 카드 — ${spot.name}`,
-      `주소: ${spot.address}`,
-      `상태: ${spot.safety.label}`,
-      spot.safety.message,
-      `데이터: ${spot.freshness.updatedLabel}`,
-      '이 카드는 데모입니다. 실제 방문 전 공식 특보와 현장 안내를 확인하세요.',
+      `${t('spot.card.title')} — ${spot.name}`,
+      `${t('spot.card.address')}: ${spot.address}`,
+      `${t('spot.card.activity')}: ${t(`activity.${selectedActivity}`)}`,
+      `${t('spot.card.safety')}: ${selectedSafety.label}`,
+      `${t('spot.card.score')}: ${selectedView.score === null ? t('common.scoreMissing') : selectedView.score}`,
+      `${t('spot.card.data')}: ${localizedDataState(t, selectedView.dataState)}`,
+      selectedSafety.message,
+      ...selectedView.reasons.map((reason) => `${t('spot.card.reason')}: ${reason.code} — ${reason.label}`),
+      `${t('spot.evidence.provider')}: ${selectedView.provenance.provider}`,
+      `${t('spot.evidence.scope')}: ${selectedView.provenance.spatialScope}`,
+      `${t('spot.card.updated')}: ${selectedView.provenance.updatedLabel}`,
+      t('common.scoreNotSafety'),
+      t('common.officialFirst'),
     ].join('\n');
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -214,13 +281,15 @@ function SpotDetailPage() {
   return (
     <div className="spot-detail-page">
       <header className="detail-visual" style={{ '--detail-accent': spot.visual.accent }}>
-        <img src={spot.imageUrl} alt={`${spot.name}의 물 풍경 데모 이미지`} />
+        {spot.imageUrl
+          ? <img src={spot.imageUrl} alt={`${spot.name}의 물 풍경`} />
+          : <div className="detail-image-placeholder" aria-hidden="true">{spot.visual.icon}</div>}
         <div className="detail-visual-shade" />
         <div className="detail-top-actions">
-          <button type="button" onClick={() => navigate(-1)} aria-label="뒤로 가기"><ArrowLeft size={20} /></button>
+          <button type="button" onClick={() => navigate(-1)} aria-label={t('spot.back')}><ArrowLeft size={20} /></button>
           <button type="button" className={saved ? 'saved' : ''} onClick={toggleSaved} aria-pressed={saved}>
             <Heart size={19} fill={saved ? 'currentColor' : 'none'} />
-            {saved ? '저장됨' : '저장'}
+            {saved ? t('common.saved') : t('common.save')}
           </button>
         </div>
 
@@ -228,7 +297,9 @@ function SpotDetailPage() {
           <div className="detail-badges">
             <span>{spot.typeLabel}</span>
             {spot.isGangneungMvp && <span>강릉 MVP</span>}
-            <span className="demo">데모 데이터</span>
+            <span className={`demo state-${selectedView.dataState}`}>
+              {localizedDataState(t, selectedView.dataState)}
+            </span>
           </div>
           <h1>{spot.name}</h1>
           <p><MapPin size={16} /> {spot.address}</p>
@@ -238,60 +309,149 @@ function SpotDetailPage() {
 
       <div className="detail-layout">
         <div className="detail-main">
-          <section className={`safety-banner safety-${spot.safety.level}`} aria-live={spot.safety.level === 'safe' ? 'polite' : 'assertive'}>
-            <div className="safety-icon">
-              {spot.safety.level === 'safe' ? <ShieldCheck size={23} /> : <ShieldAlert size={23} />}
+          {detailDataLoading && (
+            <div className="detail-data-status state-loading" role="status" aria-live="polite">
+              <Droplets size={19} aria-hidden="true" />
+              <div><strong>{t('spot.data.loading.title')}</strong><span>{t('spot.data.loading.description')}</span></div>
             </div>
-            <div><span>SAFETY FIRST</span><strong>{spot.safety.label}</strong><p>{spot.safety.message}</p></div>
-            <button type="button" onClick={downloadSafetyCard}><Download size={16} /> 오프라인 카드</button>
+          )}
+          {spot.apiId !== null && conditionStatus === 'empty' && observationStatus === 'empty' && (
+            <div className="detail-data-status state-empty" role="status" aria-live="polite">
+              <ShieldAlert size={19} aria-hidden="true" />
+              <div><strong>{t('spot.data.empty.title')}</strong><span>{t('spot.data.empty.description')}</span></div>
+            </div>
+          )}
+          {detailDataError && (
+            <div className="detail-data-status state-error" role="alert">
+              <ShieldAlert size={19} />
+              <div><strong>{t('spot.data.error.title')}</strong><span>{t('spot.data.error.description')}</span></div>
+              <button type="button" onClick={retryData}>{t('common.retry')}</button>
+            </div>
+          )}
+          <section className={`safety-banner safety-${selectedView.safety.level}`} aria-live={selectedView.safety.level === 'clear' ? 'polite' : 'assertive'}>
+            <div className="safety-icon">
+              {selectedView.safety.level === 'clear' ? <ShieldCheck size={23} /> : <ShieldAlert size={23} />}
+            </div>
+            <div><span>SAFETY FIRST · {t(`activity.${selectedActivity}`)}</span><strong>{selectedSafety.label}</strong><p>{selectedSafety.message}</p></div>
+            <button type="button" onClick={downloadSafetyCard}><Download size={16} /> {t('spot.safety.offlineCard')}</button>
           </section>
 
           <section className="detail-panel score-panel">
             <div className="detail-section-heading">
-              <div><span>ACTIVITY INDEX</span><h2>오늘, 이렇게 즐기기 좋아요.</h2></div>
-              <span className="freshness-pill">{spot.freshness.updatedLabel}</span>
+              <div><span>ACTIVITY INDEX</span><h2>{t('spot.index.title')}</h2></div>
+              <span className={`freshness-pill state-${selectedView.dataState}`}>{selectedView.provenance.updatedLabel}</span>
             </div>
-            <div className="activity-score-grid">
-              {availableScores.map(([activity, score], index) => (
-                <div className={index === 0 ? 'primary-score' : ''} key={activity}>
-                  <span>{activityLabels[activity]}</span>
-                  <strong>{score}</strong>
-                  <small>{score >= 90 ? '매우 좋음' : score >= 80 ? '좋음' : '조건 확인'}</small>
-                </div>
-              ))}
+            <div className="activity-score-grid" role="tablist" aria-label="활동별 Water Index">
+              {availableActivities.map((activity) => {
+                const view = getSpotActivityView(spot, activity.id);
+                const isSelected = activity.id === selectedActivity;
+                return (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={isSelected}
+                    className={isSelected ? 'primary-score' : ''}
+                    onClick={() => setRequestedActivity(activity.id)}
+                    key={activity.id}
+                  >
+                    <span>{t(`activity.${activity.id}`)}</span>
+                    <strong>{scoreLabel(view)}</strong>
+                    <small>{view.score === null ? localizedSafety(t, view.safety.level).label : localizedDataState(t, view.dataState)}</small>
+                  </button>
+                );
+              })}
+              {availableActivities.length === 0 && (
+                <div className="score-empty"><strong>—</strong><span>{t('spot.index.empty')}</span></div>
+              )}
+            </div>
+            <div className="score-confidence-row">
+              <span>{t('spot.index.confidence')} <strong>{selectedView.confidence === null ? '—' : `${Math.round(selectedView.confidence * 100)}%`}</strong></span>
+              <span>coverage <strong>{selectedView.coverage === null ? '—' : `${Math.round(selectedView.coverage * 100)}%`}</strong></span>
+              {selectedView.score === null && selectedView.scoreRange.length === 2 && <span>{t('spot.index.range')} <strong>{selectedView.scoreRange.join('–')}</strong></span>}
+              <span>{t('spot.index.method')} <strong>{selectedView.methodologyVersion}</strong></span>
             </div>
             <div className="score-reasons">
-              <span>점수 근거</span>
-              {spot.reasons.map((reason) => <p key={reason}><Check size={14} /> {reason}</p>)}
+              <span>{t('spot.index.reasons')}</span>
+              {selectedView.reasons.map((reason) => <p key={reason.code}><Check size={14} /><code>{reason.code}</code> {reason.label}</p>)}
+              {selectedView.reasons.length === 0 && selectedView.isDemoFallback
+                ? spot.reasons.map((reason) => <p key={reason}><Check size={14} /> {reason} <em>DEMO</em></p>)
+                : null}
+              {selectedView.reasons.length === 0 && !selectedView.isDemoFallback && <p><ShieldAlert size={14} /> {t('spot.index.noReason')}</p>}
             </div>
           </section>
 
           <section className="detail-panel condition-panel">
             <div className="detail-section-heading">
-              <div><span>CONDITION</span><h2>지금 물의 표정</h2></div>
+              <div><span>CONDITION</span><h2>{t('spot.conditions.title')}</h2></div>
               <CloudSun size={21} />
             </div>
             <div className="metric-grid">
-              <div><ThermometerSun size={21} /><span>수온</span><strong>{spot.conditions.waterTemp}</strong></div>
-              <div><CloudSun size={21} /><span>기온</span><strong>{spot.conditions.airTemp}</strong></div>
-              <div><Waves size={21} /><span>파고</span><strong>{spot.conditions.waveHeight}</strong></div>
-              <div><Wind size={21} /><span>바람</span><strong>{spot.conditions.windSpeed}</strong></div>
-              <div><Droplets size={21} /><span>수질</span><strong>{spot.conditions.waterQuality}</strong></div>
-              <div><Accessibility size={21} /><span>혼잡</span><strong>{spot.conditions.crowd}</strong></div>
+              <div><ThermometerSun size={21} /><span>{t('metric.waterTemp')}</span><strong>{selectedView.conditions.waterTemp}</strong></div>
+              <div><CloudSun size={21} /><span>{t('metric.airTemp')}</span><strong>{selectedView.conditions.airTemp}</strong></div>
+              <div><Waves size={21} /><span>{t('metric.waveHeight')}</span><strong>{selectedView.conditions.waveHeight}</strong></div>
+              <div><Wind size={21} /><span>{t('metric.wind')}</span><strong>{selectedView.conditions.windSpeed}</strong></div>
+              <div><Droplets size={21} /><span>{t('metric.waterQuality')}</span><strong>{selectedView.conditions.waterQuality}</strong></div>
+              <div><Accessibility size={21} /><span>{t('metric.crowd')}</span><strong>{selectedView.conditions.crowd}</strong></div>
             </div>
             {spot.type === 'sea' || spot.type === 'tidal_flat' ? (
               <div className="tide-timeline">
-                <div><span>간조</span><strong>{spot.conditions.tide.low}</strong></div>
+                <div><span>{t('spot.conditions.lowTide')}</span><strong>{selectedView.conditions.tide.low}</strong></div>
                 <div className="tide-line"><span className="tide-progress" /></div>
-                <div><span>만조</span><strong>{spot.conditions.tide.high}</strong></div>
+                <div><span>{t('spot.conditions.highTide')}</span><strong>{selectedView.conditions.tide.high}</strong></div>
               </div>
             ) : null}
           </section>
 
+          <section className="detail-panel evidence-panel" aria-labelledby="evidence-title">
+            <div className="detail-section-heading">
+              <div><span>PROVENANCE & LIMITS</span><h2 id="evidence-title">{t('spot.evidence.title')}</h2></div>
+              <span className={`freshness-pill state-${selectedView.dataState}`}>{localizedDataState(t, selectedView.dataState, true)}</span>
+            </div>
+            <dl className="provenance-grid">
+              <div><dt>{t('spot.evidence.provider')}</dt><dd>{selectedView.provenance.provider}</dd></div>
+              <div><dt>{t('spot.evidence.scope')}</dt><dd>{selectedView.provenance.spatialScope}</dd></div>
+              <div><dt>{t('spot.evidence.observed')}</dt><dd>{formatDateTime(selectedView.provenance.observedAt, intlLocale, t('common.noData'))}</dd></div>
+              <div><dt>{t('spot.evidence.fetched')}</dt><dd>{formatDateTime(selectedView.provenance.fetchedAt, intlLocale, t('common.noData'))}</dd></div>
+              <div><dt>{t('spot.evidence.validUntil')}</dt><dd>{formatDateTime(selectedView.provenance.validUntil, intlLocale, t('common.noData'))}</dd></div>
+              <div><dt>{t('spot.evidence.version')}</dt><dd>{selectedView.methodologyVersion}</dd></div>
+            </dl>
+            <div className="evidence-lists">
+              <div>
+                <span>{t('spot.evidence.missing')}</span>
+                {selectedView.missingMetrics.length > 0
+                  ? selectedView.missingMetrics.map((metric) => <strong key={metric}>{formatMetricName(metric)}</strong>)
+                  : <small>{t('spot.evidence.noMissing')}</small>}
+              </div>
+              <div>
+                <span>{t('spot.evidence.stale')}</span>
+                {selectedView.staleMetrics.length > 0
+                  ? selectedView.staleMetrics.map((metric) => <strong key={metric}>{formatMetricName(metric)}</strong>)
+                  : <small>{t('spot.evidence.noStale')}</small>}
+              </div>
+              <div>
+                <span>{t('spot.evidence.limits')}</span>
+                {selectedView.limitations.length > 0
+                  ? selectedView.limitations.map((limitation) => <strong key={limitation}>{limitation}</strong>)
+                  : <small>{t('spot.evidence.noLimits')}</small>}
+              </div>
+            </div>
+            {selectedView.contributions.length > 0 && (
+              <div className="contribution-list">
+                <span>{t('spot.evidence.contributions')}</span>
+                {selectedView.contributions.slice(0, 6).map((contribution, index) => (
+                  <div key={`${contribution.metric_name ?? 'metric'}-${index}`}>
+                    <strong>{formatMetricName(contribution.metric_name ?? 'metric')}</strong>
+                    <span>{contribution.weighted_points == null ? t('spot.evidence.reflected') : `${Number(contribution.weighted_points).toFixed(1)} pt`}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="detail-panel forecast-panel">
             <div className="detail-section-heading">
-              <div><span>WATER FORECAST</span><h2>이번 주, 더 좋은 날</h2></div>
-              <Link to="/forecast">전체 예보 <ChevronRight size={16} /></Link>
+              <div><span>WATER FORECAST</span><h2>{t('spot.forecast.title')}</h2></div>
+              <Link to="/forecast">{t('spot.forecast.all')} <ChevronRight size={16} /></Link>
             </div>
             <div className="detail-forecast-strip">
               {forecast.map((day) => (
@@ -303,7 +463,7 @@ function SpotDetailPage() {
                 </div>
               ))}
             </div>
-            <div className="best-day-note"><Sparkles size={18} /><p><strong>{forecastRegion}은 {bestForecast.day}요일이 가장 좋아요.</strong> {bestForecast.best} 시간대의 고정 데모 예보이며, 방문 전 공식 예보를 확인하세요.</p></div>
+            <div className="best-day-note"><Sparkles size={18} /><p>{t('spot.forecast.bestNote', { region: forecastRegion, day: bestForecast.day, time: bestForecast.best })}</p></div>
           </section>
 
           <section className="detail-panel route-panel">
@@ -322,8 +482,8 @@ function SpotDetailPage() {
 
           {livecam ? (
             <section className="detail-panel detail-livecam">
-              <div className="livecam-poster"><img src={livecam.poster} alt={`${livecam.name} 데모 미리보기`} /><span><Radio size={15} /> 데모 미리보기</span></div>
-              <div><span>SEE IT YOURSELF</span><h2>{livecam.name}</h2><p>현재 이미지는 실시간 영상이 아닙니다. 공식 스트림이 연결되면 방문 전 파도와 인파를 직접 확인할 수 있어요.</p><Link to="/livecam">라이브캠 허브 <ArrowRight size={16} /></Link></div>
+              <div className="livecam-poster"><img src={livecam.poster} alt={`${livecam.name} DEMO`} /><span><Radio size={15} /> {t('spot.livecam.demoPreview')}</span></div>
+              <div><span>SEE IT YOURSELF</span><h2>{livecam.name}</h2><p>{t('spot.livecam.notLive')}</p><Link to="/livecam">{t('spot.livecam.cta')} <ArrowRight size={16} /></Link></div>
             </section>
           ) : null}
 
@@ -344,22 +504,29 @@ function SpotDetailPage() {
         </div>
 
         <aside className="detail-sidebar">
-          <div className="sidebar-index-card">
-            <span>WATER INDEX</span>
-            <div className="sidebar-score" style={{ '--score': spot.index }}><strong>{spot.index}</strong></div>
+          <div className={`sidebar-index-card state-${selectedView.dataState}`}>
+            <span>SUITABILITY · {t(`activity.${selectedActivity}`)}</span>
+            <div className={`sidebar-score score-${selectedView.score === null ? 'unknown' : 'known'}`} style={{ '--score': selectedView.score ?? 0 }}><strong>{scoreLabel(selectedView)}</strong></div>
             <h2>{spot.summary}</h2>
             <p>{spot.description}</p>
-            <div><Clock3 size={16} /><span>BEST TIME</span><strong>{spot.bestTime}</strong></div>
+            <div><Clock3 size={16} /><span>{isRecommendationEligible(selectedView) ? 'RECOMMENDABLE' : 'DECISION'}</span><strong>{selectedView.isDemoFallback ? t('home.hero.demo') : t(`concierge.decision.${selectedView.decision}`)}</strong></div>
           </div>
-          <div className="source-card">
-            <span>DATA STATUS</span><h3>현재는 고정 데모예요.</h3><p>{dataMeta.disclaimer}</p>
-            <ul>{dataMeta.plannedSources.slice(0, 4).map((source) => <li key={source}>{source}</li>)}</ul>
+          <div className={`source-card state-${selectedView.dataState}`}>
+            <span>DATA STATUS · {localizedDataState(t, selectedView.dataState, true)}</span>
+            <h3>{localizedDataState(t, selectedView.dataState)}</h3>
+            <p>{t('spot.sidebar.policy')}</p>
+            <ul>
+              <li>{selectedView.provenance.provider}</li>
+              <li>{selectedView.provenance.spatialScope}</li>
+              <li>{selectedView.provenance.updatedLabel}</li>
+              <li>정규화 관측 스냅샷 {spot.observations?.length ?? 0}건 연결</li>
+            </ul>
           </div>
         </aside>
       </div>
 
       <div className="detail-sticky-actions">
-        <div><span>{spot.name}</span><strong>{planned ? '일정에 담았어요' : spot.bestTime}</strong></div>
+        <div><span>{spot.name} · {localizedDataState(t, selectedView.dataState)}</span><strong>{planned ? t('spot.plan.added') : selectedView.isDemoFallback ? `${spot.bestTime} · DEMO` : selectedSafety.label}</strong></div>
         <a
           className="directions"
           href={`https://map.kakao.com/?q=${encodeURIComponent(`${spot.name} ${spot.address}`)}`}
@@ -370,7 +537,7 @@ function SpotDetailPage() {
         </a>
         <button type="button" className={planned ? 'planned' : ''} onClick={() => setPlanned(true)}>
           {planned ? <Check size={17} /> : <CalendarDays size={17} />}
-          {planned ? '추가됨' : '일정에 추가'}
+          {planned ? t('spot.plan.added') : t('spot.plan.add')}
         </button>
       </div>
     </div>

@@ -1,11 +1,12 @@
 import axios from 'axios';
 
-const rawBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim() || '/api/v1/';
+const runtimeEnv = import.meta.env ?? {};
+const rawBaseUrl = runtimeEnv.VITE_API_BASE_URL?.trim() || '/api/v1/';
 const apiBaseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : `${rawBaseUrl}/`;
 
 export const runtimeConfig = Object.freeze({
   apiBaseUrl,
-  kakaoMapConfigured: Boolean(import.meta.env.VITE_KAKAO_MAP_KEY?.trim()),
+  kakaoMapConfigured: Boolean(runtimeEnv.VITE_KAKAO_MAP_KEY?.trim()),
 });
 
 const api = axios.create({

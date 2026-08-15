@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
 
@@ -36,3 +36,45 @@ class ProviderConfigTests(SimpleTestCase):
         self.assertTrue(
             all(isinstance(value, bool) for value in payload["configured"].values())
         )
+
+    def test_health_endpoints_are_get_only(self):
+        self.assertEqual(self.client.post("/api/health/").status_code, 405)
+        self.assertEqual(
+            self.client.post("/api/health/integrations/").status_code,
+            405,
+        )
+
+
+class ReadinessHealthTests(SimpleTestCase):
+    @patch("config.urls.connection")
+    def test_readiness_checks_database_without_exposing_details(self, connection):
+        context = MagicMock()
+        connection.cursor.return_value.__enter__.return_value = context
+
+        response = self.client.get("/api/health/ready/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"status": "ready", "service": "pongdang-api"},
+        )
+        context.execute.assert_called_once_with("SELECT 1")
+        context.fetchone.assert_called_once_with()
+
+    @patch("config.urls.connection")
+    def test_readiness_fails_closed_without_database_error_details(self, connection):
+        from django.db import DatabaseError
+
+        connection.cursor.side_effect = DatabaseError("private database host")
+
+        response = self.client.get("/api/health/ready/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {"status": "unavailable", "service": "pongdang-api"},
+        )
+        self.assertNotIn("private", response.content.decode())
+
+    def test_readiness_is_get_only(self):
+        self.assertEqual(self.client.post("/api/health/ready/").status_code, 405)
