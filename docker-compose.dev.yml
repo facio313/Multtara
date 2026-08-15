@@ -12,10 +12,15 @@ services:
     volumes:
       - ./backend:/app
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-pongdang}:${POSTGRES_PASSWORD:-pongdang_secret}@db:5432/${POSTGRES_DB:-pongdang}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-pongdang}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-pongdang}
       - DJANGO_SETTINGS_MODULE=config.settings.dev
-      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-not-for-production}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
       - DEBUG=True
+      - DATA_GO_KR_SERVICE_KEY=${DATA_GO_KR_SERVICE_KEY:-}
+      - TOUR_API_KEY=${TOUR_API_KEY:-}
+      - KMA_API_KEY=${KMA_API_KEY:-}
+      - KHOA_API_KEY=${KHOA_API_KEY:-}
+      - MOE_API_KEY=${MOE_API_KEY:-}
     ports:
       - "8000:8000"
 
@@ -28,6 +33,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_BASE_URL=http://localhost:8000
+      - VITE_API_BASE_URL=http://localhost:8000/api/v1/
+      - VITE_KAKAO_MAP_KEY=${VITE_KAKAO_MAP_KEY:-}
     ports:
       - "5173:5173"

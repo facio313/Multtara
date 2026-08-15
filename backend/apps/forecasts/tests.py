@@ -53,4 +53,7 @@ class ForecastViewSetTests(TestCase):
         viewset = WaterForecastViewSet()
         queryset = viewset.get_queryset()
         self.assertEqual(queryset.count(), 1)
-        self.assertIn('select_related', str(queryset.query))
+
+        with self.assertNumQueries(1):
+            forecast = queryset.get()
+            self.assertEqual(forecast.spot.name, 'Test Valley API')

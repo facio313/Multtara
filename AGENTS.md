@@ -116,5 +116,15 @@ anthropic/feat-name ─┘
 ## Critical Constraints
 
 - **`.env` 커밋 금지**. API 키·DB 비밀번호·`SECRET_KEY` 하드코딩 금지.
+- 운영 설정은 50자 이상의 무작위 `SECRET_KEY`, 명시적 `ALLOWED_HOSTS`, DB 비밀번호가 없으면 기동하지 않는다. `ALLOWED_HOSTS=*` 금지.
 - 사용자 응답 **한국어**. 코드·식별자·커밋은 **영문**.
 - 요청 범위만 구현. 모호하면 구현 전 질문.
+
+## Runtime Integration Contract
+
+- `DATA_GO_KR_SERVICE_KEY`, `TOUR_API_KEY`, `KMA_API_KEY`, `KHOA_API_KEY`, `MOE_API_KEY`, DB credentials, and Django `SECRET_KEY` are **server-only**. They must be read by Django and must never appear in frontend source, browser bundles, logs, or API payloads.
+- `VITE_KAKAO_MAP_KEY` is the Kakao Maps **public JavaScript key**. Restrict its allowed domains in Kakao Developers. Do not reuse it as a server REST key.
+- `VITE_API_BASE_URL` defaults to `/api/v1/`; same-origin production traffic is proxied by Nginx. A separate absolute origin is allowed only for split deployments.
+- `frontend/npm run build` remains the Docker/Nginx build. `frontend/npm run build:sites` is the separate Cloudflare Worker-compatible private preview build; keep `.openai/hosting.json` limited to the Sites `project_id` and optional logical bindings, never secrets.
+- The first curated experience is Gangneung-focused, while route and data shapes remain nationwide-ready.
+- When a provider or credential is unavailable, keep static tourism content usable and label fallback values as demo/missing data. Never present fixtures as live observations or infer `safe` from absent safety data.

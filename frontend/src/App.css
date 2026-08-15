@@ -1,32 +1,65 @@
-/* App Shell Layout */
 .app-shell {
-  display: flex;
-  flex-direction: column;
   min-height: 100vh;
 }
 
 .app-main {
-  flex: 1;
+  min-width: 0;
+  min-height: calc(100vh - 72px);
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 9999;
+  top: 10px;
+  left: 10px;
+  padding: 11px 15px;
+  border-radius: 10px;
+  color: #ffffff;
+  background: #073a3d;
+  transform: translateY(-160%);
+  transition: transform 140ms ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.glass-panel {
+  border: 1px solid rgba(26, 68, 68, 0.09);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 16px 50px rgba(20, 55, 55, 0.08);
+  backdrop-filter: blur(16px);
+}
+
+.inline-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  vertical-align: -0.18em;
+}
+
+.text-gradient {
+  color: var(--color-brand);
+}
+
+.flex-center {
   display: flex;
-  flex-direction: column;
-  width: 100%;
+  align-items: center;
+  justify-content: center;
 }
 
-/* ==========================================================================
-   Desktop & Tablet Layout
-   ========================================================================== */
-@media (min-width: 769px) {
-  .app-main {
-    /* Main content doesn't need to account for a bottom nav on desktop */
-  }
+.page-state {
+  display: grid;
+  min-height: 60vh;
+  place-items: center;
+  padding: 32px;
+  color: var(--color-text-muted);
+  text-align: center;
 }
 
-/* ==========================================================================
-   Mobile Layout
-   ========================================================================== */
-@media (max-width: 768px) {
+@media (max-width: 720px) {
   .app-main {
-    /* Allow main content to scroll, but the padding is handled in individual pages or globally here */
-    /* Handled via page-level padding-bottom or a global padding if needed. */
+    min-height: 100vh;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
   }
 }

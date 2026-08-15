@@ -1,132 +1,123 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap');
 
 :root {
-  /* ==========================================================================
-     PongDang Design System Tokens
-     ========================================================================== */
-  
-  /* Brand Colors - Ocean & Nature Theme */
-  --color-ocean-deep: #0a1628;
-  --color-ocean: #1a3a5c;
-  --color-wave: #4a9eff;
-  --color-aqua: #00d4aa;
-  --color-aqua-light: #5eecd5;
-  --color-foam: #f0f8ff;
-  
-  /* Semantic Colors */
-  --color-sand: #faf3e8;
-  --color-coral: #ff6b6b;
-  --color-sunset: #ff9a56;
-  --color-nature: #2dd4a8;
-  
-  /* UI Colors */
-  --color-bg: #f8fbff;
+  font-family: 'Inter', 'Noto Sans KR', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #102f31;
+  background: #f7f8f4;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --color-bg: #f7f8f4;
   --color-surface: #ffffff;
-  --color-border: #e2eaf2;
-  --color-text: #1a2332;
-  --color-text-secondary: #5a6b7d;
-  
-  /* Gradients */
-  --gradient-water: linear-gradient(135deg, var(--color-wave) 0%, var(--color-aqua) 100%);
-  --gradient-sunset: linear-gradient(135deg, var(--color-sunset) 0%, var(--color-coral) 100%);
-  
-  /* Typography */
-  --font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --color-soft: #eef2ec;
+  --color-line: #e1e7e0;
+  --color-text: #102f31;
+  --color-text-muted: #687d7b;
+  --color-text-faint: #94a4a2;
+  --color-brand: #0b987a;
+  --color-brand-soft: #dff5ed;
+  --color-coral: #e96c55;
+  --color-wave: #526ee5;
+  --shadow-card: 0 22px 60px rgba(20, 55, 55, 0.11);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #0a0e14;
-    --color-surface: #131a26;
-    --color-border: #2a384c;
-    --color-text: #f0f4f8;
-    --color-text-secondary: #9aaec7;
-    --color-foam: #1a2332;
-  }
-}
-
-/* ==========================================================================
-   Reset & Base Styles
-   ========================================================================== */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
-  padding: 0;
-  font-family: var(--font-family-base);
-  background-color: var(--color-bg);
-  color: var(--color-text);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* Base Layout */
-#root {
-  min-height: 100vh;
-  background-color: var(--color-bg);
-  position: relative;
-}
-
-@media (prefers-color-scheme: dark) {
-  #root {
-    box-shadow: none;
-  }
-}
-
-h1, h2, h3, h4, h5, h6 {
-  margin-top: 0;
-  margin-bottom: 0.5rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+html {
+  min-width: 320px;
+  scroll-behavior: smooth;
+  background: var(--color-bg);
 }
 
 body {
-  margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
+  margin: 0;
+  color: var(--color-text);
+  background:
+    radial-gradient(circle at 14% 8%, rgba(76, 218, 177, 0.08), transparent 22rem),
+    var(--color-bg);
 }
 
-h1 {
-  font-size: clamp(2rem, 1rem + 3vw, 3.2rem);
-  line-height: 1.1;
-  letter-spacing: -0.02em;
+body,
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
-h2 {
-  font-size: clamp(1.25rem, 0.8rem + 1.5vw, 2rem);
-  line-height: 1.2;
+button,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  touch-action: manipulation;
 }
 
 a {
-  color: var(--color-wave);
+  color: inherit;
   text-decoration: none;
 }
 
-/* ==========================================================================
-   Utilities (Glassmorphism, Layout)
-   ========================================================================== */
-.glass-panel {
-  background: color-mix(in oklab, var(--color-surface) 70%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid color-mix(in oklab, var(--color-border) 40%, transparent);
-  box-shadow: 0 8px 32px rgba(10, 22, 40, 0.08);
-  border-radius: 20px;
+button {
+  color: inherit;
 }
 
-.text-gradient {
-  background: var(--gradient-water);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+img {
+  display: block;
+  max-width: 100%;
 }
 
-.flex-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+h1,
+h2,
+h3,
+p {
+  text-wrap: pretty;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+:focus-visible {
+  outline: 3px solid rgba(11, 152, 122, 0.44);
+  outline-offset: 3px;
+}
+
+::selection {
+  color: #f5fffb;
+  background: #0a6c5a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

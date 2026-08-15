@@ -58,7 +58,8 @@ class ConditionViewSetTests(TestCase):
         viewset = ConditionScoreViewSet()
         queryset = viewset.get_queryset()
         self.assertEqual(queryset.count(), 1)
-        self.assertEqual(queryset.first().activity, 'swimming')
-        
-        # Test that spot is fetched (using _prefetched_objects_cache or similar is hard, but we know select_related is in the query)
-        self.assertIn('select_related', str(queryset.query))
+
+        with self.assertNumQueries(1):
+            score = queryset.get()
+            self.assertEqual(score.activity, 'swimming')
+            self.assertEqual(score.spot.name, 'Test River API')

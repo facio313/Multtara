@@ -1,21 +1,26 @@
 import { create } from 'zustand';
-import api from '../services/api';
+import { spots as demoSpots } from '../data/pongdangData';
+import { getCollectionWithFallback } from '../services/api';
 
 const useSpotStore = create((set) => ({
   spots: [],
   selectedSpot: null,
+  source: 'demo',
   loading: false,
   error: null,
 
   fetchSpots: async (params = {}) => {
     set({ loading: true, error: null });
     try {
-      // Mock for now until API is ready
-      // const response = await api.get('/spots/', { params });
-      // set({ spots: response.data.results, loading: false });
-      set({ spots: [], loading: false }); 
+      const result = await getCollectionWithFallback('spots/', demoSpots, { params });
+      set({
+        spots: result.data,
+        source: result.source,
+        error: result.error,
+        loading: false,
+      });
     } catch (error) {
-      set({ error: error.message, loading: false });
+      set({ spots: demoSpots, source: 'demo', error: { kind: 'client', message: error.message }, loading: false });
     }
   },
 
