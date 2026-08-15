@@ -79,3 +79,21 @@ class RecommendApiTests(TestCase):
         self.assertEqual(response.data["results"][0]["name"], "송정 해수욕장")
         self.assertIn("서핑", response.data["reason"])
         self.assertIn("부산", response.data["reason"])
+
+    def test_concierge_parses_keywords(self):
+        response = self.client.get("/api/v1/spots/concierge/", {"q": "부산 서핑"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["parsed"]["persona_type"], "surf")
+        self.assertEqual(response.data["parsed"]["home_region"], "부산")
+        self.assertEqual(response.data["activity"], "surf")
+        self.assertEqual(response.data["results"][0]["name"], "송정 해수욕장")
+        self.assertIn("서핑", response.data["reason"])
+
+    def test_concierge_pet_filter(self):
+        self.busan.pet_allowed = True
+        self.busan.save(update_fields=["pet_allowed"])
+        response = self.client.get("/api/v1/spots/concierge/", {"q": "반려"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["parsed"]["pet"])
+        names = [row["name"] for row in response.data["results"]]
+        self.assertEqual(names, ["송정 해수욕장"])

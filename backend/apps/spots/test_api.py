@@ -79,6 +79,50 @@ class SpotApiTests(TestCase):
         self.assertFalse(response.data["livecam"]["is_live"])
         self.assertTrue(response.data["twin_facts"])
 
+    def test_detail_includes_extras_without_seed(self):
+        response = self.client.get(f"/api/v1/spots/{self.spot.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["facilities"])
+        self.assertEqual(response.data["facilities"][0]["type"], "shower")
+        self.assertIsNone(response.data["catch"])
+        self.assertIsNone(response.data["hotspring"])
+        self.assertIn("asmr_score", response.data["asmr"])
+        self.assertIn("predicted_level", response.data["crowd"])
+        self.assertIn("best_season", response.data["analytics"])
+        self.assertEqual(response.data["quality_trust"]["official_grade"], "1")
+        self.assertIsInstance(response.data["golden"], list)
+
+    def test_tidal_and_hotspring_extras(self):
+        mud = WaterSpot.objects.create(
+            type="tidal_flat",
+            name="선재도 갯벌",
+            lat=37.25,
+            lng=126.53,
+            region="인천",
+            address="인천",
+        )
+        onsen = WaterSpot.objects.create(
+            type="hotspring",
+            name="수안보 온천",
+            lat=36.84,
+            lng=127.99,
+            region="충북",
+            address="충북",
+        )
+        mud_res = self.client.get(f"/api/v1/spots/{mud.id}/")
+        self.assertEqual(mud_res.status_code, 200)
+        self.assertIsNotNone(mud_res.data["catch"])
+        self.assertIn("바지락", mud_res.data["catch"]["species"])
+        onsen_res = self.client.get(f"/api/v1/spots/{onsen.id}/")
+        self.assertEqual(onsen_res.status_code, 200)
+        self.assertEqual(onsen_res.data["hotspring"]["minerals"], "나트륨, 탄산, 황")
+
+    def test_quality_trust_action(self):
+        response = self.client.get(f"/api/v1/spots/{self.spot.id}/quality-trust/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["official_grade"], "1")
+        self.assertIn("review_signal", response.data)
+
     def test_safety_radar_lists_sea_and_valley(self):
         WaterSpot.objects.create(
             type="valley",

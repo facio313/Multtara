@@ -22,12 +22,26 @@ LOCKED = "잠시 후 다시 시도해 주세요."
 _DUMMY_HASH = make_password("not-a-real-password")
 
 
+PERSONA_CHOICES = (
+    "swim",
+    "surf",
+    "relax",
+    "onsen",
+    "mudflat",
+    "rafting",
+    "family",
+    "healing",
+)
+MOOD_CHOICES = ("healing", "release", "energetic", "calm")
+
+
 def _public_user(user: User) -> dict:
     return {
         "id": user.id,
         "username": user.username,
         "home_region": user.home_region,
         "persona_type": user.persona_type,
+        "mood_state": user.mood_state,
         "date_joined": user.date_joined,
     }
 
@@ -82,6 +96,24 @@ class LoginSerializer(serializers.Serializer):
     def validate(self, attrs):
         attrs["username"] = attrs["username"].strip()
         return attrs
+
+
+class ProfileSerializer(serializers.Serializer):
+    home_region = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    persona_type = serializers.CharField(required=False, allow_blank=True, max_length=50)
+    mood_state = serializers.CharField(required=False, allow_blank=True, max_length=50)
+
+    def validate_persona_type(self, value):
+        token = (value or "").strip()
+        if token and token not in PERSONA_CHOICES:
+            raise serializers.ValidationError("지원하지 않는 성향입니다.")
+        return token
+
+    def validate_mood_state(self, value):
+        token = (value or "").strip()
+        if token and token not in MOOD_CHOICES:
+            raise serializers.ValidationError("지원하지 않는 기분입니다.")
+        return token
 
 
 class PasswordChangeSerializer(serializers.Serializer):
@@ -169,6 +201,16 @@ class MeView(APIView):
     @method_decorator(never_cache)
     def get(self, request):
         return Response(_public_user(request.user))
+
+    def patch(self, request):
+        serializer = ProfileSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        for field in ("home_region", "persona_type", "mood_state"):
+            if field in serializer.validated_data:
+                setattr(user, field, serializer.validated_data[field])
+        user.save(update_fields=["home_region", "persona_type", "mood_state"])
+        return Response(_public_user(user))
 
 
 class PasswordChangeView(APIView):

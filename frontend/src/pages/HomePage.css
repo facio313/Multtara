@@ -31,6 +31,31 @@
   color: var(--accent);
 }
 
+.home-ask {
+  display: flex;
+  gap: 0.5rem;
+  width: min(100%, 32rem);
+}
+
+.home-ask input {
+  flex: 1;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  outline: none;
+}
+
+.home-ask .auth-submit {
+  border: 0;
+  background: var(--ink);
+  color: var(--on-ink);
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 .home-board {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;

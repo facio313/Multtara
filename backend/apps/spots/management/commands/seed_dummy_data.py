@@ -2,9 +2,17 @@ from django.core.management.base import BaseCommand
 
 from apps.conditions.models import CrowdLevel, WaterCondition
 from apps.spots.models import WaterSpot
+from services.spot_extras import seed_spot_extras
 from services.stations import REGION_MID_LAND, SPOT_KHOA_OBS, SPOT_MID_LAND
 from services.water_forecast import upsert_forecast_for_spot
 from services.water_index import upsert_scores_for_spot
+
+PET_SPOTS = {
+    "광안리 해수욕장",
+    "을왕리 해수욕장",
+    "가평 용추계곡",
+    "청평호",
+}
 
 SPOTS = [
     {
@@ -551,6 +559,7 @@ class Command(BaseCommand):
                 description=item["description"],
                 khoa_obs_code=SPOT_KHOA_OBS.get(item["name"], ""),
                 kma_mid_reg_id=SPOT_MID_LAND.get(item["name"]) or REGION_MID_LAND.get(item["region"], ""),
+                pet_allowed=item.get("pet_allowed", item["name"] in PET_SPOTS),
             )
             WaterCondition.objects.create(spot=spot, **item["condition"])
             CrowdLevel.objects.create(
@@ -559,6 +568,7 @@ class Command(BaseCommand):
                 recommended_time="오전 9-11시",
                 parking_availability="보통",
             )
+            seed_spot_extras(spot)
             upsert_scores_for_spot(spot)
             upsert_forecast_for_spot(spot)
 

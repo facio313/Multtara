@@ -24,6 +24,9 @@ const HomePage = () => {
   const [radar, setRadar] = useState([]);
   const [recs, setRecs] = useState([]);
   const [recReason, setRecReason] = useState('');
+  const [ask, setAsk] = useState('');
+  const [askRows, setAskRows] = useState([]);
+  const [askReason, setAskReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const position = useGeolocation();
@@ -104,6 +107,22 @@ const HomePage = () => {
       .catch(() => setNearby([]));
   }, [position]);
 
+  const submitAsk = (event) => {
+    event.preventDefault();
+    const query = ask.trim();
+    if (!query) return;
+    api
+      .get('/spots/concierge/', { params: { q: query, page_size: 6 } })
+      .then((response) => {
+        setAskRows(unwrapList(response.data));
+        setAskReason(response.data.reason || '');
+      })
+      .catch(() => {
+        setAskRows([]);
+        setAskReason('추천을 불러오지 못했습니다.');
+      });
+  };
+
   const featured = ranking[0];
   const rest = ranking.slice(1);
 
@@ -125,6 +144,18 @@ const HomePage = () => {
             </button>
           ))}
         </div>
+        <form className="home-ask" onSubmit={submitAsk}>
+          <input
+            type="search"
+            value={ask}
+            onChange={(event) => setAsk(event.target.value)}
+            placeholder="비 오는 날 아이와 갈 곳"
+            aria-label="물 컨시어지"
+          />
+          <button type="submit" className="auth-submit">
+            묻기
+          </button>
+        </form>
       </div>
 
       {loading && (
@@ -179,6 +210,32 @@ const HomePage = () => {
       {!loading && !featured && !error && (
         <p className="empty">이 활동에 맞는 장소가 없습니다.</p>
       )}
+
+      {askRows.length > 0 && (
+        <section>
+          <h3 className="section-title">컨시어지</h3>
+          {askReason && <p className="muted home-note">{askReason}</p>}
+          <ul className="rank-list">
+            {askRows.map((spot) => (
+              <li key={spot.id}>
+                <Link to={`/spot/${spot.id}`} className="rank-row">
+                  <span className="rank-copy">
+                    <strong>{spot.name}</strong>
+                    <em>
+                      {spot.region} · {spotTypeLabel(spot.type)}
+                    </em>
+                  </span>
+                  <span className={`score is-${scoreTone(spot.water_index)}`}>
+                    {spot.water_index ?? '-'}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {askReason && askRows.length === 0 && <p className="empty">{askReason}</p>}
 
       {recs.length > 0 && (
         <section>

@@ -21,6 +21,8 @@ const useAuthStore = create((set, get) => ({
   user: null,
   passport: null,
   safetyCards: [],
+  itineraries: [],
+  itineraryPlan: null,
   ready: false,
 
   async loadPassport() {
@@ -59,9 +61,9 @@ const useAuthStore = create((set, get) => ({
       await refreshCsrf();
       const { data } = await api.get('/auth/me/');
       set({ user: data, ready: true });
-      await Promise.all([get().loadPassport(), get().loadSafetyCards()]);
+      await Promise.all([get().loadPassport(), get().loadSafetyCards(), get().loadItineraries()]);
     } catch {
-      set({ user: null, passport: null, safetyCards: [], ready: true });
+      set({ user: null, passport: null, safetyCards: [], itineraries: [], itineraryPlan: null, ready: true });
     }
   },
 
@@ -70,7 +72,7 @@ const useAuthStore = create((set, get) => ({
     try {
       const { data } = await api.post('/auth/register/', payload);
       set({ user: data });
-      await Promise.all([get().loadPassport(), get().loadSafetyCards()]);
+      await Promise.all([get().loadPassport(), get().loadSafetyCards(), get().loadItineraries()]);
       return { ok: true };
     } catch (error) {
       return { ok: false, message: fieldError(error.response?.data) };
@@ -82,7 +84,7 @@ const useAuthStore = create((set, get) => ({
     try {
       const { data } = await api.post('/auth/login/', payload);
       set({ user: data });
-      await Promise.all([get().loadPassport(), get().loadSafetyCards()]);
+      await Promise.all([get().loadPassport(), get().loadSafetyCards(), get().loadItineraries()]);
       return { ok: true };
     } catch (error) {
       return { ok: false, message: fieldError(error.response?.data) };
@@ -96,7 +98,7 @@ const useAuthStore = create((set, get) => ({
     } catch {
       // Session is cleared locally even if the network call fails.
     }
-    set({ user: null, passport: null, safetyCards: [] });
+    set({ user: null, passport: null, safetyCards: [], itineraries: [], itineraryPlan: null });
   },
 
   async changePassword(payload) {
@@ -109,7 +111,7 @@ const useAuthStore = create((set, get) => ({
     }
   },
 
-  async checkin(spotId) {
+  async checkin(spotId, ecoAction = '') {
     await refreshCsrf();
     let coords;
     try {
@@ -118,11 +120,62 @@ const useAuthStore = create((set, get) => ({
       return { ok: false, message: error.message || '위치를 확인하지 못했습니다.' };
     }
     try {
-      const { data } = await api.post('/passport/checkin/', {
+      const body = { spot_id: spotId, ...coords };
+      if (ecoAction) body.eco_action = ecoAction;
+      const { data } = await api.post('/passport/checkin/', body);
+      set({ passport: data });
+      return { ok: true, data };
+    } catch (error) {
+      return { ok: false, message: fieldError(error.response?.data) };
+    }
+  },
+
+  async logEco(spotId, ecoAction = 'plogging') {
+    await refreshCsrf();
+    try {
+      const { data } = await api.post('/passport/eco/', {
         spot_id: spotId,
-        ...coords,
+        eco_action: ecoAction,
       });
       set({ passport: data });
+      return { ok: true, data };
+    } catch (error) {
+      return { ok: false, message: fieldError(error.response?.data) };
+    }
+  },
+
+  async updateProfile(payload) {
+    await refreshCsrf();
+    try {
+      const { data } = await api.patch('/auth/me/', payload);
+      set({ user: data });
+      return { ok: true, data };
+    } catch (error) {
+      return { ok: false, message: fieldError(error.response?.data) };
+    }
+  },
+
+  async loadItineraries() {
+    if (!get().user) {
+      set({ itineraries: [] });
+      return;
+    }
+    try {
+      const { data } = await api.get('/itinerary/');
+      set({ itineraries: Array.isArray(data) ? data : [] });
+    } catch {
+      set({ itineraries: [] });
+    }
+  },
+
+  async createItinerary(payload) {
+    await refreshCsrf();
+    try {
+      const { data } = await api.post('/itinerary/', payload);
+      set({ itineraryPlan: data });
+      if (data?.id) {
+        await get().loadItineraries();
+      }
       return { ok: true, data };
     } catch (error) {
       return { ok: false, message: fieldError(error.response?.data) };

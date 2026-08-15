@@ -17,6 +17,21 @@ class CheckinSerializer(serializers.Serializer):
     spot_id = serializers.IntegerField()
     lat = serializers.FloatField()
     lng = serializers.FloatField()
+    eco_action = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+
+    def validate_eco_action(self, value):
+        return (value or "").strip()
+
+
+class EcoActionSerializer(serializers.Serializer):
+    spot_id = serializers.IntegerField()
+    eco_action = serializers.CharField(max_length=255)
+
+    def validate_eco_action(self, value):
+        token = (value or "").strip()
+        if not token:
+            raise serializers.ValidationError("에코 액션을 입력해 주세요.")
+        return token
 
 
 class PassportView(APIView):
@@ -60,8 +75,32 @@ class PassportCheckinView(APIView):
             serializer.validated_data["lng"],
         ):
             return Response({"detail": "이 장소 근처에서만 인증할 수 있습니다."}, status=400)
-        stamp = Passport.objects.create(user=request.user, spot=spot)
+        stamp = Passport.objects.create(
+            user=request.user,
+            spot=spot,
+            eco_action=serializer.validated_data.get("eco_action") or "",
+        )
         UserActivity.objects.create(user=request.user, spot=spot, action="visited")
         payload = passport_payload(request.user)
         payload["stamp"] = stamp_payload(stamp)
         return Response(payload, status=201)
+
+
+class PassportEcoView(APIView):
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [CheckinThrottle]
+
+    def post(self, request):
+        serializer = EcoActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        spot = WaterSpot.objects.filter(pk=serializer.validated_data["spot_id"]).first()
+        if spot is None:
+            return Response({"detail": "장소를 찾을 수 없습니다."}, status=404)
+        stamp = Passport.objects.filter(user=request.user, spot=spot).first()
+        if stamp is None:
+            return Response({"detail": "먼저 방문 인증이 필요합니다."}, status=400)
+        stamp.eco_action = serializer.validated_data["eco_action"]
+        stamp.save(update_fields=["eco_action"])
+        payload = passport_payload(request.user)
+        payload["stamp"] = stamp_payload(stamp)
+        return Response(payload)

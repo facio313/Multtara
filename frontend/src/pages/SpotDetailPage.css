@@ -163,6 +163,12 @@
   color: var(--danger);
 }
 
+.passport-checkin label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 .safety-card-save {
   display: flex;
   flex-direction: column;

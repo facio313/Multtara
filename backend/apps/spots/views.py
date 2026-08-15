@@ -11,7 +11,9 @@ from apps.conditions.models import ConditionScore, CrowdLevel, WaterCondition
 from apps.conditions.serializers import ConditionScoreSerializer, WaterConditionSerializer
 from apps.forecasts.models import WaterForecast
 from apps.forecasts.serializers import WaterForecastSerializer
+from services.concierge import concierge_spots
 from services.recommend import recommend_spots
+from services.spot_extras import quality_trust as quality_trust_payload
 from .models import WaterSpot
 from .serializers import WaterSpotSerializer
 
@@ -49,10 +51,13 @@ class WaterSpotViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         return (
             WaterSpot.objects.all()
+            .select_related("hotspringdetail")
             .prefetch_related(
                 Prefetch("scores", queryset=ConditionScore.objects.order_by("-computed_at")),
                 Prefetch("conditions", queryset=WaterCondition.objects.order_by("-fetched_at")),
                 Prefetch("crowd_levels", queryset=CrowdLevel.objects.order_by("-updated_at")),
+                "nearbyfacility_set",
+                "catchguide_set",
             )
             .order_by("id")
         )
@@ -127,6 +132,37 @@ class WaterSpotViewSet(viewsets.ReadOnlyModelViewSet):
             response.data = {**meta, **response.data}
             return response
         return Response({**meta, "results": serializer.data})
+
+    @action(detail=False, methods=["get"])
+    def concierge(self, request):
+        query = request.query_params.get("q", "")
+        user = request.user if request.user.is_authenticated else None
+        payload = concierge_spots(query, user)
+        spots = payload["spots"]
+        page = self.paginate_queryset(spots)
+        serializer = self.get_serializer(
+            page if page is not None else spots,
+            many=True,
+            context={"request": request, "activity": payload["activity"]},
+        )
+        meta = {
+            "personalized": payload["personalized"],
+            "activity": payload["activity"],
+            "persona_type": payload["persona_type"],
+            "mood_state": payload["mood_state"],
+            "home_region": payload["home_region"],
+            "reason": payload["reason"],
+            "parsed": payload["parsed"],
+        }
+        if page is not None:
+            response = self.get_paginated_response(serializer.data)
+            response.data = {**meta, **response.data}
+            return response
+        return Response({**meta, "results": serializer.data})
+
+    @action(detail=True, methods=["get"], url_path="quality-trust")
+    def quality_trust(self, request, pk=None):
+        return Response(quality_trust_payload(self.get_object()))
 
     @action(detail=False, methods=["get"])
     def nearby(self, request):

@@ -29,6 +29,7 @@ const MapPage = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [spotType, setSpotType] = useState('');
+  const [petsOnly, setPetsOnly] = useState(false);
   const [layer, setLayer] = useState('index');
   const [mapEngine, setMapEngine] = useState(() => (kakaoMapKey() ? 'kakao' : 'leaflet'));
 
@@ -36,7 +37,11 @@ const MapPage = () => {
     const fetchSpots = async () => {
       try {
         const response = await api.get('/spots/', {
-          params: { page_size: 100, ...(spotType ? { type: spotType } : {}) },
+          params: {
+            page_size: 100,
+            ...(spotType ? { type: spotType } : {}),
+            ...(petsOnly ? { pet_allowed: true } : {}),
+          },
         });
         setSpots(unwrapList(response.data));
       } catch (error) {
@@ -48,7 +53,7 @@ const MapPage = () => {
     };
     setLoading(true);
     fetchSpots();
-  }, [spotType]);
+  }, [spotType, petsOnly]);
 
   const filteredSpots = useMemo(
     () =>
@@ -89,6 +94,13 @@ const MapPage = () => {
               {item.label}
             </button>
           ))}
+          <button
+            type="button"
+            className={`chip ${petsOnly ? 'active' : ''}`}
+            onClick={() => setPetsOnly((value) => !value)}
+          >
+            반려동물
+          </button>
         </div>
         <div className="chip-row">
           {LAYERS.map((item) => (

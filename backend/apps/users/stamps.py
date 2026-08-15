@@ -34,6 +34,8 @@ BADGE_RULES = (
     ("hotspring_3", "온천 마스터", "온천을 3곳 인증했습니다.", lambda counts: counts["hotspring"] >= 3),
     ("waterfall_1", "폭포 수집", "폭포를 1곳 인증했습니다.", lambda counts: counts["waterfall"] >= 1),
     ("tidal_1", "갯벌 체험", "갯벌을 1곳 인증했습니다.", lambda counts: counts["tidal_flat"] >= 1),
+    ("eco_1", "첫 플로깅", "에코 액션을 1번 남겼습니다.", lambda counts: counts["eco"] >= 1),
+    ("eco_3", "물길 지킴이", "에코 액션을 3번 남겼습니다.", lambda counts: counts["eco"] >= 3),
 )
 
 
@@ -51,7 +53,7 @@ def within_checkin_range(spot: WaterSpot, lat: float, lng: float) -> bool:
 
 
 def _counts(stamps) -> dict[str, int]:
-    counts = {"total": 0}
+    counts = {"total": 0, "eco": 0}
     for key, _label in COLLECTION_TYPES:
         counts[key] = 0
     for stamp in stamps:
@@ -59,6 +61,8 @@ def _counts(stamps) -> dict[str, int]:
         spot_type = stamp.spot.type
         if spot_type in counts:
             counts[spot_type] += 1
+        if stamp.eco_action:
+            counts["eco"] += 1
     return counts
 
 
@@ -102,6 +106,7 @@ def stamp_payload(stamp: Passport) -> dict:
         "type": spot.type,
         "region": spot.region,
         "verified_at": stamp.verified_at,
+        "eco_action": stamp.eco_action,
     }
 
 

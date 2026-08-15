@@ -3,6 +3,16 @@ from rest_framework import serializers
 from apps.conditions.serializers import WaterConditionSerializer
 from services.livecam import livecam_payload
 from services.safety_radar import assess_safety, twin_facts
+from services.spot_extras import (
+    analytics_payload,
+    asmr_payload,
+    catch_payload,
+    estimate_crowd,
+    facilities_payload,
+    golden_moments,
+    hotspring_payload,
+    quality_trust as quality_trust_payload,
+)
 from services.tide_timer import summarize_tide
 from .models import WaterSpot
 
@@ -16,6 +26,13 @@ class WaterSpotSerializer(serializers.ModelSerializer):
     livecam = serializers.SerializerMethodField()
     crowd = serializers.SerializerMethodField()
     twin_facts = serializers.SerializerMethodField()
+    facilities = serializers.SerializerMethodField()
+    catch = serializers.SerializerMethodField()
+    hotspring = serializers.SerializerMethodField()
+    asmr = serializers.SerializerMethodField()
+    golden = serializers.SerializerMethodField()
+    analytics = serializers.SerializerMethodField()
+    quality_trust = serializers.SerializerMethodField()
 
     class Meta:
         model = WaterSpot
@@ -44,6 +61,13 @@ class WaterSpotSerializer(serializers.ModelSerializer):
             "livecam",
             "crowd",
             "twin_facts",
+            "facilities",
+            "catch",
+            "hotspring",
+            "asmr",
+            "golden",
+            "analytics",
+            "quality_trust",
         )
 
     def _activity(self) -> str:
@@ -85,13 +109,35 @@ class WaterSpotSerializer(serializers.ModelSerializer):
 
     def get_crowd(self, obj):
         latest = self._latest_related(obj, "crowd_levels")
-        if latest is None:
-            return None
-        return {
-            "predicted_level": latest.predicted_level,
-            "recommended_time": latest.recommended_time,
-            "parking_availability": latest.parking_availability,
-        }
+        stored = None
+        if latest is not None:
+            stored = {
+                "predicted_level": latest.predicted_level,
+                "recommended_time": latest.recommended_time,
+                "parking_availability": latest.parking_availability,
+            }
+        return estimate_crowd(obj, stored)
+
+    def get_facilities(self, obj):
+        return facilities_payload(obj)
+
+    def get_catch(self, obj):
+        return catch_payload(obj)
+
+    def get_hotspring(self, obj):
+        return hotspring_payload(obj)
+
+    def get_asmr(self, obj):
+        return asmr_payload(obj)
+
+    def get_golden(self, obj):
+        return golden_moments(obj, self._latest_related(obj, "conditions"))
+
+    def get_analytics(self, obj):
+        return analytics_payload(obj)
+
+    def get_quality_trust(self, obj):
+        return quality_trust_payload(obj)
 
     def get_tide(self, obj):
         latest = self._latest_related(obj, "conditions")

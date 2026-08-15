@@ -15,6 +15,7 @@ api_v1_patterns = [
     path("auth/", include("apps.users.urls")),
     path("passport/", include("apps.users.passport_urls")),
     path("safety-card/", include("apps.trips.safety_urls")),
+    path("itinerary/", include("apps.trips.itinerary_urls")),
     path("spots/", include("apps.spots.urls")),
     path("conditions/", include("apps.conditions.urls")),
     path("forecasts/", include("apps.forecasts.urls")),

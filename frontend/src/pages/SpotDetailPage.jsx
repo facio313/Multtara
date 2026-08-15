@@ -19,6 +19,8 @@ function formatValue(value, unit) {
 
 const QUALITY_LABELS = { 1: '좋음', 2: '보통', 3: '나쁨' };
 const RISK_LABELS = { low: '낮음', medium: '보통', high: '높음' };
+const CROWD_LABELS = { high: '혼잡', medium: '보통', low: '여유' };
+const SOUND_LABELS = { wave: '파도', valley: '계곡', waterfall: '폭포', tidal: '갯벌', rain: '비' };
 
 function labeled(value, map) {
   if (value == null || value === '') return '-';
@@ -31,6 +33,7 @@ const SpotDetailPage = () => {
   const user = useAuthStore((state) => state.user);
   const passport = useAuthStore((state) => state.passport);
   const checkin = useAuthStore((state) => state.checkin);
+  const logEco = useAuthStore((state) => state.logEco);
   const saveSafetyCard = useAuthStore((state) => state.saveSafetyCard);
   const safetyCards = useAuthStore((state) => state.safetyCards);
   const [spot, setSpot] = useState(null);
@@ -41,6 +44,8 @@ const SpotDetailPage = () => {
   const [cardMessage, setCardMessage] = useState('');
   const [savingCard, setSavingCard] = useState(false);
   const [shareWith, setShareWith] = useState('');
+  const [ecoChecked, setEcoChecked] = useState(false);
+  const [ecoBusy, setEcoBusy] = useState(false);
 
   useEffect(() => {
     const fetchSpot = async () => {
@@ -81,15 +86,25 @@ const SpotDetailPage = () => {
   const nxt = tide.next;
   const safety = spot.safety || {};
   const live = spot.livecam || {};
-  const visited = Boolean(passport?.stamps?.some((stamp) => String(stamp.spot_id) === String(spot.id)));
+  const visitedStamp = passport?.stamps?.find((stamp) => String(stamp.spot_id) === String(spot.id));
+  const visited = Boolean(visitedStamp);
+  const hasEco = Boolean(visitedStamp?.eco_action);
   const savedCard = safetyCards.find((row) => String(row.spot_id) === String(spot.id));
 
   const submitCheckin = async () => {
     setCheckingIn(true);
     setCheckinMessage('');
-    const result = await checkin(spot.id);
+    const result = await checkin(spot.id, ecoChecked ? 'plogging' : '');
     setCheckingIn(false);
     setCheckinMessage(result.ok ? '방문 인증을 남겼습니다.' : result.message);
+  };
+
+  const submitEco = async () => {
+    setEcoBusy(true);
+    setCheckinMessage('');
+    const result = await logEco(spot.id, 'plogging');
+    setEcoBusy(false);
+    setCheckinMessage(result.ok ? '플로깅을 남겼습니다.' : result.message);
   };
 
   const submitSafetyCard = async () => {
@@ -144,12 +159,26 @@ const SpotDetailPage = () => {
         {user && visited && <p className="muted">이 장소를 인증했습니다.</p>}
         {user && !visited && (
           <>
+            <label className="muted">
+              <input
+                type="checkbox"
+                checked={ecoChecked}
+                onChange={(event) => setEcoChecked(event.target.checked)}
+              />{' '}
+              플로깅했어요
+            </label>
             <button type="button" className="auth-submit" onClick={submitCheckin} disabled={checkingIn}>
               {checkingIn ? '인증 중' : '방문 인증'}
             </button>
             <p className="muted">장소 5km 안에서만 인증됩니다. 위치 권한이 필요합니다.</p>
           </>
         )}
+        {user && visited && !hasEco && (
+          <button type="button" className="auth-submit" onClick={submitEco} disabled={ecoBusy}>
+            {ecoBusy ? '기록 중' : '플로깅 인증'}
+          </button>
+        )}
+        {user && hasEco && <p className="muted">이 장소에서 에코 액션을 남겼습니다.</p>}
         {checkinMessage && <p className={checkinMessage.includes('남겼') ? 'muted' : 'auth-error'}>{checkinMessage}</p>}
       </section>
 
@@ -218,6 +247,149 @@ const SpotDetailPage = () => {
         </dl>
         {condition.weather_alert ? <p className="muted tide">{condition.weather_alert}</p> : null}
       </section>
+
+      {spot.crowd?.predicted_level && (
+        <section>
+          <h2 className="section-title">혼잡</h2>
+          <dl className="facts">
+            <div>
+              <dt>예상</dt>
+              <dd>{CROWD_LABELS[spot.crowd.predicted_level] || spot.crowd.predicted_level}</dd>
+            </div>
+            <div>
+              <dt>추천 시간</dt>
+              <dd>{spot.crowd.recommended_time || '-'}</dd>
+            </div>
+            <div>
+              <dt>주차</dt>
+              <dd>{spot.crowd.parking_availability || '-'}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
+
+      {spot.facilities?.length > 0 && (
+        <section>
+          <h2 className="section-title">주변 시설</h2>
+          <ul className="spot-rows">
+            {spot.facilities.map((row) => (
+              <li key={`${row.type}-${row.name}`} className="spot-row">
+                <span className="spot-copy">
+                  <strong>{row.name}</strong>
+                  <em>{row.label}</em>
+                </span>
+                <span className="muted">{row.distance_min}분</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {spot.catch && (
+        <section>
+          <h2 className="section-title">채집 안내</h2>
+          <dl className="facts">
+            <div>
+              <dt>어종</dt>
+              <dd>{spot.catch.species}</dd>
+            </div>
+            <div>
+              <dt>금지</dt>
+              <dd>{spot.catch.banned_species || '-'}</dd>
+            </div>
+            <div>
+              <dt>적기</dt>
+              <dd>{spot.catch.best_time || '-'}</dd>
+            </div>
+          </dl>
+          {spot.catch.season_restriction && (
+            <p className="muted tide">{spot.catch.season_restriction}</p>
+          )}
+        </section>
+      )}
+
+      {spot.hotspring && (
+        <section>
+          <h2 className="section-title">온천</h2>
+          <dl className="facts">
+            <div>
+              <dt>성분</dt>
+              <dd>{spot.hotspring.minerals}</dd>
+            </div>
+            <div>
+              <dt>효능</dt>
+              <dd>{spot.hotspring.benefits}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
+
+      {spot.golden?.length > 0 && (
+        <section>
+          <h2 className="section-title">골든 타임</h2>
+          <ul className="spot-rows">
+            {spot.golden.map((row) => (
+              <li key={`${row.date}-${row.time}-${row.type}`} className="spot-row">
+                <span className="spot-copy">
+                  <strong>{row.label}</strong>
+                  <em>
+                    {row.time}
+                    {row.sunset ? ` · 일몰 ${row.sunset}` : ''}
+                  </em>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {spot.asmr && (
+        <section>
+          <h2 className="section-title">물소리</h2>
+          <dl className="facts">
+            <div>
+              <dt>소리</dt>
+              <dd>{SOUND_LABELS[spot.asmr.sound_type] || spot.asmr.sound_type}</dd>
+            </div>
+            <div>
+              <dt>ASMR</dt>
+              <dd>{spot.asmr.asmr_score ?? '-'}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
+
+      {spot.analytics && (
+        <section>
+          <h2 className="section-title">한눈에</h2>
+          <dl className="facts">
+            <div>
+              <dt>평균 수온</dt>
+              <dd>{formatValue(spot.analytics.avg_water_temp, '°C')}</dd>
+            </div>
+            <div>
+              <dt>수질 추이</dt>
+              <dd>{spot.analytics.quality_trend || '-'}</dd>
+            </div>
+            <div>
+              <dt>추천 계절</dt>
+              <dd>{spot.analytics.best_season || '-'}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
+
+      {spot.quality_trust && (
+        <section>
+          <h2 className="section-title">수질 신뢰</h2>
+          <p className="muted">
+            공식 {labeled(spot.quality_trust.official_grade, QUALITY_LABELS)} ·{' '}
+            {spot.quality_trust.review_signal}
+            {spot.quality_trust.agrees_with_official === true ? ' · 후기와 비슷' : ''}
+            {spot.quality_trust.agrees_with_official === false ? ' · 후기와 다름' : ''}
+          </p>
+        </section>
+      )}
 
       {activityScores.length > 0 && (
         <section>

@@ -146,6 +146,37 @@ class AuthApiTests(TestCase):
         self.assertEqual(changed.status_code, 200)
         self.assertEqual(self.client.get("/api/v1/auth/me/").status_code, 200)
 
+    def test_patch_persona_and_mood(self):
+        User.objects.create_user(username="changer", password=STRONG)
+        token = self.csrf()
+        self.client.post(
+            "/api/v1/auth/login/",
+            {"username": "changer", "password": STRONG},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        token = self.csrf()
+        patched = self.client.patch(
+            "/api/v1/auth/me/",
+            {"persona_type": "surf", "mood_state": "calm", "home_region": "부산"},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(patched.status_code, 200)
+        self.assertEqual(patched.data["persona_type"], "surf")
+        self.assertEqual(patched.data["mood_state"], "calm")
+        self.assertEqual(patched.data["home_region"], "부산")
+        stored = User.objects.get(username="changer")
+        self.assertEqual(stored.persona_type, "surf")
+        token = self.csrf()
+        rejected = self.client.patch(
+            "/api/v1/auth/me/",
+            {"persona_type": "wizard"},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(rejected.status_code, 400)
+
     def test_spots_stay_public(self):
         response = self.client.get("/api/v1/spots/")
         self.assertEqual(response.status_code, 200)

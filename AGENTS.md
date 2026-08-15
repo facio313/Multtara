@@ -68,10 +68,13 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 갱신: `python manage.py refresh_conditions --skip-tour` 또는 Compose `refresher` 서비스(`--loop`, 기본 3시간). `fetch_quality`는 수질만.  
 수질: NIER `WaterQualityService/getWaterMeasuringList` → `WaterCondition.water_quality_grade`. 자외선: 기상청 `LivingWthrIdxServiceV5/getUVIdxV5` → `WaterCondition.uv_index`. 기존 Water Index 가중치 슬롯에만 반영.  
 지도: Kakao Maps JS SDK (`VITE_KAKAO_MAP_KEY`). 키가 없거나 SDK 로드 실패 시 Leaflet.  
-추천: `GET /api/v1/spots/recommend/` — 로그인 시 `persona_type` / `mood_state` / `home_region` + Water Index 규칙 랭킹. 비로그인 시 일반 지수 순. LLM 없음.
+추천: `GET /api/v1/spots/recommend/` — 로그인 시 `persona_type` / `mood_state` / `home_region` + Water Index 규칙 랭킹. 비로그인 시 일반 지수 순. LLM 없음.  
+컨시어지: `GET /api/v1/spots/concierge/?q=` — 키워드 규칙 랭킹, LLM 없음.  
+프로필: `PATCH /api/v1/auth/me/` — `persona_type`(swim, surf, relax, onsen, mudflat, rafting, family, healing) · `mood_state`(healing, release, energetic, calm) · `home_region`.  
+일정: `GET`/`POST /api/v1/itinerary/` — POST `start_point`, `transport`(car|public|walk), `is_day_trip`, `party_size`, `budget`, `activity`. 로그인 시 저장.  
 
 인증: Django **세션 쿠키**(httpOnly, SameSite=Lax) + **세션 CSRF**. JWT/로컬스토리지 토큰 없음. 비밀번호 Argon2, 최소 12자, 실패 5회 잠금. 소셜 로그인은 아직 없음.  
-Passport: `POST /api/v1/passport/checkin/` (로그인 필요, 장소당 1회). **위도·경도 필수**, 5km 안만 허용.  
+Passport: `POST /api/v1/passport/checkin/` (로그인 필요, 장소당 1회). **위도·경도 필수**, 5km 안만 허용. 선택 `eco_action` 또는 `POST /api/v1/passport/eco/`.  
 Safety card: `POST /api/v1/safety-card/` (로그인 필요). 컨디션 스냅샷을 저장하고 기기에도 남겨 오프라인으로 본다.
 
 ---

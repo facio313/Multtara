@@ -134,3 +134,54 @@ class PassportApiTests(TestCase):
             HTTP_X_CSRFTOKEN=token,
         )
         self.assertEqual(response.status_code, 201)
+
+    def test_checkin_accepts_eco_action(self):
+        self.login()
+        token = self.csrf()
+        response = self.client.post(
+            "/api/v1/passport/checkin/",
+            {
+                "spot_id": self.sea.id,
+                "lat": 35.16,
+                "lng": 129.16,
+                "eco_action": "plogging",
+            },
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["stamp"]["eco_action"], "plogging")
+        ids = [badge["id"] for badge in response.data["badges"]]
+        self.assertIn("eco_1", ids)
+        stamp = Passport.objects.get(user=self.user, spot=self.sea)
+        self.assertEqual(stamp.eco_action, "plogging")
+
+    def test_eco_endpoint_updates_existing_stamp(self):
+        self.login()
+        token = self.csrf()
+        missing = self.client.post(
+            "/api/v1/passport/eco/",
+            {"spot_id": self.sea.id, "eco_action": "plogging"},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(missing.status_code, 400)
+
+        token = self.csrf()
+        self.client.post(
+            "/api/v1/passport/checkin/",
+            {"spot_id": self.sea.id, "lat": 35.16, "lng": 129.16},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        token = self.csrf()
+        updated = self.client.post(
+            "/api/v1/passport/eco/",
+            {"spot_id": self.sea.id, "eco_action": "trash pickup"},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.data["stamp"]["eco_action"], "trash pickup")
+        ids = [badge["id"] for badge in updated.data["badges"]]
+        self.assertIn("eco_1", ids)
