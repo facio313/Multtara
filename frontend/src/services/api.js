@@ -12,6 +12,10 @@ export const runtimeConfig = Object.freeze({
 const api = axios.create({
   baseURL: apiBaseUrl,
   timeout: 10000,
+  withCredentials: true,
+  withXSRFToken: true,
+  xsrfCookieName: 'csrftoken',
+  xsrfHeaderName: 'X-CSRFToken',
   headers: {
     'Content-Type': 'application/json',
   },

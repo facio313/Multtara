@@ -114,3 +114,41 @@ test('recommendation payload preserves explicit supervision yes/no and unresolve
     null,
   );
 });
+
+test('recommendation payload sends a trimmed bounded region and canonical spot type', () => {
+  const form = {
+    activity: 'surf',
+    region: '  강원  ',
+    spotType: 'sea',
+    quiet: 50,
+    activityLevel: 70,
+    requiresAccessibility: false,
+    bringingPet: false,
+    adultSupervisionConfirmed: null,
+    participantSkillLevel: 'intermediate',
+  };
+
+  const payload = buildRecommendationPayload(form, [28]);
+
+  assert.equal(payload.region, '강원');
+  assert.equal(payload.spot_type, 'beach');
+});
+
+test('empty region and activity-incompatible spot type are not sent', () => {
+  const form = {
+    activity: 'onsen',
+    region: '   ',
+    spotType: 'beach',
+    quiet: 80,
+    activityLevel: 10,
+    requiresAccessibility: false,
+    bringingPet: false,
+    adultSupervisionConfirmed: null,
+    participantSkillLevel: 'unspecified',
+  };
+
+  const payload = buildRecommendationPayload(form, [40]);
+
+  assert.equal(Object.hasOwn(payload, 'region'), false);
+  assert.equal(Object.hasOwn(payload, 'spot_type'), false);
+});

@@ -174,6 +174,35 @@ class DomainContractTests(TestCase):
             )
         )
 
+    def test_forecast_uses_its_provider_window_not_observation_max_age(self):
+        target = NOW + timedelta(days=1)
+        closure = Metric(
+            name="official_stop_signal",
+            value=True,
+            unit="boolean",
+            source="official",
+            spatial_scope="spot:1",
+            observed_at=NOW - timedelta(hours=1),
+            fetched_at=NOW,
+            valid_from=target,
+            valid_until=target + timedelta(hours=1),
+            mode=MetricMode.FORECAST,
+        )
+
+        self.assertTrue(closure.is_current(target, max_age_seconds=900))
+        self.assertTrue(
+            closure.is_current(
+                target + timedelta(hours=1),
+                max_age_seconds=900,
+            )
+        )
+        self.assertFalse(
+            closure.is_current(
+                target + timedelta(hours=1, microseconds=1),
+                max_age_seconds=900,
+            )
+        )
+
     def test_observation_set_is_immutable_and_rejects_duplicates(self):
         item = metric("air_temperature_c", 20)
         snapshot = ObservationSet.from_metrics(item)
@@ -484,6 +513,89 @@ class FamilySwimGateTests(TestCase):
 
 
 class OtherActivityContractTests(TestCase):
+    def test_relax_requires_current_official_coastal_access(self):
+        common = (
+            metric("weather_alert_level", "none"),
+            metric("lightning_clearance_minutes", 45),
+            metric("marine_hazard_status", "clear"),
+            metric("hci_beach_score", 100),
+            metric("crowd_level", "low"),
+        )
+        context = EvaluationContext(Activity.RELAX, NOW)
+
+        missing = evaluate_water_index(
+            ObservationSet.from_metrics(*common),
+            context,
+        )
+        self.assertEqual(missing.safety_status, SafetyStatus.UNKNOWN)
+        self.assertEqual(missing.decision, Decision.UNKNOWN)
+        self.assertIsNone(missing.score)
+        self.assertIn(
+            "official_entry_status|access_status",
+            missing.missing_metrics,
+        )
+        self.assertIn(
+            "ACCESS_STATUS_MISSING",
+            {gate.reason_code for gate in missing.gates},
+        )
+
+        for access_name in ("official_entry_status", "access_status"):
+            with self.subTest(access_name=access_name):
+                clear = evaluate_water_index(
+                    ObservationSet.from_metrics(
+                        *common,
+                        metric(access_name, "open"),
+                    ),
+                    context,
+                )
+                self.assertEqual(clear.safety_status, SafetyStatus.CLEAR)
+                self.assertEqual(clear.decision, Decision.RECOMMENDED)
+                self.assertEqual(clear.score, 100)
+
+    def test_relax_stale_or_closed_access_never_exposes_a_score(self):
+        common = (
+            metric("weather_alert_level", "none"),
+            metric("lightning_clearance_minutes", 45),
+            metric("marine_hazard_status", "clear"),
+            metric("hci_beach_score", 100),
+            metric("crowd_level", "low"),
+        )
+        context = EvaluationContext(Activity.RELAX, NOW)
+
+        stale = evaluate_water_index(
+            ObservationSet.from_metrics(
+                *common,
+                metric(
+                    "official_entry_status",
+                    "open",
+                    valid_for=timedelta(minutes=-1),
+                ),
+            ),
+            context,
+        )
+        self.assertEqual(stale.safety_status, SafetyStatus.UNKNOWN)
+        self.assertEqual(stale.decision, Decision.UNKNOWN)
+        self.assertIsNone(stale.score)
+        self.assertIn(
+            "official_entry_status|access_status",
+            stale.stale_or_conflicting_metrics,
+        )
+
+        closed = evaluate_water_index(
+            ObservationSet.from_metrics(
+                *common,
+                metric("access_status", "closed"),
+            ),
+            context,
+        )
+        self.assertEqual(closed.safety_status, SafetyStatus.STOP)
+        self.assertEqual(closed.decision, Decision.BLOCKED)
+        self.assertIsNone(closed.score)
+        self.assertIn(
+            "OFFICIAL_ACCESS_CLOSED",
+            {gate.reason_code for gate in closed.gates},
+        )
+
     def test_mudflat_official_window_is_a_gate(self):
         common = (
             metric("official_entry_status", "open"),
@@ -554,6 +666,7 @@ class OtherActivityContractTests(TestCase):
 
     def test_hci_score_does_not_override_coastal_hazard(self):
         snapshot = ObservationSet.from_metrics(
+            metric("official_entry_status", "open"),
             metric("weather_alert_level", "none"),
             metric("lightning_clearance_minutes", 45),
             metric("marine_hazard_status", "warning"),

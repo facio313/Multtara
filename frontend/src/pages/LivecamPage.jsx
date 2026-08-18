@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  AlertTriangle,
   ArrowUpRight,
   BadgeCheck,
   Camera,
@@ -10,36 +11,20 @@ import {
   Info,
   MapPin,
   Maximize2,
-  Radio,
   RotateCcw,
   Search,
   ShieldCheck,
   Waves,
   X,
 } from 'lucide-react';
-import { livecams, spots } from '../data/pongdangData';
+import { livecams } from '../data/pongdangData';
+import { useWaterSpots } from '../hooks/useWaterData';
 import { localizedSafety, useI18n } from '../i18n';
+import { buildLivecamCards } from '../services/livecamData';
 import './LivecamPage.css';
 
-const STATUS_FILTERS = ['all', 'official', 'poster'];
+const STATUS_FILTERS = ['all', 'official', 'unknown', 'demo'];
 const ALL_REGIONS = '__all__';
-
-const toArray = (value) => (Array.isArray(value) ? value : []);
-
-const toScore = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.min(100, Math.max(0, Math.round(parsed))) : null;
-};
-
-const safeOfficialUrl = (value) => {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  try {
-    const parsed = new URL(value);
-    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : null;
-  } catch {
-    return null;
-  }
-};
 
 const getIndexTone = (score) => {
   if (score === null) return 'unknown';
@@ -55,22 +40,24 @@ const getIndexLabel = (t, score) => {
 };
 
 const getStatusMeta = (cam, t) => {
-  const status = String(cam.status || '').toLowerCase();
-  if (cam.isLive) {
+  if (cam.availability === 'official') {
     return {
+      icon: BadgeCheck,
       tone: 'official',
       label: t('livecam.status.official.label'),
       description: t('livecam.status.official.description'),
     };
   }
-  if (status.includes('offline') || status.includes('중단') || status.includes('오프라인')) {
+  if (cam.availability === 'unknown') {
     return {
-      tone: 'offline',
-      label: t('livecam.status.offline.label'),
-      description: t('livecam.status.offline.description'),
+      icon: Info,
+      tone: 'unknown',
+      label: t('livecam.status.unknown.label'),
+      description: t('livecam.status.unknown.description'),
     };
   }
   return {
+    icon: Camera,
     tone: 'demo',
     label: t('livecam.status.demo.label'),
     description: t('livecam.status.demo.description'),
@@ -82,31 +69,42 @@ const formatCondition = (value, suffix = '') => {
   return typeof value === 'number' ? `${value}${suffix}` : String(value);
 };
 
-const SPOT_BY_ID = new Map(toArray(spots).map((spot) => [String(spot.id), spot]));
+function formatUpdatedLabel(cam, t, intlLocale) {
+  if (cam.availability === 'demo') return t('livecam.updated.demo');
+  if (!cam.verifiedAt) return t('livecam.updated.unknown');
+  const date = new Date(cam.verifiedAt);
+  if (Number.isNaN(date.getTime())) return t('livecam.updated.unknown');
+  return t('livecam.updated.catalog', {
+    date: new Intl.DateTimeFormat(intlLocale, { dateStyle: 'medium' }).format(date),
+  });
+}
 
-const CAM_DATA = toArray(livecams).map((cam, index) => {
-  const spot = SPOT_BY_ID.get(String(cam?.spotId)) || null;
-  const waterIndex = toScore(cam?.waterIndex ?? spot?.index);
-  return {
-    ...cam,
-    id: cam?.id ?? `livecam-${index}`,
-    name: String(cam?.name || spot?.name || `물멍 카메라 ${index + 1}`),
-    region: String(cam?.region || spot?.region || '지역 미정'),
-    status: cam?.status || 'demo',
-    isLive: Boolean(cam?.isLive),
-    waterIndex,
-    poster: typeof cam?.poster === 'string' ? cam.poster : '',
-    tags: toArray(cam?.tags),
-    updatedLabel: String(cam?.updatedLabel || spot?.freshness?.updatedLabel || '고정 데모'),
-    officialUrl: safeOfficialUrl(cam?.officialUrl),
-    spot,
-  };
-});
-
-const REGION_OPTIONS = [...new Set(CAM_DATA.map((cam) => cam.region).filter(Boolean))];
+function Poster({ cam, failed, focused = false, onError, t }) {
+  if (cam.poster && !failed) {
+    return (
+      <img
+        src={cam.poster}
+        alt={t(focused ? 'livecam.poster.focusAlt' : 'livecam.poster.staticAlt', { name: cam.name })}
+        loading={focused ? undefined : 'lazy'}
+        onError={onError}
+      />
+    );
+  }
+  return (
+    <div className="livecam-poster-fallback" role="img" aria-label={`${cam.name} ${t('livecam.poster.pending')}`}>
+      <Waves aria-hidden="true" />
+      <span>{t('livecam.poster.pending')}</span>
+    </div>
+  );
+}
 
 function LivecamPage() {
-  const { t } = useI18n();
+  const { intlLocale, t } = useI18n();
+  const {
+    spots,
+    spotStatus,
+    retryData,
+  } = useWaterSpots(null, { loadConditions: false });
   const [statusFilter, setStatusFilter] = useState('all');
   const [regionFilter, setRegionFilter] = useState(ALL_REGIONS);
   const [query, setQuery] = useState('');
@@ -116,24 +114,34 @@ function LivecamPage() {
   const closeButtonRef = useRef(null);
   const lastTriggerRef = useRef(null);
 
+  const cameras = useMemo(() => buildLivecamCards(spots, livecams), [spots]);
+  const regionOptions = useMemo(
+    () => [...new Set(cameras.map((cam) => cam.region).filter(Boolean))],
+    [cameras],
+  );
   const filteredCams = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase('ko-KR');
-    return CAM_DATA.filter((cam) => {
-      const statusMatches = statusFilter === 'all'
-        || (statusFilter === 'official' && cam.isLive)
-        || (statusFilter === 'poster' && !cam.isLive);
+    const normalizedQuery = query.trim().toLocaleLowerCase(intlLocale);
+    return cameras.filter((cam) => {
+      const statusMatches = statusFilter === 'all' || cam.availability === statusFilter;
       const regionMatches = regionFilter === ALL_REGIONS || cam.region === regionFilter;
       const searchableText = [cam.name, cam.region, cam.spot?.typeLabel, ...cam.tags]
         .filter(Boolean)
         .join(' ')
-        .toLocaleLowerCase('ko-KR');
-      const queryMatches = !normalizedQuery || searchableText.includes(normalizedQuery);
-      return statusMatches && regionMatches && queryMatches;
+        .toLocaleLowerCase(intlLocale);
+      return statusMatches && regionMatches
+        && (!normalizedQuery || searchableText.includes(normalizedQuery));
     });
-  }, [query, regionFilter, statusFilter]);
+  }, [cameras, intlLocale, query, regionFilter, statusFilter]);
 
-  const focusedCam = CAM_DATA.find((cam) => cam.id === focusedId) || null;
-  const officialCount = CAM_DATA.filter((cam) => cam.isLive).length;
+  const focusedCam = cameras.find((cam) => cam.id === focusedId) || null;
+  const officialCount = cameras.filter((cam) => cam.availability === 'official').length;
+  const dataState = ['idle', 'loading'].includes(spotStatus)
+    ? 'loading'
+    : spotStatus === 'error'
+      ? 'error'
+      : spotStatus === 'empty'
+        ? 'empty'
+        : 'ready';
 
   const closeFocusMode = useCallback(() => {
     setFocusedId(null);
@@ -161,7 +169,7 @@ function LivecamPage() {
 
       if (event.key !== 'Tab' || !focusPanelRef.current) return;
       const focusable = [...focusPanelRef.current.querySelectorAll(
-        'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        'a[href], button:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])',
       )];
       if (!focusable.length) return;
       const first = focusable[0];
@@ -197,7 +205,7 @@ function LivecamPage() {
     <div className="livecam-page">
       <header className="livecam-hero" aria-labelledby="livecam-title">
         <div className="livecam-hero__copy">
-          <span className="livecam-eyebrow">WATER WINDOW</span>
+          <span className="livecam-eyebrow">{t('livecam.eyebrow.hero')}</span>
           <h1 id="livecam-title">{t('livecam.hero.title')}</h1>
           <p>{t('livecam.hero.description')}</p>
         </div>
@@ -205,7 +213,7 @@ function LivecamPage() {
         <dl className="livecam-hero__stats" aria-label={t('livecam.stats.label')}>
           <div>
             <dt>{t('livecam.stats.registered')}</dt>
-            <dd>{CAM_DATA.length}</dd>
+            <dd>{cameras.length}</dd>
           </div>
           <div>
             <dt>{t('livecam.stats.official')}</dt>
@@ -213,15 +221,26 @@ function LivecamPage() {
           </div>
           <div>
             <dt>{t('livecam.stats.autoplay')}</dt>
-            <dd>OFF</dd>
+            <dd>{t('livecam.autoplay.off')}</dd>
           </div>
         </dl>
       </header>
 
+      <div className={`livecam-data-notice livecam-data-notice--${dataState}`} role="status" aria-live="polite">
+        {dataState === 'error' ? <AlertTriangle aria-hidden="true" /> : <Info aria-hidden="true" />}
+        <div>
+          <strong>{t(`livecam.data.${dataState}.title`)}</strong>
+          <span>{t(`livecam.data.${dataState}.description`)}</span>
+        </div>
+        {dataState === 'error' && (
+          <button type="button" onClick={retryData}>{t('common.retry')}</button>
+        )}
+      </div>
+
       <section className="livecam-toolbar" aria-labelledby="livecam-filter-title">
         <div className="livecam-toolbar__heading">
           <div>
-            <span className="livecam-eyebrow">LIVE &amp; POSTER VIEW</span>
+            <span className="livecam-eyebrow">{t('livecam.eyebrow.filters')}</span>
             <h2 id="livecam-filter-title">{t('livecam.filters.title')}</h2>
           </div>
           <span className="livecam-result-count" aria-live="polite">
@@ -247,20 +266,25 @@ function LivecamPage() {
             </div>
           </fieldset>
 
-          <label className="livecam-region-filter">
+          <label className="livecam-region-filter" htmlFor="livecam-region-select">
             <span>{t('livecam.filters.region')}</span>
-            <select value={regionFilter} onChange={(event) => setRegionFilter(event.target.value)}>
+            <select
+              id="livecam-region-select"
+              value={regionFilter}
+              onChange={(event) => setRegionFilter(event.target.value)}
+            >
               <option value={ALL_REGIONS}>{t('livecam.filters.allRegions')}</option>
-              {REGION_OPTIONS.map((region) => (
+              {regionOptions.map((region) => (
                 <option key={region} value={region}>{region}</option>
               ))}
             </select>
           </label>
 
-          <label className="livecam-search">
+          <label className="livecam-search" htmlFor="livecam-search-input">
             <span className="sr-only">{t('livecam.search.label')}</span>
             <Search aria-hidden="true" />
             <input
+              id="livecam-search-input"
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -274,7 +298,7 @@ function LivecamPage() {
       <section className="livecam-results" aria-labelledby="livecam-results-title">
         <div className="livecam-results__heading">
           <div>
-            <span className="livecam-eyebrow">CURATED WATER VIEWS</span>
+            <span className="livecam-eyebrow">{t('livecam.eyebrow.results')}</span>
             <h2 id="livecam-results-title">{t('livecam.results.title')}</h2>
           </div>
           <p>
@@ -287,13 +311,12 @@ function LivecamPage() {
           <div className="livecam-grid">
             {filteredCams.map((cam) => {
               const posterFailed = failedPosters.includes(cam.id);
-              const safety = cam.spot?.safety;
-              const conditions = cam.spot?.conditions || {};
-              const waterTemp = formatCondition(conditions.waterTemp, '°C');
-              const waveHeight = formatCondition(conditions.waveHeight, 'm');
-              const crowd = formatCondition(conditions.crowd);
+              const waterTemp = formatCondition(cam.conditions.waterTemp, '°C');
+              const waveHeight = formatCondition(cam.conditions.waveHeight, 'm');
+              const crowd = formatCondition(cam.conditions.crowd);
               const indexTone = getIndexTone(cam.waterIndex);
               const statusMeta = getStatusMeta(cam, t);
+              const StatusIcon = statusMeta.icon;
 
               return (
                 <article
@@ -302,36 +325,31 @@ function LivecamPage() {
                   style={{ '--livecam-visual': cam.spot?.visual?.gradient || 'linear-gradient(145deg, #0b4f58, #69cbb7)' }}
                 >
                   <div className="livecam-card__poster">
-                    {cam.poster && !posterFailed ? (
-                      <img
-                        src={cam.poster}
-                        alt={t('livecam.poster.staticAlt', { name: cam.name })}
-                        loading="lazy"
-                        onError={() => markPosterFailed(cam.id)}
-                      />
-                    ) : (
-                      <div className="livecam-poster-fallback" role="img" aria-label={`${cam.name} ${t('livecam.poster.pending')}`}>
-                        <Waves aria-hidden="true" />
-                        <span>{t('livecam.poster.pending')}</span>
-                      </div>
-                    )}
+                    <Poster
+                      cam={cam}
+                      failed={posterFailed}
+                      onError={() => markPosterFailed(cam.id)}
+                      t={t}
+                    />
 
                     <div className="livecam-card__overlay">
                       <span className={`livecam-state-badge livecam-state-badge--${statusMeta.tone}`}>
-                        {cam.isLive ? <Radio aria-hidden="true" /> : <Camera aria-hidden="true" />}
+                        <StatusIcon aria-hidden="true" />
                         {statusMeta.label}
                       </span>
                       <span className={`livecam-index-badge livecam-index-badge--${indexTone}`}>
-                        <small>INDEX</small>
+                        <small>{t('livecam.index.short')}</small>
                         <strong>{cam.waterIndex ?? '—'}</strong>
                       </span>
                     </div>
 
+                    <span className="livecam-poster-kind">{t('livecam.poster.demoBadge')}</span>
                     <button
                       type="button"
                       className="livecam-focus-button"
-                      aria-label={`${cam.name} ${t('livecam.focus.open')}`}
+                      aria-label={`${cam.name || t('livecam.place.unknown')} ${t('livecam.focus.open')}`}
                       aria-haspopup="dialog"
+                      aria-controls="livecam-focus-dialog"
                       aria-expanded={focusedId === cam.id}
                       onClick={(event) => openFocusMode(cam.id, event.currentTarget)}
                     >
@@ -343,8 +361,8 @@ function LivecamPage() {
                   <div className="livecam-card__body">
                     <div className="livecam-card__title-row">
                       <div>
-                        <p><MapPin aria-hidden="true" /> {cam.region}</p>
-                        <h3>{cam.name}</h3>
+                        <p><MapPin aria-hidden="true" /> {cam.region || t('livecam.region.unknown')}</p>
+                        <h3>{cam.name || t('livecam.place.unknown')}</h3>
                       </div>
                       <span className={`livecam-index-label livecam-index-label--${indexTone}`}>
                         {getIndexLabel(t, cam.waterIndex)}
@@ -370,7 +388,9 @@ function LivecamPage() {
 
                     <div className="livecam-safety-row">
                       <ShieldCheck aria-hidden="true" />
-                      <span>{safety?.level ? localizedSafety(t, safety.level).label : t('livecam.safety.missing')}</span>
+                      <span>{cam.safety?.level
+                        ? localizedSafety(t, cam.safety.level).label
+                        : t('livecam.safety.missing')}</span>
                     </div>
 
                     {cam.tags.length > 0 && (
@@ -380,7 +400,7 @@ function LivecamPage() {
                     )}
 
                     <div className="livecam-card__footer">
-                      <span><Clock3 aria-hidden="true" /> {cam.updatedLabel}</span>
+                      <span><Clock3 aria-hidden="true" /> {formatUpdatedLabel(cam, t, intlLocale)}</span>
                       <div>
                         {cam.spot?.id && (
                           <Link to={`/spot/${cam.spot.id}`}>
@@ -388,11 +408,11 @@ function LivecamPage() {
                           </Link>
                         )}
                         {cam.officialUrl ? (
-                          <a href={cam.officialUrl} target="_blank" rel="noreferrer">
+                          <a href={cam.officialUrl} target="_blank" rel="noopener noreferrer">
                             {t('livecam.link.official')} <ExternalLink aria-hidden="true" />
                           </a>
                         ) : (
-                          <span className="livecam-link-unavailable">{t('livecam.link.pending')}</span>
+                          <span className="livecam-link-unavailable">{t('livecam.link.unknown')}</span>
                         )}
                       </div>
                     </div>
@@ -421,94 +441,105 @@ function LivecamPage() {
         </div>
       </aside>
 
-      {focusedCam && (
-        <div
-          className="livecam-focus-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeFocusMode();
-          }}
-        >
-          <section
-            id="livecam-focus-dialog"
-            ref={focusPanelRef}
-            className="livecam-focus-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="livecam-focus-title"
-            aria-describedby="livecam-focus-description"
+      {focusedCam && (() => {
+        const statusMeta = getStatusMeta(focusedCam, t);
+        const StatusIcon = statusMeta.icon;
+        return (
+          <div
+            className="livecam-focus-backdrop"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeFocusMode();
+            }}
           >
-            <button
-              type="button"
-              ref={closeButtonRef}
-              className="livecam-focus-close"
-              onClick={closeFocusMode}
+            <section
+              id="livecam-focus-dialog"
+              ref={focusPanelRef}
+              className="livecam-focus-panel"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="livecam-focus-title"
+              aria-describedby="livecam-focus-description"
             >
-              <X aria-hidden="true" />
-              <span>{t('common.close')}</span>
-            </button>
+              <button
+                type="button"
+                ref={closeButtonRef}
+                className="livecam-focus-close"
+                onClick={closeFocusMode}
+              >
+                <X aria-hidden="true" />
+                <span>{t('common.close')}</span>
+              </button>
 
-            <div
-              className="livecam-focus-media"
-              style={{ '--livecam-visual': focusedCam.spot?.visual?.gradient || 'linear-gradient(145deg, #0b4f58, #69cbb7)' }}
-            >
-              {focusedCam.poster && !failedPosters.includes(focusedCam.id) ? (
-                <img
-                  src={focusedCam.poster}
-                  alt={t('livecam.poster.focusAlt', { name: focusedCam.name })}
-                  onError={() => markPosterFailed(focusedCam.id)}
-                />
-              ) : (
-                <div className="livecam-poster-fallback" role="img" aria-label={`${focusedCam.name} ${t('livecam.poster.pending')}`}>
-                  <Waves aria-hidden="true" />
-                  <span>{t('livecam.poster.pending')}</span>
-                </div>
-              )}
-              <div className="livecam-focus-media__status">
-                <span className={`livecam-state-badge livecam-state-badge--${getStatusMeta(focusedCam, t).tone}`}>
-                  {focusedCam.isLive ? <Radio aria-hidden="true" /> : <Camera aria-hidden="true" />}
-                  {getStatusMeta(focusedCam, t).label}
-                </span>
-                <span>{t('livecam.autoplay.none')}</span>
-              </div>
-            </div>
-
-            <div className="livecam-focus-copy">
-              <span className="livecam-eyebrow">FOCUS WATER VIEW</span>
-              <h2 id="livecam-focus-title">{focusedCam.name}</h2>
-              <p id="livecam-focus-description">{getStatusMeta(focusedCam, t).description}</p>
-
-              <div className="livecam-focus-summary">
-                <div>
-                  <span>Water Index</span>
-                  <strong>{focusedCam.waterIndex ?? '—'}</strong>
-                  <small>{getIndexLabel(t, focusedCam.waterIndex)}</small>
-                </div>
-                <div>
-                  <span>{t('livecam.filters.region')}</span>
-                  <strong>{focusedCam.region}</strong>
-                  <small>{focusedCam.updatedLabel}</small>
-                </div>
-              </div>
-
-              <div className="livecam-focus-actions">
-                {focusedCam.spot?.id && (
-                  <Link to={`/spot/${focusedCam.spot.id}`} onClick={closeFocusMode}>
-                    {t('livecam.place.details')} <ArrowUpRight aria-hidden="true" />
-                  </Link>
-                )}
-                {focusedCam.officialUrl ? (
-                  <a href={focusedCam.officialUrl} target="_blank" rel="noreferrer">
-                    {t('livecam.provider.open')} <ExternalLink aria-hidden="true" />
-                  </a>
+              <div
+                className="livecam-focus-media"
+                style={{ '--livecam-visual': focusedCam.spot?.visual?.gradient || 'linear-gradient(145deg, #0b4f58, #69cbb7)' }}
+              >
+                {focusedCam.embedUrl ? (
+                  <iframe
+                    src={focusedCam.embedUrl}
+                    title={t('livecam.embed.title', { name: focusedCam.name })}
+                    allow="encrypted-media; picture-in-picture; fullscreen"
+                    allowFullScreen
+                    loading="lazy"
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    sandbox="allow-scripts allow-same-origin allow-presentation"
+                  />
                 ) : (
-                  <span>{t('livecam.provider.missing')}</span>
+                  <Poster
+                    cam={focusedCam}
+                    failed={failedPosters.includes(focusedCam.id)}
+                    focused
+                    onError={() => markPosterFailed(focusedCam.id)}
+                    t={t}
+                  />
                 )}
+                <div className="livecam-focus-media__status">
+                  <span className={`livecam-state-badge livecam-state-badge--${statusMeta.tone}`}>
+                    <StatusIcon aria-hidden="true" />
+                    {statusMeta.label}
+                  </span>
+                  <span>{t('livecam.autoplay.none')}</span>
+                </div>
               </div>
-            </div>
-          </section>
-        </div>
-      )}
+
+              <div className="livecam-focus-copy">
+                <span className="livecam-eyebrow">{t('livecam.eyebrow.focus')}</span>
+                <h2 id="livecam-focus-title">{focusedCam.name || t('livecam.place.unknown')}</h2>
+                <p id="livecam-focus-description">{statusMeta.description}</p>
+
+                <div className="livecam-focus-summary">
+                  <div>
+                    <span>{t('livecam.index.title')}</span>
+                    <strong>{focusedCam.waterIndex ?? '—'}</strong>
+                    <small>{getIndexLabel(t, focusedCam.waterIndex)}</small>
+                  </div>
+                  <div>
+                    <span>{t('livecam.filters.region')}</span>
+                    <strong>{focusedCam.region || t('livecam.region.unknown')}</strong>
+                    <small>{formatUpdatedLabel(focusedCam, t, intlLocale)}</small>
+                  </div>
+                </div>
+
+                <div className="livecam-focus-actions">
+                  {focusedCam.spot?.id && (
+                    <Link to={`/spot/${focusedCam.spot.id}`} onClick={closeFocusMode}>
+                      {t('livecam.place.details')} <ArrowUpRight aria-hidden="true" />
+                    </Link>
+                  )}
+                  {focusedCam.officialUrl ? (
+                    <a href={focusedCam.officialUrl} target="_blank" rel="noopener noreferrer">
+                      {t('livecam.provider.open')} <ExternalLink aria-hidden="true" />
+                    </a>
+                  ) : (
+                    <span>{t('livecam.provider.missing')}</span>
+                  )}
+                </div>
+              </div>
+            </section>
+          </div>
+        );
+      })()}
     </div>
   );
 }

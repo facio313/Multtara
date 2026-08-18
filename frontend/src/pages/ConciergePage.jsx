@@ -1,14 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Accessibility,
   AlertTriangle,
   ArrowRight,
+  Banknote,
   CalendarClock,
+  Car,
   Check,
   Clock3,
   Compass,
   Database,
+  Footprints,
   LoaderCircle,
   MapPin,
   MessageCircleMore,
@@ -18,12 +27,29 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Trash2,
   Users,
   WandSparkles,
   Waves,
 } from 'lucide-react';
-import { personas } from '../data/pongdangData';
+import { personas, spotTypeOptions } from '../data/pongdangData';
+import { useWaterSpots } from '../hooks/useWaterData';
 import { useI18n } from '../i18n';
+import {
+  allowsItinerarySessionConfirmation,
+  buildSavedItineraryUpdatePayload,
+  classifyItineraryError,
+  deleteSavedItinerary,
+  hasBlockingItineraryRevalidation,
+  ITINERARY_TRANSITIONS,
+  listSavedItineraries,
+  minuteToTime,
+  normalizeItineraryStatus,
+  requestItineraryPlan,
+  requiresItineraryAdultSupervisionConfirmation,
+  timeToMinute,
+  updateSavedItinerary,
+} from '../services/itineraryApi';
 import {
   buildRecommendationPayload,
   getRecommendationError,
@@ -31,6 +57,9 @@ import {
   requestRecommendations,
   requiresAdultSupervision,
 } from '../services/recommendations';
+import { apiSpotRouteId } from '../services/waterData';
+import { spotTypeSupportsActivity } from '../services/spotTypes';
+import useSessionStore from '../store/useSessionStore';
 import './ConciergePage.css';
 
 const MAX_EVIDENCE_AGE_MS = 15 * 60 * 1000;
@@ -63,6 +92,8 @@ const personaPresets = {
 
 const defaultForm = {
   activity: 'relax',
+  region: '강릉 · 강원',
+  spotType: '',
   quiet: 72,
   activityLevel: 28,
   ages: '30',
@@ -91,11 +122,18 @@ const demoRecommendations = {
 };
 
 const spotTypeMessageKeys = {
-  beach: 'map.type.sea',
+  beach: 'map.type.beach',
+  river: 'map.type.river',
   valley: 'map.type.valley',
   hotspring: 'map.type.hotspring',
+  pool: 'map.type.pool',
+  waterpark: 'map.type.waterpark',
   lake: 'map.type.lake',
-  mudflat: 'map.type.tidal_flat',
+  waterfall: 'map.type.waterfall',
+  riverside: 'map.type.riverside',
+  reservoir: 'map.type.reservoir',
+  mudflat: 'map.type.mudflat',
+  coastal_road: 'map.type.coastal_road',
 };
 
 function readPersonaId() {
@@ -225,6 +263,7 @@ function normalizeLiveResponse(payload, t) {
     const waterIndex = item?.water_index || {};
     const safetyStatus = String(waterIndex.safety_status || 'unknown').toLowerCase();
     const spotId = item?.spot?.id;
+    const spotRouteId = apiSpotRouteId(spotId);
     const spotName = typeof item?.spot?.name === 'string' ? item.spot.name.trim() : '';
     const fitScore = toFiniteNumber(item?.score);
     const suitabilityScore = toFiniteNumber(waterIndex.suitability_score);
@@ -250,8 +289,7 @@ function normalizeLiveResponse(payload, t) {
       return;
     }
     if (
-      spotId === null
-      || spotId === undefined
+      spotRouteId === null
       || !spotName
       || fitScore === null
       || fitScore < 0
@@ -274,7 +312,8 @@ function normalizeLiveResponse(payload, t) {
 
     const contributions = Array.isArray(item?.contributions) ? item.contributions : [];
     accepted.push({
-      id: String(spotId),
+      id: spotRouteId,
+      apiId: Number(spotId),
       rank: Number.isInteger(item?.rank) ? item.rank : accepted.length + 1,
       name: spotName,
       type: spotTypeMessageKeys[item?.spot?.type]
@@ -418,7 +457,7 @@ function ExclusionSummary({ excluded, meta, t }) {
     <aside className="exclusion-summary" aria-labelledby="exclusion-title">
       <div className="exclusion-heading">
         <div>
-          <span>FAIL-CLOSED REPORT</span>
+          <span>{t('concierge.eyebrow.report')}</span>
           <h3 id="exclusion-title">{t('concierge.excluded.title')}</h3>
         </div>
         {meta ? <small>{t('concierge.excluded.count', { candidates: Math.round(meta.candidateCount), evaluated: Math.round(meta.evaluatedCount) })}</small> : null}
@@ -448,7 +487,7 @@ function LiveRecommendationCard({ item, index, t }) {
     <article className={`recommendation-card rank-${Math.min(index + 1, 3)} is-live`}>
       <div className="recommendation-rank">
         <span>{String(displayedRank).padStart(2, '0')}</span>
-        <span>LIVE · {item.type}</span>
+        <span>{t('dataState.live.short')} · {item.type}</span>
       </div>
 
       <div className="recommendation-score" aria-label={`${t('concierge.card.fit')} ${Math.round(item.fitScore)}`}>
@@ -465,7 +504,7 @@ function LiveRecommendationCard({ item, index, t }) {
           <ShieldCheck size={17} aria-hidden="true" />
           <div>
             <span>Water Index {Math.round(item.suitabilityScore)}</span>
-            <strong>CLEAR · {decision}</strong>
+            <strong>{t('safety.clear.label')} · {decision}</strong>
           </div>
         </div>
         <dl>
@@ -501,7 +540,7 @@ function DemoRecommendationCard({ item, index, locale, t }) {
     <article className="recommendation-card is-demo">
       <div className="recommendation-rank">
         <span>{String(index + 1).padStart(2, '0')}</span>
-        <span>DEMO · {locale === 'ko' ? item.type : t('concierge.demo.type')}</span>
+        <span>{t('dataState.demo.short')} · {locale === 'ko' ? item.type : t('concierge.demo.type')}</span>
       </div>
 
       <div className="recommendation-score is-unavailable" aria-label={t('concierge.card.noLiveScore')}>
@@ -531,6 +570,553 @@ function DemoRecommendationCard({ item, index, locale, t }) {
   );
 }
 
+function itineraryDateValue(offsetDays = 0) {
+  const now = new Date();
+  now.setDate(now.getDate() + offsetDays);
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+function refreshItinerarySession(error) {
+  if ([401, 403].includes(error?.response?.status)) {
+    void useSessionStore.getState().ensureSession({ force: true });
+  }
+}
+
+function formatPlanDate(value, locale, fallback) {
+  const date = new Date(`${value}T12:00:00`);
+  if (!Number.isFinite(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat(locale, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
+}
+
+function formatKrw(value, locale) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return '—';
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency: 'KRW',
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function SavedItineraryCard({ item, intlLocale, onDeleted, onUpdated, t }) {
+  const currentStatus = normalizeItineraryStatus(item.status);
+  const revalidationRequired = item.evidenceStatus?.revalidationRequired === true;
+  const sessionConfirmationAllowed = allowsItinerarySessionConfirmation(item);
+  const blockingRevalidation = hasBlockingItineraryRevalidation(item);
+  const adultSupervisionRequired = requiresItineraryAdultSupervisionConfirmation(item);
+  const [title, setTitle] = useState(item.title || '');
+  const [status, setStatus] = useState(currentStatus);
+  const [adultSupervisionConfirmed, setAdultSupervisionConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const transitions = (ITINERARY_TRANSITIONS[currentStatus] || [currentStatus]).filter((next) => (
+    !blockingRevalidation
+    || !['accepted', 'started'].includes(next)
+    || next === currentStatus
+  ));
+  const enteringExecutionState = status !== currentStatus
+    && ['accepted', 'started'].includes(status);
+  const adultConfirmationMissing = enteringExecutionState
+    && adultSupervisionRequired
+    && !adultSupervisionConfirmed;
+
+  const submitUpdate = async (event) => {
+    event.preventDefault();
+    if (blockingRevalidation
+      && status !== currentStatus
+      && ['accepted', 'started'].includes(status)) {
+      setFeedback({ type: 'error', messageKey: 'itinerary.error.revalidation' });
+      return;
+    }
+    if (adultConfirmationMissing) {
+      setFeedback({ type: 'error', messageKey: 'itinerary.error.adultSupervision' });
+      return;
+    }
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const payload = buildSavedItineraryUpdatePayload(item, {
+        title,
+        status,
+        adultSupervisionConfirmed,
+      });
+      const updated = await updateSavedItinerary(item.id, payload);
+      onUpdated(updated);
+      setAdultSupervisionConfirmed(false);
+      setFeedback({ type: 'success', messageKey: 'itinerary.saved.updated' });
+    } catch (error) {
+      refreshItinerarySession(error);
+      setFeedback({ type: 'error', ...classifyItineraryError(error) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    setFeedback(null);
+    try {
+      await deleteSavedItinerary(item.id);
+      onDeleted(item.id);
+    } catch (error) {
+      refreshItinerarySession(error);
+      setFeedback({ type: 'error', ...classifyItineraryError(error) });
+      setConfirmingDelete(false);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <li className="saved-itinerary-card">
+      <div className="saved-itinerary-meta">
+        <span className={`saved-itinerary-status is-${currentStatus}`}>{t(`itinerary.status.${currentStatus}`)}</span>
+        <span>{t('itinerary.saved.date', {
+          date: formatPlanDate(item.plan_date, intlLocale, t('common.noData')),
+          start: minuteToTime(item.start_minute),
+          end: minuteToTime(item.end_minute),
+        })}</span>
+      </div>
+      <strong>{item.title || t('itinerary.status.draft')}</strong>
+      <p>{item.start_spot_name || t('account.spot.unknown')} → {item.end_spot_name || t('account.spot.unknown')}</p>
+      <p className="saved-itinerary-participant">
+        {t(`activity.${item.activity}`)} · {t(`forecast.profile.${item.participantProfile}`)} · {t(`concierge.skill.${item.participantSkillLevel}`)}
+      </p>
+      <div className={`saved-itinerary-evidence-state is-${revalidationRequired ? 'required' : 'current'}`}>
+        {revalidationRequired ? <ShieldAlert size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}
+        <strong>{t(sessionConfirmationAllowed
+          ? 'itinerary.evidence.supervisionRequired'
+          : (revalidationRequired ? 'itinerary.evidence.revalidationRequired' : 'itinerary.evidence.current'))}</strong>
+      </div>
+      {blockingRevalidation ? (
+        <div id={`saved-evidence-warning-${item.id}`} className="saved-itinerary-evidence-warning" role="alert">
+          <p>{t('itinerary.evidence.replan')}</p>
+          <ul>
+            {item.evidenceStatus.reasonCodes.map((code) => {
+              const key = `itinerary.evidence.reason.${code}`;
+              const label = t(key);
+              return <li key={code}>{label === key ? t('itinerary.evidence.reason.unknown') : label}</li>;
+            })}
+          </ul>
+          <a href="#composer-title">{t('itinerary.evidence.replanCta')}</a>
+        </div>
+      ) : sessionConfirmationAllowed ? (
+        <div id={`saved-evidence-warning-${item.id}`} className="saved-itinerary-evidence-warning is-supervision" role="status">
+          <p>{t('itinerary.evidence.supervisionDescription')}</p>
+          <small>{t('itinerary.evidence.supervisionNotStored')}</small>
+        </div>
+      ) : (
+        <p className="saved-itinerary-execution-notice"><ShieldAlert size={14} aria-hidden="true" /> {t('itinerary.evidence.executionNotice')}</p>
+      )}
+
+      <details className="saved-itinerary-evidence-details">
+        <summary><Database size={15} aria-hidden="true" /> {t('itinerary.evidence.details')}</summary>
+        <dl>
+          <div><dt>{t('itinerary.evidence.checked')}</dt><dd>{formatGeneratedAt(item.evidenceStatus.checkedAt, intlLocale, t('common.noData'))}</dd></div>
+          <div><dt>{t('itinerary.evidence.routeUntil')}</dt><dd>{formatGeneratedAt(item.routeRevalidationRequiredAt, intlLocale, t('common.noData'))}</dd></div>
+          <div><dt>{t('itinerary.evidence.waterUntil')}</dt><dd>{formatGeneratedAt(item.safetyRevalidationRequiredAt, intlLocale, t('common.noData'))}</dd></div>
+          <div><dt>{t('itinerary.evidence.routeState')}</dt><dd>{t(`itinerary.evidence.route.${item.routeEvidence.dataState}`)}</dd></div>
+          <div><dt>{t('itinerary.evidence.routeProviders')}</dt><dd>{item.routeEvidence.providers.join(' · ') || t('common.noData')}</dd></div>
+          <div><dt>{t('itinerary.evidence.snapshots')}</dt><dd>{item.routeEvidence.snapshotIds.length}</dd></div>
+        </dl>
+        {item.routeEvidence.sourceUrls.length > 0 ? (
+          <div className="saved-itinerary-source-links">
+            {item.routeEvidence.sourceUrls.map((url, index) => <a href={url} key={url} target="_blank" rel="noreferrer">{t('itinerary.evidence.routeSource', { count: index + 1 })}</a>)}
+          </div>
+        ) : null}
+        <div className="saved-itinerary-water-evidence">
+          <strong>{t('itinerary.evidence.waterRows', { count: item.waterEvidence.length })}</strong>
+          {item.waterEvidence.length > 0 ? (
+            <ul>
+              {item.waterEvidence.map((evidence) => (
+                <li key={`${evidence.spotId}-${evidence.conditionScoreId ?? 'unknown'}`}>
+                  <span>{t('itinerary.evidence.spotId', { id: evidence.spotId })}</span>
+                  <strong>{t(`forecast.safety.${evidence.safetyStatus}`)} · {t(`forecast.decision.${evidence.decision}`)}</strong>
+                  <small>{evidence.suitabilityScore ?? t('common.scoreMissing')} · {evidence.sources.join(' · ') || t('common.noData')}</small>
+                  <small>{t('itinerary.evidence.skillProvenance', {
+                    requested: evidence.participantSkillLevel
+                      ? t(`concierge.skill.${evidence.participantSkillLevel}`)
+                      : t('common.noData'),
+                    condition: evidence.conditionScoreParticipantSkillLevel
+                      ? t(`concierge.skill.${evidence.conditionScoreParticipantSkillLevel}`)
+                      : t('common.noData'),
+                  })}</small>
+                  {evidence.sessionContextReconfirmationRequired ? <em>{t('itinerary.evidence.sessionReconfirm')}</em> : null}
+                </li>
+              ))}
+            </ul>
+          ) : <p>{t('itinerary.evidence.waterMissing')}</p>}
+        </div>
+      </details>
+
+      <form className="saved-itinerary-form" onSubmit={submitUpdate}>
+        <label htmlFor={`saved-title-${item.id}`}>
+          <span>{t('itinerary.field.title')}</span>
+          <input
+            id={`saved-title-${item.id}`}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            maxLength="120"
+            disabled={busy}
+          />
+        </label>
+        <label htmlFor={`saved-status-${item.id}`}>
+          <span>{t('itinerary.saved.status')}</span>
+          <select
+            id={`saved-status-${item.id}`}
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+            disabled={busy}
+            aria-describedby={revalidationRequired ? `saved-evidence-warning-${item.id}` : undefined}
+          >
+            {transitions.map((nextStatus) => (
+              <option key={nextStatus} value={nextStatus}>{t(`itinerary.status.${nextStatus}`)}</option>
+            ))}
+          </select>
+        </label>
+        {adultSupervisionRequired ? (
+          <label className="saved-itinerary-supervision-check" htmlFor={`saved-supervision-${item.id}`}>
+            <input
+              id={`saved-supervision-${item.id}`}
+              type="checkbox"
+              checked={adultSupervisionConfirmed}
+              onChange={(event) => setAdultSupervisionConfirmed(event.target.checked)}
+              disabled={busy || blockingRevalidation}
+              aria-describedby={`saved-supervision-help-${item.id}`}
+            />
+            <span>{t('itinerary.evidence.supervisionConfirm')}</span>
+            <small id={`saved-supervision-help-${item.id}`}>{t('itinerary.evidence.supervisionConfirmHelp')}</small>
+          </label>
+        ) : null}
+        {adultConfirmationMissing ? (
+          <p className="itinerary-feedback is-error" role="status">{t('itinerary.error.adultSupervision')}</p>
+        ) : null}
+        {feedback ? (
+          <p className={`itinerary-feedback is-${feedback.type}`} role={feedback.type === 'error' ? 'alert' : 'status'}>
+            {t(feedback.messageKey)}
+          </p>
+        ) : null}
+        <div className="saved-itinerary-actions">
+          <button type="submit" disabled={busy || adultConfirmationMissing}>{t('itinerary.saved.update')}</button>
+          {!confirmingDelete ? (
+            <button type="button" className="is-delete" onClick={() => setConfirmingDelete(true)} disabled={busy}>
+              <Trash2 size={14} aria-hidden="true" /> {t('itinerary.saved.delete')}
+            </button>
+          ) : (
+            <>
+              <button type="button" className="is-delete" onClick={remove} disabled={busy}>
+                {t('itinerary.saved.confirmDelete')}
+              </button>
+              <button type="button" onClick={() => setConfirmingDelete(false)} disabled={busy}>
+                {t('itinerary.saved.cancelDelete')}
+              </button>
+            </>
+          )}
+        </div>
+      </form>
+    </li>
+  );
+}
+
+function ItineraryWorkspace({ requestState, intlLocale, t }) {
+  const session = useSessionStore();
+  const hasLiveRequest = requestState?.kind === 'live'
+    && Array.isArray(requestState.recommendations)
+    && requestState.requestPayload;
+  const itineraryRequestKey = hasLiveRequest
+    ? `${requestState.meta?.generatedAt || ''}|${requestState.requestPayload.activity}|${requestState.recommendations.map((item) => item.apiId).join(',')}`
+    : 'none';
+  const { spots, spotStatus } = useWaterSpots(null, { loadConditions: false });
+  const apiSpots = useMemo(() => spots.filter((spot) => (
+    Number.isInteger(Number(spot.apiId))
+    && Number(spot.apiId) > 0
+    && spot.catalogVerification !== 'unknown'
+  )), [spots]);
+  const [form, setForm] = useState({
+    startSpot: '',
+    endSpot: '',
+    planDate: itineraryDateValue(),
+    startTime: '08:00',
+    endTime: '18:00',
+    transport: 'drive',
+    budget: '100000',
+    badWeather: false,
+    save: false,
+    title: '',
+  });
+  const [planState, setPlanState] = useState({ kind: 'idle', data: null, error: null });
+  const [savedState, setSavedState] = useState({ kind: 'idle', items: [], error: null });
+
+  useEffect(() => {
+    void session.ensureSession();
+  }, [session]);
+
+  const loadSaved = useCallback(async () => {
+    setSavedState((current) => ({ ...current, kind: 'loading', error: null }));
+    try {
+      const items = await listSavedItineraries();
+      setSavedState({ kind: 'ready', items, error: null });
+    } catch (error) {
+      refreshItinerarySession(error);
+      setSavedState((current) => ({
+        ...current,
+        kind: 'error',
+        error: classifyItineraryError(error),
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (session.status === 'authenticated') void loadSaved();
+  }, [loadSaved, session.status]);
+
+  const updateForm = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    setPlanState({ kind: 'idle', data: null, error: null, requestKey: itineraryRequestKey });
+  };
+
+  const submitPlan = async (event) => {
+    event.preventDefault();
+    if (!hasLiveRequest) return;
+    const startSpot = Number(form.startSpot);
+    const endSpot = Number(form.endSpot);
+    const startMinute = timeToMinute(form.startTime);
+    const endMinute = timeToMinute(form.endTime);
+    if (!startSpot || !endSpot || startSpot === endSpot) {
+      setPlanState({ kind: 'error', data: null, error: { messageKey: 'itinerary.error.selectStops' }, requestKey: itineraryRequestKey });
+      return;
+    }
+    if (startMinute === null || endMinute === null || startMinute >= endMinute) {
+      setPlanState({ kind: 'error', data: null, error: { messageKey: 'itinerary.error.time' }, requestKey: itineraryRequestKey });
+      return;
+    }
+
+    const candidateIds = [...new Set(
+      requestState.recommendations
+        .map((item) => Number(item.apiId))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    )];
+    setPlanState({ kind: 'loading', data: null, error: null, requestKey: itineraryRequestKey });
+    try {
+      const save = session.status === 'authenticated' && form.save;
+      const payload = {
+        recommendation: requestState.requestPayload,
+        candidate_ids: candidateIds,
+        start_spot: startSpot,
+        end_spot: endSpot,
+        transport: form.transport,
+        plan_date: form.planDate,
+        start_minute: startMinute,
+        end_minute: endMinute,
+        budget_krw: Math.max(0, Math.floor(Number(form.budget) || 0)),
+        bad_weather: form.badWeather,
+        save,
+        title: save ? form.title.trim() : '',
+      };
+      const data = await requestItineraryPlan(payload);
+      setPlanState({ kind: 'ready', data, error: null, requestKey: itineraryRequestKey });
+      if (data?.saved_itinerary_id) await loadSaved();
+    } catch (error) {
+      refreshItinerarySession(error);
+      setPlanState({ kind: 'error', data: null, error: classifyItineraryError(error), requestKey: itineraryRequestKey });
+    }
+  };
+
+  const activePlanState = planState.requestKey === itineraryRequestKey
+    ? planState
+    : { kind: 'idle', data: null, error: null };
+  const plan = activePlanState.data?.plan;
+  const visits = Array.isArray(plan?.visits) ? plan.visits : [];
+  const routeSnapshotCount = Array.isArray(activePlanState.data?.route_evidence?.snapshot_ids)
+    ? activePlanState.data.route_evidence.snapshot_ids.length
+    : 0;
+
+  if (!hasLiveRequest && session.status !== 'authenticated') return null;
+
+  return (
+    <div className="itinerary-workspace">
+      {hasLiveRequest ? <section className="itinerary-builder" aria-labelledby="itinerary-builder-title">
+        <div className="itinerary-builder-heading">
+          <div>
+            <span>{t('itinerary.eyebrow.builder')}</span>
+            <h2 id="itinerary-builder-title">{t('itinerary.builder.title')}</h2>
+            <p>{t('itinerary.builder.description')}</p>
+          </div>
+          <CalendarClock size={27} aria-hidden="true" />
+        </div>
+
+        <form className="itinerary-builder-form" onSubmit={submitPlan}>
+          <label htmlFor="itinerary-start">
+            <span>{t('itinerary.field.start')}</span>
+            <select id="itinerary-start" value={form.startSpot} onChange={(event) => updateForm('startSpot', event.target.value)} disabled={activePlanState.kind === 'loading'} required>
+              <option value="">{t('itinerary.choose')}</option>
+              {apiSpots.map((spot) => <option key={spot.apiId} value={spot.apiId}>{spot.name} · {spot.region}</option>)}
+            </select>
+          </label>
+          <label htmlFor="itinerary-end">
+            <span>{t('itinerary.field.end')}</span>
+            <select id="itinerary-end" value={form.endSpot} onChange={(event) => updateForm('endSpot', event.target.value)} disabled={activePlanState.kind === 'loading'} required>
+              <option value="">{t('itinerary.choose')}</option>
+              {apiSpots.map((spot) => <option key={spot.apiId} value={spot.apiId}>{spot.name} · {spot.region}</option>)}
+            </select>
+          </label>
+          <label htmlFor="itinerary-date">
+            <span>{t('itinerary.field.date')}</span>
+            <input id="itinerary-date" type="date" min={itineraryDateValue()} max={itineraryDateValue(7)} value={form.planDate} onChange={(event) => updateForm('planDate', event.target.value)} disabled={activePlanState.kind === 'loading'} required />
+          </label>
+          <label htmlFor="itinerary-transport">
+            <span>{t('itinerary.field.transport')}</span>
+            <select id="itinerary-transport" value={form.transport} onChange={(event) => updateForm('transport', event.target.value)} disabled={activePlanState.kind === 'loading'}>
+              <option value="drive">{t('itinerary.transport.drive')}</option>
+              <option value="walk">{t('itinerary.transport.walk')}</option>
+              <option value="bicycle">{t('itinerary.transport.bicycle')}</option>
+            </select>
+          </label>
+          <label htmlFor="itinerary-start-time">
+            <span>{t('itinerary.field.startTime')}</span>
+            <input id="itinerary-start-time" type="time" value={form.startTime} onChange={(event) => updateForm('startTime', event.target.value)} disabled={activePlanState.kind === 'loading'} required />
+          </label>
+          <label htmlFor="itinerary-end-time">
+            <span>{t('itinerary.field.endTime')}</span>
+            <input id="itinerary-end-time" type="time" value={form.endTime} onChange={(event) => updateForm('endTime', event.target.value)} disabled={activePlanState.kind === 'loading'} required />
+          </label>
+          <label htmlFor="itinerary-budget">
+            <span>{t('itinerary.field.budget')}</span>
+            <input id="itinerary-budget" type="number" min="0" max="100000000" step="1000" inputMode="numeric" value={form.budget} onChange={(event) => updateForm('budget', event.target.value)} disabled={activePlanState.kind === 'loading'} required />
+          </label>
+          <label className="itinerary-check" htmlFor="itinerary-bad-weather">
+            <input id="itinerary-bad-weather" type="checkbox" checked={form.badWeather} onChange={(event) => updateForm('badWeather', event.target.checked)} disabled={activePlanState.kind === 'loading'} />
+            <span>{t('itinerary.field.badWeather')}</span>
+          </label>
+
+          {session.status === 'authenticated' ? (
+            <>
+              <label className="itinerary-check" htmlFor="itinerary-save">
+                <input id="itinerary-save" type="checkbox" checked={form.save} onChange={(event) => updateForm('save', event.target.checked)} disabled={activePlanState.kind === 'loading'} />
+                <span>{t('itinerary.field.save')}</span>
+              </label>
+              {form.save ? (
+                <label className="is-wide" htmlFor="itinerary-title">
+                  <span>{t('itinerary.field.title')}</span>
+                  <input id="itinerary-title" value={form.title} onChange={(event) => updateForm('title', event.target.value)} maxLength="120" disabled={activePlanState.kind === 'loading'} />
+                </label>
+              ) : null}
+            </>
+          ) : (
+            <p className="itinerary-auth-note">
+              {t('itinerary.anonymous')} <Link to="/profile">{t('itinerary.signInToSave')}</Link>
+            </p>
+          )}
+
+          {apiSpots.length === 0 ? (
+            <p className="itinerary-feedback" role="status">
+              {['idle', 'loading'].includes(spotStatus) ? t('itinerary.catalog.loading') : t('itinerary.catalog.unavailable')}
+            </p>
+          ) : null}
+          {activePlanState.kind === 'error' ? (
+            <p className="itinerary-feedback is-error" role="alert">{t(activePlanState.error?.messageKey || 'itinerary.error.response')}</p>
+          ) : null}
+          <button type="submit" className="itinerary-submit" disabled={activePlanState.kind === 'loading' || apiSpots.length === 0}>
+            {activePlanState.kind === 'loading' ? <LoaderCircle className="button-spinner" size={17} aria-hidden="true" /> : <CalendarClock size={17} aria-hidden="true" />}
+            {activePlanState.kind === 'loading' ? t('itinerary.generating') : t('itinerary.submit')}
+          </button>
+        </form>
+      </section> : null}
+
+      {hasLiveRequest && activePlanState.kind === 'ready' ? (
+        <section className="itinerary-result" aria-labelledby="itinerary-result-title" aria-live="polite">
+          <div className="itinerary-result-heading">
+            <div>
+              <span>{t('itinerary.result.badge')}</span>
+              <h2 id="itinerary-result-title">{t('itinerary.result.title')}</h2>
+              <p>{t('itinerary.result.notice')}</p>
+            </div>
+            <ShieldAlert size={27} aria-hidden="true" />
+          </div>
+          <p className="itinerary-safety-notice"><ShieldAlert size={17} aria-hidden="true" /> {t('itinerary.result.safetyNotice')}</p>
+          {activePlanState.data.saved_itinerary_id ? <p className="itinerary-saved-notice"><Check size={16} aria-hidden="true" /> {t('itinerary.result.saved')}</p> : null}
+          <dl className="itinerary-summary-grid">
+            <div><dt><MapPin size={15} aria-hidden="true" /> {t('itinerary.summary.route')}</dt><dd>{activePlanState.data.start_spot?.name || '—'} → {activePlanState.data.end_spot?.name || '—'}</dd></div>
+            <div><dt><Banknote size={15} aria-hidden="true" /> {t('itinerary.summary.cost')}</dt><dd>{formatKrw(plan?.total_cost_krw, intlLocale)}</dd></div>
+            <div><dt><Car size={15} aria-hidden="true" /> {t('itinerary.summary.travel')}</dt><dd>{t('itinerary.unit.minutes', { count: Math.max(0, Number(plan?.total_travel_minutes) || 0) })}</dd></div>
+            <div><dt><Footprints size={15} aria-hidden="true" /> {t('itinerary.summary.activity')}</dt><dd>{t('itinerary.unit.minutes', { count: Math.max(0, Number(plan?.total_activity_minutes) || 0) })}</dd></div>
+            <div><dt><Clock3 size={15} aria-hidden="true" /> {t('itinerary.summary.end')}</dt><dd>{minuteToTime(plan?.end_arrival_minute)}</dd></div>
+          </dl>
+          <div className="itinerary-visits">
+            <h3>{t('itinerary.visits.title')}</h3>
+            {visits.length === 0 ? <p>{t('itinerary.visits.empty')}</p> : (
+              <ol>
+                {visits.map((visit) => (
+                  <li key={`${visit.candidate_id}-${visit.start_minute}`}>
+                    <span>{minuteToTime(visit.start_minute)}</span>
+                    <div>
+                      <strong>{visit.candidate_name || t('account.spot.unknown')}</strong>
+                      <small>{t('itinerary.visits.window', {
+                        arrival: minuteToTime(visit.arrival_minute),
+                        start: minuteToTime(visit.start_minute),
+                        end: minuteToTime(visit.end_minute),
+                      })}</small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+          <p className="itinerary-route-evidence"><Database size={15} aria-hidden="true" /> {t('itinerary.routeEvidence', { count: routeSnapshotCount })}</p>
+        </section>
+      ) : null}
+
+      {session.status === 'authenticated' ? (
+        <section className="saved-itinerary-section" aria-labelledby="saved-itinerary-title">
+          <div className="itinerary-builder-heading">
+            <div>
+              <span>{t('itinerary.eyebrow.saved')}</span>
+              <h2 id="saved-itinerary-title">{t('itinerary.saved.title')}</h2>
+              <p>{t('itinerary.saved.description')}</p>
+            </div>
+            <Database size={26} aria-hidden="true" />
+          </div>
+          {savedState.kind === 'loading' ? <p className="itinerary-feedback" role="status"><LoaderCircle className="button-spinner" size={16} aria-hidden="true" /> {t('itinerary.saved.loading')}</p> : null}
+          {savedState.kind === 'error' ? (
+            <div className="itinerary-feedback is-error" role="alert">
+              <span>{t(savedState.error?.messageKey || 'itinerary.error.response')}</span>
+              <button type="button" onClick={loadSaved}>{t('common.retry')}</button>
+            </div>
+          ) : null}
+          {savedState.kind === 'ready' && savedState.items.length === 0 ? (
+            <div className="saved-itinerary-empty"><strong>{t('itinerary.saved.empty')}</strong><p>{t('itinerary.saved.emptyDescription')}</p></div>
+          ) : null}
+          {savedState.items.length > 0 ? (
+            <ul className="saved-itinerary-list">
+              {savedState.items.map((item) => (
+                <SavedItineraryCard
+                  key={item.id}
+                  item={item}
+                  intlLocale={intlLocale}
+                  t={t}
+                  onUpdated={(updated) => setSavedState((current) => ({
+                    ...current,
+                    items: current.items.map((entry) => (entry.id === updated.id ? updated : entry)),
+                  }))}
+                  onDeleted={(id) => setSavedState((current) => ({
+                    ...current,
+                    items: current.items.filter((entry) => entry.id !== id),
+                  }))}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
 function ConciergePage() {
   const location = useLocation();
   const { intlLocale, locale, t } = useI18n();
@@ -554,6 +1140,9 @@ function ConciergePage() {
   const isLoading = requestState.kind === 'loading';
   const controlAges = parseAges(form.ages).ages || [];
   const supervisionRequired = requiresAdultSupervision(form, controlAges);
+  const compatibleSpotTypes = spotTypeOptions.filter((option) => (
+    option.id !== 'all' && spotTypeSupportsActivity(option.id, form.activity)
+  ));
 
   const runRecommendation = async (nextForm, nextQuery) => {
     const parsed = parseAges(nextForm.ages);
@@ -581,6 +1170,7 @@ function ConciergePage() {
           recommendations: normalized.recommendations,
           excluded: normalized.excluded,
           meta: normalized.meta,
+          requestPayload: payload,
         });
       } else {
         setRequestState({
@@ -638,6 +1228,13 @@ function ConciergePage() {
       ) {
         next.adultSupervisionConfirmed = null;
       }
+      if (
+        field === 'activity'
+        && next.spotType
+        && !spotTypeSupportsActivity(next.spotType, value)
+      ) {
+        next.spotType = '';
+      }
       return next;
     });
     setRequestState({ kind: 'idle' });
@@ -656,7 +1253,7 @@ function ConciergePage() {
     <div className="concierge-page">
       <header className="concierge-hero">
         <div className="concierge-heading">
-          <span className="concierge-kicker"><WandSparkles size={15} aria-hidden="true" /> EVIDENCE-FIRST WATER CONCIERGE</span>
+          <span className="concierge-kicker"><WandSparkles size={15} aria-hidden="true" /> {t('concierge.eyebrow.hero')}</span>
           <h1>{t('concierge.hero.title')}</h1>
           <p>{t('concierge.hero.description')}</p>
           <div className="concierge-proof">
@@ -676,14 +1273,16 @@ function ConciergePage() {
         <section className="concierge-composer" aria-labelledby="composer-title">
           <div className="composer-title-row">
             <div>
-              <span>STEP 01 · CONDITIONS</span>
+              <span>{t('concierge.eyebrow.conditions')}</span>
               <h2 id="composer-title">{t('concierge.form.title')}</h2>
             </div>
             <span className={`runtime-label is-${requestState.kind}`}>
               {requestState.kind === 'live' && t('concierge.state.live')}
               {requestState.kind === 'loading' && t('concierge.state.loading')}
               {requestState.kind === 'demo' && (requestState.error ? t('concierge.state.demoError') : t('concierge.state.demoEmpty'))}
-              {requestState.kind === 'idle' && (persona ? `${t(`persona.${persona.id}.title`)} · preset` : t('concierge.state.idle'))}
+              {requestState.kind === 'idle' && (persona
+                ? t('concierge.state.preset', { persona: t(`persona.${persona.id}.title`) })
+                : t('concierge.state.idle'))}
             </span>
           </div>
 
@@ -731,6 +1330,35 @@ function ConciergePage() {
                       <option key={option.value} value={option.value}>{option.icon} {t(`activity.${option.value}`)}</option>
                     ))}
                   </select>
+                </label>
+
+                <label className="condition-field">
+                  <span><MapPin size={16} aria-hidden="true" /> {t('concierge.controls.region')}</span>
+                  <input
+                    type="text"
+                    value={form.region}
+                    onChange={(event) => updateForm('region', event.target.value)}
+                    placeholder={t('concierge.controls.regionPlaceholder')}
+                    maxLength="100"
+                    autoComplete="address-level1"
+                  />
+                  <small>{form.region.trim()
+                    ? t('concierge.controls.regionHelp')
+                    : t('concierge.controls.regionNationwideHelp')}</small>
+                </label>
+
+                <label className="condition-field">
+                  <span><Compass size={16} aria-hidden="true" /> {t('concierge.controls.spotType')}</span>
+                  <select
+                    value={form.spotType}
+                    onChange={(event) => updateForm('spotType', event.target.value)}
+                  >
+                    <option value="">{t('concierge.controls.allCompatibleTypes')}</option>
+                    {compatibleSpotTypes.map((option) => (
+                      <option key={option.id} value={option.id}>{t(`map.type.${option.id}`)}</option>
+                    ))}
+                  </select>
+                  <small>{t('concierge.controls.spotTypeHelp')}</small>
                 </label>
 
                 {['surf', 'swim'].includes(form.activity) && (
@@ -841,7 +1469,7 @@ function ConciergePage() {
           <section className="concierge-empty" aria-labelledby="empty-title">
             <div className="empty-graphic"><Compass size={24} aria-hidden="true" /></div>
             <div>
-              <span>READY WHEN YOU ARE</span>
+              <span>{t('concierge.eyebrow.ready')}</span>
               <h2 id="empty-title">{t('concierge.empty.title')}</h2>
               <p>{t('concierge.empty.description')}</p>
             </div>
@@ -872,25 +1500,11 @@ function ConciergePage() {
 
                 <ExclusionSummary excluded={requestState.excluded} meta={requestState.meta} t={t} />
 
-                <div className="itinerary-preview">
-                  <div className="itinerary-copy">
-                    <span>STEP 02 · READY LATER</span>
-                    <h2>{t('concierge.itinerary.title')}</h2>
-                    <p>{t('concierge.itinerary.description')}</p>
-                    <button type="button" disabled title={t('concierge.itinerary.pending')}>
-                      <CalendarClock size={18} aria-hidden="true" /> {t('concierge.itinerary.pending')}
-                    </button>
-                  </div>
-                  <div className="itinerary-rules" aria-label={t('concierge.itinerary.rules')}>
-                    <div><Clock3 size={18} aria-hidden="true" /><span><strong>{t('concierge.itinerary.hours')}</strong><small>{t('concierge.itinerary.hoursDetail')}</small></span></div>
-                    <div><MapPin size={18} aria-hidden="true" /><span><strong>{t('concierge.itinerary.matrix')}</strong><small>{t('concierge.itinerary.matrixDetail')}</small></span></div>
-                    <div><ShieldCheck size={18} aria-hidden="true" /><span><strong>{t('concierge.itinerary.weather')}</strong><small>{t('concierge.itinerary.weatherDetail')}</small></span></div>
-                  </div>
-                </div>
               </>
             ) : null}
           </section>
         )}
+        <ItineraryWorkspace requestState={requestState} intlLocale={intlLocale} t={t} />
       </div>
     </div>
   );

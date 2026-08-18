@@ -1,7 +1,7 @@
 .livecam-page {
   --livecam-navy: #0a3036;
   --livecam-ink: #123a3d;
-  --livecam-muted: #6c807e;
+  --livecam-muted: #566d69;
   --livecam-mint: #0e9878;
   --livecam-mint-soft: #dff5ed;
   --livecam-violet: #6372df;
@@ -129,16 +129,75 @@
 .livecam-toolbar,
 .livecam-results,
 .livecam-integrity-note,
-.livecam-empty {
+.livecam-empty,
+.livecam-data-notice {
   border: 1px solid var(--color-line, #e1e7e0);
   background: rgba(255, 255, 255, 0.91);
   box-shadow: 0 18px 55px rgba(26, 63, 62, 0.07);
 }
 
+.livecam-data-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem clamp(0rem, 3vw, 3rem) 0;
+  padding: 0.85rem 1rem;
+  border-radius: 1rem;
+  color: #355956;
+}
+
+.livecam-data-notice > svg {
+  width: 1.1rem;
+  color: #0b8067;
+}
+
+.livecam-data-notice > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.livecam-data-notice strong {
+  color: #173f3e;
+  font-size: 0.76rem;
+}
+
+.livecam-data-notice span {
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.livecam-data-notice > button {
+  min-height: 2.35rem;
+  padding-inline: 0.8rem;
+  border: 0;
+  border-radius: 0.7rem;
+  color: white;
+  background: #793e35;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.livecam-data-notice--error {
+  border-color: #e6b4ab;
+  background: #fff4f1;
+}
+
+.livecam-data-notice--error > svg {
+  color: #9b493d;
+}
+
+.livecam-data-notice--loading,
+.livecam-data-notice--empty {
+  background: #f7faf7;
+}
+
 .livecam-toolbar {
   position: relative;
   z-index: 2;
-  margin: clamp(-1.5rem, -2vw, -0.5rem) clamp(0rem, 3vw, 3rem) 0;
+  margin: 1rem clamp(0rem, 3vw, 3rem) 0;
   padding: clamp(1.35rem, 3vw, 2.2rem);
   border-radius: 1.75rem;
   backdrop-filter: blur(18px);
@@ -428,9 +487,9 @@
   background: rgba(74, 70, 126, 0.82);
 }
 
-.livecam-state-badge--offline {
-  color: #fff5f2;
-  background: rgba(114, 72, 67, 0.84);
+.livecam-state-badge--unknown {
+  color: #fffaf1;
+  background: rgba(112, 74, 25, 0.92);
 }
 
 .livecam-index-badge {
@@ -482,6 +541,20 @@
   font-size: 0.69rem;
   font-weight: 700;
   transition: background 160ms ease, transform 160ms ease;
+}
+
+.livecam-poster-kind {
+  position: absolute;
+  z-index: 2;
+  bottom: 0.9rem;
+  left: 0.9rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(40, 37, 73, 0.84);
+  font-size: 0.61rem;
+  font-weight: 740;
 }
 
 .livecam-focus-button:hover {
@@ -798,6 +871,16 @@
   background: var(--livecam-visual);
 }
 
+.livecam-focus-media iframe {
+  position: relative;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  min-height: min(76vh, 48rem);
+  border: 0;
+  background: #031a1d;
+}
+
 .livecam-focus-media__status {
   position: absolute;
   inset: auto 1rem 1rem;
@@ -862,7 +945,7 @@
 
 .livecam-focus-summary span,
 .livecam-focus-summary small {
-  color: rgba(240, 255, 250, 0.6);
+  color: rgba(240, 255, 250, 0.78);
   font-size: 0.64rem;
 }
 
@@ -904,7 +987,7 @@
 }
 
 .livecam-focus-actions > span {
-  color: rgba(241, 255, 250, 0.57);
+  color: rgba(241, 255, 250, 0.76);
   font-size: 0.72rem;
   line-height: 1.55;
 }
@@ -952,7 +1035,7 @@
   }
 
   .livecam-toolbar {
-    margin: -0.75rem 0.35rem 0;
+    margin: 0.75rem 0.35rem 0;
     padding: 1.25rem;
     border-radius: 1.35rem;
   }
@@ -975,6 +1058,10 @@
     margin-top: 1rem;
     padding: 1.25rem;
     border-radius: 1.35rem;
+  }
+
+  .livecam-data-notice {
+    margin-inline: 0.35rem;
   }
 
   .livecam-grid {
@@ -1023,6 +1110,15 @@
     justify-content: flex-start;
   }
 
+  .livecam-data-notice {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .livecam-data-notice > button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
   .livecam-focus-backdrop {
     padding: 0.35rem;
   }
@@ -1057,6 +1153,22 @@
   .livecam-status-filter button {
     transition: none;
   }
+
+  .livecam-card:hover,
+  .livecam-focus-button:hover,
+  .livecam-status-filter button:hover,
+  .livecam-card:hover .livecam-card__poster img {
+    transform: none;
+  }
+}
+
+.livecam-page button:focus-visible,
+.livecam-page a:focus-visible,
+.livecam-page select:focus-visible,
+.livecam-page input:focus-visible,
+.livecam-page iframe:focus-visible {
+  outline: 3px solid #f2b84f;
+  outline-offset: 3px;
 }
 
 @media (forced-colors: active) {

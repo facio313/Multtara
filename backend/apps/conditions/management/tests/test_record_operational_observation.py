@@ -83,6 +83,20 @@ class OperationalObservationTests(TestCase):
                 **arguments,
             )
 
+    def test_official_river_flow_is_typed_as_cubic_metres_per_second(self):
+        observation = build_operational_observation(
+            source="MOE",
+            provider_record_id="MOE-STATION-1",
+            source_url="https://www.me.go.kr/public/river-flow",
+            spatial_scope=f"spot:{self.spot.pk}",
+            metric_assignments=("river_flow_cms=15.5",),
+            **self.temporal_arguments(),
+        )
+
+        flow = observation.observations.get("river_flow_cms")
+        self.assertEqual(flow.value, 15.5)
+        self.assertEqual(flow.unit, "m3/s")
+
     def test_command_persists_idempotent_auditable_snapshot(self):
         now = timezone.now().replace(microsecond=0)
         common = (

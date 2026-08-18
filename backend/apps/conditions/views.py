@@ -29,6 +29,7 @@ class ConditionScoreFilter(django_filters.FilterSet):
             "spot",
             "activity",
             "participant_profile",
+            "participant_skill_level",
             "safety_status",
             "decision",
         )
@@ -87,6 +88,7 @@ class ConditionScoreViewSet(viewsets.ReadOnlyModelViewSet):
                 spot_id=OuterRef("spot_id"),
                 activity=OuterRef("activity"),
                 participant_profile=OuterRef("participant_profile"),
+                participant_skill_level=OuterRef("participant_skill_level"),
             )
             .filter(evaluated_at__lte=as_of)
             .filter(applicable_snapshot)
@@ -100,6 +102,12 @@ class ConditionScoreViewSet(viewsets.ReadOnlyModelViewSet):
             # Family consumers must opt in explicitly so an UNKNOWN family
             # evaluation cannot accidentally replace the general display row.
             base_queryset = base_queryset.filter(participant_profile="general")
+        if "participant_skill_level" not in request.query_params:
+            # Skill-specific surf rows are opt-in. The backwards-compatible
+            # default is the explicitly unscoped, fail-closed identity.
+            base_queryset = base_queryset.filter(
+                participant_skill_level="unspecified"
+            )
         queryset = (
             self.filter_queryset(base_queryset)
             .filter(evaluated_at__lte=as_of)
@@ -107,9 +115,21 @@ class ConditionScoreViewSet(viewsets.ReadOnlyModelViewSet):
             .filter(same_spot_snapshot)
             .filter(id=Subquery(latest_id))
         )
+        serializer_context = {
+            **self.get_serializer_context(),
+            "effective_as_of": as_of,
+        }
         page = self.paginate_queryset(queryset)
         if page is not None:
-            serializer = self.get_serializer(page, many=True)
+            serializer = self.get_serializer(
+                page,
+                many=True,
+                context=serializer_context,
+            )
             return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(queryset, many=True)
+        serializer = self.get_serializer(
+            queryset,
+            many=True,
+            context=serializer_context,
+        )
         return Response(serializer.data)

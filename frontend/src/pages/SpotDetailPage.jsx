@@ -15,6 +15,7 @@ import {
   Droplets,
   ExternalLink,
   Heart,
+  Info,
   MapPin,
   Navigation2,
   ParkingCircle,
@@ -28,9 +29,11 @@ import {
   Waves,
   Wind,
 } from 'lucide-react';
-import { activityOptions, livecams, weeklyForecast } from '../data/pongdangData';
+import { activityOptions, livecams } from '../data/pongdangData';
+import { useDailyForecast } from '../hooks/useDailyForecast';
 import { useWaterSpot } from '../hooks/useWaterData';
 import { localizedDataState, localizedSafety, useI18n } from '../i18n';
+import { bestEligibleForecast } from '../services/dailyForecastApi';
 import {
   formatMetricName,
   getSpotActivityView,
@@ -46,8 +49,8 @@ const facilitySets = {
     { icon: ParkingCircle, title: '인근 주차', meta: '현장 혼잡도에 따라 변동', tag: '이동' },
     { icon: Utensils, title: '로컬 한 끼', meta: '현재 위치 기반 연결 예정', tag: '미식' },
   ],
-  hotspring: [
-    { icon: Bath, title: '온천 운영시간', meta: '휴무·입장 마감 방문 전 확인', tag: '입욕' },
+  facility: [
+    { icon: Bath, title: '시설 운영시간', meta: '휴무·입장 마감 방문 전 확인', tag: '시설' },
     { icon: Accessibility, title: '무장애 동선', meta: '시설별 지원 범위 확인', tag: '접근성' },
     { icon: ParkingCircle, title: '주차·진입', meta: '혼잡 시간대 방문 전 확인', tag: '이동' },
     { icon: Utensils, title: '회복 한 끼', meta: '주변 식당 연결 예정', tag: '미식' },
@@ -58,7 +61,7 @@ const facilitySets = {
     { icon: ShowerHead, title: '세족·정비', meta: '인근 편의시설 연결 예정', tag: '물놀이 후' },
     { icon: Utensils, title: '지역 한 끼', meta: '현재 위치 기반 연결 예정', tag: '미식' },
   ],
-  tidal_flat: [
+  mudflat: [
     { icon: Clock3, title: '복귀 시각', meta: '조석과 현장 통제 우선 확인', tag: '안전' },
     { icon: ShowerHead, title: '세척 공간', meta: '운영 여부 방문 전 확인', tag: '체험 후' },
     { icon: ParkingCircle, title: '주차·진입', meta: '체험장별 이용 안내 확인', tag: '이동' },
@@ -72,18 +75,22 @@ const facilitySets = {
   ],
 };
 
-const analytics = [86, 82, 88, 90, 94];
+const FACILITY_GROUP_BY_TYPE = Object.freeze({
+  beach: 'beach',
+  coastal_road: 'beach',
+  hotspring: 'facility',
+  pool: 'facility',
+  waterpark: 'facility',
+  river: 'valley',
+  valley: 'valley',
+  lake: 'valley',
+  waterfall: 'valley',
+  riverside: 'valley',
+  reservoir: 'valley',
+  mudflat: 'mudflat',
+});
 
-function resolveForecastRegion(region) {
-  if (region.includes('강릉')) return '강릉';
-  if (region.includes('강원')) return '강원';
-  if (/서울|경기|인천|수도권/.test(region)) return '수도권';
-  if (/충청|대전|세종/.test(region)) return '충청';
-  if (/전라|광주/.test(region)) return '전라';
-  if (/경상|부산|대구|울산/.test(region)) return '경상';
-  if (region.includes('제주')) return '제주';
-  return '전국';
-}
+const analytics = [86, 82, 88, 90, 94];
 
 function readFavorite(id) {
   try {
@@ -105,12 +112,22 @@ function defaultActivityForSpot(spot) {
   if (!spot) return 'swim';
   const preferred = {
     hotspring: 'onsen',
-    tidal_flat: 'mudflat',
+    pool: 'onsen',
+    waterpark: 'onsen',
+    mudflat: 'mudflat',
+    river: 'rafting',
     valley: 'rafting',
+    lake: 'rafting',
+    riverside: 'rafting',
+    reservoir: 'rafting',
   }[spot.type] ?? 'swim';
-  if (spot.conditionRecords?.[preferred] || spot.scores?.[preferred] !== null) return preferred;
+  if (
+    spot.conditionRecords?.[preferred]
+    || (spot.scores?.[preferred] !== null && spot.scores?.[preferred] !== undefined)
+  ) return preferred;
   return activityOptions.find((activity) => (
-    spot.conditionRecords?.[activity.id] || spot.scores?.[activity.id] !== null
+    spot.conditionRecords?.[activity.id]
+    || (spot.scores?.[activity.id] !== null && spot.scores?.[activity.id] !== undefined)
   ))?.id ?? preferred;
 }
 
@@ -124,9 +141,19 @@ function formatDateTime(value, locale, fallback) {
   }).format(date);
 }
 
+function formatForecastDate(value, locale, fallback) {
+  const date = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat(locale, {
+    weekday: 'short',
+    month: 'numeric',
+    day: 'numeric',
+  }).format(date);
+}
+
 function TypeSpecificPanel({ spot }) {
   const { t } = useI18n();
-  if (spot.type === 'hotspring') {
+  if (['hotspring', 'pool', 'waterpark'].includes(spot.type)) {
     return (
       <section className="detail-panel type-panel type-hotspring">
         <div className="detail-section-heading">
@@ -142,7 +169,7 @@ function TypeSpecificPanel({ spot }) {
     );
   }
 
-  if (spot.type === 'tidal_flat') {
+  if (spot.type === 'mudflat') {
     return (
       <section className="detail-panel type-panel type-tidal">
         <div className="detail-section-heading">
@@ -157,7 +184,7 @@ function TypeSpecificPanel({ spot }) {
     );
   }
 
-  if (spot.type === 'valley') {
+  if (['river', 'valley', 'lake', 'waterfall', 'riverside', 'reservoir'].includes(spot.type)) {
     return (
       <section className="detail-panel type-panel type-valley">
         <div className="detail-section-heading">
@@ -203,6 +230,14 @@ function SpotDetailPage() {
   const [requestedActivity, setRequestedActivity] = useState(null);
   const [saved, setSaved] = useState(() => readFavorite(id));
   const [planned, setPlanned] = useState(false);
+  const forecastActivity = requestedActivity ?? defaultActivityForSpot(spot);
+  const dailyForecast = useDailyForecast({
+    spot: spot?.apiId,
+    activity: forecastActivity,
+    participantProfile: 'general',
+    days: 7,
+    enabled: Number.isInteger(Number(spot?.apiId)) && Number(spot?.apiId) > 0,
+  });
 
   if (!spot) {
     if (spotStatus === 'idle' || spotStatus === 'loading') {
@@ -224,15 +259,15 @@ function SpotDetailPage() {
     );
   }
 
-  const selectedActivity = requestedActivity ?? defaultActivityForSpot(spot);
+  const selectedActivity = forecastActivity;
   const selectedView = getSpotActivityView(spot, selectedActivity);
   const selectedSafety = localizedSafety(t, selectedView.safety.level);
-  const forecastRegion = resolveForecastRegion(spot.region);
-  const forecast = weeklyForecast.filter((day) => day.region === forecastRegion).slice(0, 7);
-  const bestForecast = forecast.reduce((best, day) => (day.score > best.score ? day : best));
-  const facilities = facilitySets[spot.type] ?? facilitySets.default;
+  const forecastRows = dailyForecast.data?.results ?? [];
+  const bestForecast = bestEligibleForecast(forecastRows);
+  const facilities = facilitySets[FACILITY_GROUP_BY_TYPE[spot.type]] ?? facilitySets.default;
   const availableActivities = activityOptions.filter((activity) => (
-    spot.conditionRecords?.[activity.id] || spot.scores?.[activity.id] !== null
+    spot.conditionRecords?.[activity.id]
+    || (spot.scores?.[activity.id] !== null && spot.scores?.[activity.id] !== undefined)
   ));
   const livecam = livecams.find((cam) => cam.id === spot.livecamId);
   const detailDataError = spotStatus === 'error'
@@ -246,6 +281,28 @@ function SpotDetailPage() {
         || ['idle', 'loading'].includes(observationStatus)
       )
     ));
+
+  const moveActivityTab = (event, currentIndex) => {
+    let nextIndex;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % availableActivities.length;
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextIndex = (currentIndex - 1 + availableActivities.length) % availableActivities.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = availableActivities.length - 1;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    const nextActivity = availableActivities[nextIndex];
+    setRequestedActivity(nextActivity.id);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`activity-tab-${nextActivity.id}`)?.focus();
+    });
+  };
 
   const toggleSaved = () => {
     const next = !saved;
@@ -341,17 +398,21 @@ function SpotDetailPage() {
               <div><span>ACTIVITY INDEX</span><h2>{t('spot.index.title')}</h2></div>
               <span className={`freshness-pill state-${selectedView.dataState}`}>{selectedView.provenance.updatedLabel}</span>
             </div>
-            <div className="activity-score-grid" role="tablist" aria-label="활동별 Water Index">
-              {availableActivities.map((activity) => {
+            <div className="activity-score-grid" role="tablist" aria-label="활동별 Water Index" aria-orientation="horizontal">
+              {availableActivities.map((activity, index) => {
                 const view = getSpotActivityView(spot, activity.id);
                 const isSelected = activity.id === selectedActivity;
                 return (
                   <button
                     type="button"
                     role="tab"
+                    id={`activity-tab-${activity.id}`}
+                    aria-controls="activity-score-panel"
                     aria-selected={isSelected}
+                    tabIndex={isSelected ? 0 : -1}
                     className={isSelected ? 'primary-score' : ''}
                     onClick={() => setRequestedActivity(activity.id)}
+                    onKeyDown={(event) => moveActivityTab(event, index)}
                     key={activity.id}
                   >
                     <span>{t(`activity.${activity.id}`)}</span>
@@ -364,19 +425,28 @@ function SpotDetailPage() {
                 <div className="score-empty"><strong>—</strong><span>{t('spot.index.empty')}</span></div>
               )}
             </div>
-            <div className="score-confidence-row">
-              <span>{t('spot.index.confidence')} <strong>{selectedView.confidence === null ? '—' : `${Math.round(selectedView.confidence * 100)}%`}</strong></span>
-              <span>coverage <strong>{selectedView.coverage === null ? '—' : `${Math.round(selectedView.coverage * 100)}%`}</strong></span>
-              {selectedView.score === null && selectedView.scoreRange.length === 2 && <span>{t('spot.index.range')} <strong>{selectedView.scoreRange.join('–')}</strong></span>}
-              <span>{t('spot.index.method')} <strong>{selectedView.methodologyVersion}</strong></span>
-            </div>
-            <div className="score-reasons">
-              <span>{t('spot.index.reasons')}</span>
-              {selectedView.reasons.map((reason) => <p key={reason.code}><Check size={14} /><code>{reason.code}</code> {reason.label}</p>)}
-              {selectedView.reasons.length === 0 && selectedView.isDemoFallback
-                ? spot.reasons.map((reason) => <p key={reason}><Check size={14} /> {reason} <em>DEMO</em></p>)
-                : null}
-              {selectedView.reasons.length === 0 && !selectedView.isDemoFallback && <p><ShieldAlert size={14} /> {t('spot.index.noReason')}</p>}
+            <div
+              id="activity-score-panel"
+              role="tabpanel"
+              aria-labelledby={availableActivities.length > 0
+                ? `activity-tab-${selectedActivity}`
+                : undefined}
+              tabIndex={0}
+            >
+              <div className="score-confidence-row">
+                <span>{t('spot.index.confidence')} <strong>{selectedView.confidence === null ? '—' : `${Math.round(selectedView.confidence * 100)}%`}</strong></span>
+                <span>coverage <strong>{selectedView.coverage === null ? '—' : `${Math.round(selectedView.coverage * 100)}%`}</strong></span>
+                {selectedView.score === null && selectedView.scoreRange.length === 2 && <span>{t('spot.index.range')} <strong>{selectedView.scoreRange.join('–')}</strong></span>}
+                <span>{t('spot.index.method')} <strong>{selectedView.methodologyVersion}</strong></span>
+              </div>
+              <div className="score-reasons">
+                <span>{t('spot.index.reasons')}</span>
+                {selectedView.reasons.map((reason) => <p key={reason.code}><Check size={14} /><code>{reason.code}</code> {reason.label}</p>)}
+                {selectedView.reasons.length === 0 && selectedView.isDemoFallback
+                  ? spot.reasons.map((reason) => <p key={reason}><Check size={14} /> {reason} <em>DEMO</em></p>)
+                  : null}
+                {selectedView.reasons.length === 0 && !selectedView.isDemoFallback && <p><ShieldAlert size={14} /> {t('spot.index.noReason')}</p>}
+              </div>
             </div>
           </section>
 
@@ -393,7 +463,7 @@ function SpotDetailPage() {
               <div><Droplets size={21} /><span>{t('metric.waterQuality')}</span><strong>{selectedView.conditions.waterQuality}</strong></div>
               <div><Accessibility size={21} /><span>{t('metric.crowd')}</span><strong>{selectedView.conditions.crowd}</strong></div>
             </div>
-            {spot.type === 'sea' || spot.type === 'tidal_flat' ? (
+            {spot.type === 'beach' || spot.type === 'mudflat' ? (
               <div className="tide-timeline">
                 <div><span>{t('spot.conditions.lowTide')}</span><strong>{selectedView.conditions.tide.low}</strong></div>
                 <div className="tide-line"><span className="tide-progress" /></div>
@@ -450,20 +520,61 @@ function SpotDetailPage() {
 
           <section className="detail-panel forecast-panel">
             <div className="detail-section-heading">
-              <div><span>WATER FORECAST</span><h2>{t('spot.forecast.title')}</h2></div>
-              <Link to="/forecast">{t('spot.forecast.all')} <ChevronRight size={16} /></Link>
+              <div>
+                <span>{t(spot.apiId === null ? 'spot.forecast.eyebrowDemo' : 'spot.forecast.eyebrowApi')}</span>
+                <h2>{t('spot.forecast.title')}</h2>
+              </div>
+              <Link to={spot.apiId === null
+                ? '/forecast'
+                : `/forecast?spot=${encodeURIComponent(spot.apiId)}&activity=${encodeURIComponent(selectedActivity)}&profile=general`}>
+                {t('spot.forecast.all')} <ChevronRight size={16} />
+              </Link>
             </div>
-            <div className="detail-forecast-strip">
-              {forecast.map((day) => (
-                <div className={day.score >= 90 ? 'best' : ''} key={day.id}>
-                  <span>{day.day}</span>
-                  <strong>{day.score}</strong>
-                  <div className="forecast-mini-bar"><span style={{ height: `${day.score}%` }} /></div>
-                  <small>{day.date.slice(5).replace('-', '.')}</small>
+            {spot.apiId === null ? (
+              <div className="detail-forecast-state is-demo" role="status">
+                <ShieldAlert size={19} aria-hidden="true" />
+                <div><strong>{t('spot.forecast.demoTitle')}</strong><p>{t('spot.forecast.demoDescription')}</p></div>
+              </div>
+            ) : null}
+            {spot.apiId !== null && dailyForecast.status === 'loading' ? (
+              <div className="detail-forecast-state" role="status" aria-live="polite">
+                <Droplets size={19} aria-hidden="true" />
+                <div><strong>{t('spot.forecast.loading')}</strong><p>{t('spot.forecast.loadingDescription')}</p></div>
+              </div>
+            ) : null}
+            {spot.apiId !== null && dailyForecast.status === 'error' ? (
+              <div className="detail-forecast-state is-error" role="alert">
+                <ShieldAlert size={19} aria-hidden="true" />
+                <div><strong>{t('spot.forecast.errorTitle')}</strong><p>{t(dailyForecast.error?.messageKey || 'forecast.api.error.response')}</p></div>
+                <button type="button" onClick={dailyForecast.retry}>{t('common.retry')}</button>
+              </div>
+            ) : null}
+            {spot.apiId !== null && dailyForecast.status === 'ready' ? (
+              <>
+                <div className="detail-forecast-strip" aria-label={t('spot.forecast.weekAria')}>
+                  {forecastRows.map((day) => (
+                    <div className={bestForecast?.forecastDate === day.forecastDate ? 'best' : ''} key={day.forecastDate}>
+                      <span>{formatForecastDate(day.forecastDate, intlLocale, day.forecastDate)}</span>
+                      <strong>{day.score ?? '—'}</strong>
+                      <div className="forecast-mini-bar" aria-hidden="true"><span style={{ height: `${day.score ?? 0}%` }} /></div>
+                      <small>{t(`forecast.safety.${day.safetyStatus}`)}</small>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <div className="best-day-note"><Sparkles size={18} /><p>{t('spot.forecast.bestNote', { region: forecastRegion, day: bestForecast.day, time: bestForecast.best })}</p></div>
+                {bestForecast ? (
+                  <div className="best-day-note"><Sparkles size={18} aria-hidden="true" /><p>{t('spot.forecast.bestCurrent', { date: formatForecastDate(bestForecast.forecastDate, intlLocale, bestForecast.forecastDate) })}</p></div>
+                ) : (
+                  <div className="best-day-note is-unknown"><ShieldAlert size={18} aria-hidden="true" /><p>{t('spot.forecast.noBest')}</p></div>
+                )}
+                <dl className="detail-forecast-provenance">
+                  <div><dt>{t('forecast.detail.availability')}</dt><dd>{forecastRows[0] ? t(`forecast.availability.${forecastRows[0].availability}`) : t('common.noData')}</dd></div>
+                  <div><dt>{t('forecast.detail.providers')}</dt><dd>{forecastRows[0]?.providers.join(' · ') || t('common.noData')}</dd></div>
+                  <div><dt>{t('forecast.detail.validUntil')}</dt><dd>{formatDateTime(forecastRows[0]?.validUntil, intlLocale, t('common.noData'))}</dd></div>
+                  <div><dt>{t('forecast.detail.current')}</dt><dd>{t(forecastRows[0]?.evidenceCurrent ? 'forecast.current.yes' : 'forecast.current.no')}</dd></div>
+                </dl>
+                <p className="detail-forecast-policy"><Info size={15} aria-hidden="true" /> {t('spot.forecast.policy')}</p>
+              </>
+            ) : null}
           </section>
 
           <section className="detail-panel route-panel">

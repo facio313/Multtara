@@ -6,8 +6,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --prefix=/install --no-cache-dir -r /tmp/requirements.txt
+COPY requirements.lock /tmp/requirements.lock
+RUN pip install \
+    --disable-pip-version-check \
+    --prefix=/install \
+    --no-cache-dir \
+    --require-hashes \
+    -r /tmp/requirements.lock
 
 # Stage 2: Runtime
 FROM python:3.12-slim-bookworm

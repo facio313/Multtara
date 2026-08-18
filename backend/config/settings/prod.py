@@ -43,6 +43,15 @@ if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
 CORS_ALLOWED_ORIGINS = parse_production_cors_allowed_origins(
     config("CORS_ALLOWED_ORIGINS", default="")
 )
+# Exact split-deployment origins may use the same session/CSRF contract as the
+# same-origin SPA. Secure cookies and explicit trusted origins are all required;
+# configuring CORS alone would otherwise yield a login flow that appears to
+# succeed but cannot retain or submit the session cross-site.
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
+CORS_ALLOW_CREDENTIALS = bool(CORS_ALLOWED_ORIGINS)
+if CORS_ALLOWED_ORIGINS:
+    SESSION_COOKIE_SAMESITE = "None"
+    CSRF_COOKIE_SAMESITE = "None"
 
 # This table predates the evidence-backed condition pipeline and may contain
 # seed/demo values. Keep its public API closed in production even when rows

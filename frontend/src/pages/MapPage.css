@@ -203,6 +203,80 @@
   font-weight: 760;
 }
 
+.pd-map-nearby {
+  display: grid;
+  min-width: min(100%, 220px);
+  grid-template-columns: minmax(0, auto) auto;
+  align-items: center;
+  gap: 3px 6px;
+  padding: 5px 7px;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  background: #fbfcfa;
+}
+
+.pd-map-nearby > button {
+  display: inline-flex;
+  min-height: 35px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding-inline: 10px;
+  border: 0;
+  border-radius: 10px;
+  color: #f4fffb;
+  background: #0b5f54;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
+.pd-map-nearby > button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.pd-map-nearby > .pd-map-nearby-clear {
+  width: 35px;
+  padding: 0;
+  color: #385b58;
+  background: #e8efeb;
+}
+
+.pd-map-nearby-status,
+.pd-map-nearby small {
+  grid-column: 1 / -1;
+  line-height: 1.35;
+}
+
+.pd-map-nearby-status {
+  color: #385e5b;
+  font-size: 0.61rem;
+  font-weight: 720;
+}
+
+.pd-map-nearby small {
+  color: #536b68;
+  font-size: 0.54rem;
+}
+
+.pd-map-nearby.state-denied,
+.pd-map-nearby.state-unavailable,
+.pd-map-nearby.state-timeout,
+.pd-map-nearby.state-error,
+.pd-map-nearby.state-unsupported {
+  border-color: rgba(164, 73, 59, 0.28);
+  background: #fff7f4;
+}
+
+.pd-map-nearby.state-denied .pd-map-nearby-status,
+.pd-map-nearby.state-unavailable .pd-map-nearby-status,
+.pd-map-nearby.state-timeout .pd-map-nearby-status,
+.pd-map-nearby.state-error .pd-map-nearby-status,
+.pd-map-nearby.state-unsupported .pd-map-nearby-status {
+  color: #8d4035;
+}
+
 .pd-map-type-filters {
   display: flex;
   flex: 0 0 auto;
@@ -252,6 +326,46 @@
   display: flex;
   align-items: center;
   gap: 11px;
+}
+
+.pd-map-panel-heading > .pd-map-layer-actions {
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.pd-map-layer-switch {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid rgba(222, 249, 241, 0.12);
+  border-radius: 11px;
+  background: rgba(2, 26, 29, 0.35);
+}
+
+.pd-map-layer-switch button {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  padding-inline: 9px;
+  border: 0;
+  border-radius: 8px;
+  color: rgba(235, 251, 246, 0.72);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.6rem;
+  font-weight: 760;
+}
+
+.pd-map-layer-switch button:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pd-map-layer-switch button.is-active {
+  color: #073b35;
+  background: #a7ead7;
 }
 
 .pd-map-panel-icon {
@@ -516,6 +630,13 @@
   --marker-color: #a75c53;
 }
 
+.pd-map-marker-temperature-very-cold { --marker-color: #3c69b4; }
+.pd-map-marker-temperature-cold { --marker-color: #287fbd; }
+.pd-map-marker-temperature-cool { --marker-color: #278f8b; }
+.pd-map-marker-temperature-mild { --marker-color: #bd7c24; }
+.pd-map-marker-temperature-warm { --marker-color: #bd5145; }
+.pd-map-marker-temperature-unknown { --marker-color: #667773; }
+
 .pd-map-marker.safety-caution {
   border-color: #ffd1a6;
 }
@@ -629,6 +750,11 @@
 .legend-good { background: #5eb0d1; }
 .legend-fair { background: #d5a34a; }
 .legend-caution { border: 2px solid #ffba8e; background: transparent; }
+.legend-temperature-very-cold { background: #6697ec; }
+.legend-temperature-cold { background: #56a9e3; }
+.legend-temperature-cool { background: #55c5bd; }
+.legend-temperature-mild { background: #efb45f; }
+.legend-temperature-warm { background: #ed786a; }
 
 .pd-kakao-marker {
   display: flex;
@@ -666,7 +792,22 @@
 .pd-kakao-marker-good { background: #346f8b; }
 .pd-kakao-marker-fair { background: #90641e; }
 .pd-kakao-marker-check { background: #97574e; }
+.pd-kakao-marker-temperature-very-cold { background: #3c69b4; }
+.pd-kakao-marker-temperature-cold { background: #287fbd; }
+.pd-kakao-marker-temperature-cool { background: #278f8b; }
+.pd-kakao-marker-temperature-mild { background: #9b651c; }
+.pd-kakao-marker-temperature-warm { background: #a94338; }
+.pd-kakao-marker-temperature-unknown { background: #667773; }
 .pd-kakao-marker.safety-caution { border-color: #ffc69f; }
+
+.pd-map-page button:focus-visible,
+.pd-map-page a:focus-visible,
+.pd-map-page select:focus-visible,
+.pd-map-page input:focus-visible,
+.pd-kakao-marker:focus-visible {
+  outline: 3px solid #f6bd56;
+  outline-offset: 3px;
+}
 
 .pd-map-sheet {
   max-height: clamp(650px, 74dvh, 790px);
@@ -1120,6 +1261,10 @@
     flex-basis: 360px;
   }
 
+  .pd-map-nearby {
+    flex: 1 1 280px;
+  }
+
   .pd-map-type-filters {
     width: 100%;
     overflow-x: auto;
@@ -1263,8 +1408,22 @@
   }
 
   .pd-map-panel-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
     min-height: 66px;
     padding: 13px 15px;
+  }
+
+  .pd-map-panel-heading > .pd-map-layer-actions {
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    flex-direction: row;
+  }
+
+  .pd-map-layer-switch {
+    overflow-x: auto;
   }
 
   .pd-map-panel-icon {
@@ -1393,6 +1552,16 @@
     font-size: 0.68rem;
   }
 
+  .pd-map-nearby {
+    width: 100%;
+  }
+
+  .pd-map-layer-switch button {
+    min-height: 34px;
+    padding-inline: 8px;
+    font-size: 0.56rem;
+  }
+
   .pd-map-condition-row {
     gap: 5px;
   }
@@ -1436,12 +1605,46 @@
   .pd-map-loading span {
     animation: none;
   }
+
+  .pd-map-fallback,
+  .pd-map-marker,
+  .pd-map-marker::after,
+  .pd-map-marker-name,
+  .pd-map-result-card,
+  .pd-map-featured-footer a,
+  .pd-map-scope button,
+  .pd-map-type-filters button {
+    scroll-behavior: auto;
+    transition: none;
+  }
+
+  .pd-map-marker:hover,
+  .pd-map-marker.is-selected {
+    transform: translate(-50%, -50%) rotate(-45deg);
+  }
+
+  .pd-map-result-card:hover,
+  .pd-map-featured-footer a:hover {
+    transform: none;
+  }
 }
 
 /* Auditable live/demo condition states */
 .pd-map-data-note.state-live {
   border-color: rgba(88, 219, 178, 0.28);
   background: rgba(17, 74, 68, 0.56);
+}
+
+.pd-map-data-note.state-live strong,
+.pd-map-data-note.state-live div span,
+.pd-map-data-note.state-error strong,
+.pd-map-data-note.state-error div span {
+  color: #f2fffb;
+}
+
+.pd-map-data-note.state-live div span,
+.pd-map-data-note.state-error div span {
+  opacity: 0.82;
 }
 
 .pd-map-data-note.state-error {

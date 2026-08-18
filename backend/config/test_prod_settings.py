@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 
@@ -6,6 +8,18 @@ from config.settings.validation import (
     parse_production_cors_allowed_origins,
     parse_production_database_url,
 )
+
+
+class ProductionSplitSessionSettingsContractTests(SimpleTestCase):
+    def test_prod_settings_bind_split_cors_to_csrf_and_secure_cookie_mode(self):
+        source = (Path(__file__).parent / "settings" / "prod.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)", source)
+        self.assertIn("CORS_ALLOW_CREDENTIALS = bool(CORS_ALLOWED_ORIGINS)", source)
+        self.assertIn('SESSION_COOKIE_SAMESITE = "None"', source)
+        self.assertIn('CSRF_COOKIE_SAMESITE = "None"', source)
 
 
 class ProductionDatabaseSettingsTests(SimpleTestCase):

@@ -22,6 +22,7 @@ class ProviderConfig:
     kma: str
     khoa: str
     moe: str
+    routing_matrix: str = ""
 
     @classmethod
     def from_environment(cls) -> "ProviderConfig":
@@ -32,6 +33,7 @@ class ProviderConfig:
             kma=_read_key("KMA_API_KEY", shared_key),
             khoa=_read_key("KHOA_API_KEY", shared_key),
             moe=_read_key("MOE_API_KEY", shared_key),
+            routing_matrix=_read_key("ROUTING_MATRIX_URL"),
         )
 
     def public_status(self) -> dict[str, bool]:
@@ -42,6 +44,7 @@ class ProviderConfig:
             "weather": bool(self.kma),
             "marine": bool(self.khoa),
             "water_quality": bool(self.moe),
+            "routing_matrix": bool(self.routing_matrix),
         }
 
 

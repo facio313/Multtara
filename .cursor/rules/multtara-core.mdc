@@ -9,5 +9,5 @@ alwaysApply: true
 - 모호하면 구현 전 질문. **요청 범위만** 구현.
 - 도메인·API·DB 변경 전 **`AGENTS.md`** · 기획/플랜 문서 확인.
 - **`.env` 커밋 금지**. 키 하드코딩 금지.
-- **브랜치**: `{tool}/feature` → `{tool}` → `dev` → `main`. 영문 kebab-case만.
-- 이 워크트리에서는 **`cursor` 브랜치(및 `cursor/*`)만** 커밋. `main`/`dev`/`anthropic`/`codex` 직접 수정 금지.
+- **브랜치**: `{tool}-feature` → `{tool}` → `dev` → `main`. 영문 kebab-case만.
+- 이 워크트리에서는 **`cursor` 브랜치(및 `cursor-*`)만** 커밋. `main`/`dev`/`anthropic`/`codex` 직접 수정 금지.

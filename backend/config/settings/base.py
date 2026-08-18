@@ -83,6 +83,9 @@ AUTH_PASSWORD_VALIDATORS = [
 AUTH_USER_MODEL = "users.User"
 
 REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
     "DEFAULT_FILTER_BACKENDS": [
@@ -94,6 +97,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "anon": "120/minute",
         "recommendations": "10/minute",
+        "authentication": "10/minute",
     },
 }
 
@@ -121,3 +125,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # a direct internal request cannot allocate an unbounded request body.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 1_000
+
+# Session authentication is same-origin by default. Split HTTPS deployments
+# must opt into exact origins in prod.py and still send a CSRF token.
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = "Lax"

@@ -1,440 +1,1093 @@
-import { useMemo, useState } from 'react';
 import {
-  Accessibility,
-  ArrowRight,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
   BadgeCheck,
   CalendarDays,
-  Check,
-  ChevronRight,
-  Compass,
   Database,
-  Droplets,
+  KeyRound,
   Leaf,
-  LockKeyhole,
+  LoaderCircle,
+  LogIn,
+  LogOut,
   MapPin,
-  Route,
+  Images,
+  Pencil,
+  RefreshCw,
+  ShieldAlert,
   ShieldCheck,
-  Sparkles,
+  Trash2,
+  X,
+  UserPlus,
   UserRound,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { passportCollections, personas, spots } from '../data/pongdangData';
+import { useWaterSpots } from '../hooks/useWaterData';
 import { useI18n } from '../i18n';
+import {
+  accountLocaleToUiLocale,
+  changeAccountPassword,
+  classifyAccountError,
+  createActivity,
+  createEcoAction,
+  isMissingSession,
+  listActivities,
+  listEcoActions,
+  listPassports,
+  uiLocaleToAccountLocale,
+} from '../services/accountApi';
+import {
+  createTripMemory,
+  deleteTripMemory,
+  listTripMemories,
+  updateTripMemory,
+} from '../services/memoryApi';
+import useSessionStore from '../store/useSessionStore';
 import './ProfilePage.css';
 
-const PREFERENCE_STORAGE_KEY = 'pongdang:persona-preference';
+const PERSONA_TYPES = ['', 'active', 'family', 'wellness', 'local', 'stay'];
+const ECO_ACTION_TYPES = ['cleanup', 'reusable', 'local', 'transit', 'safety_share'];
+const VERIFICATION_STATES = new Set(['pending', 'verified', 'rejected']);
 
-const demoSavedTrips = [
-  {
-    id: 'east-coast-wave-day',
-    eyebrow: '8월 22일 · 당일',
-    title: '강릉, 파도와 커피 사이',
-    route: '안목해변 → 초당동 → 경포호',
-    condition: '예상 지수 91',
-    href: '/forecast',
-    tone: 'mint',
-  },
-  {
-    id: 'forest-valley-rest',
-    eyebrow: '저장한 초안 · 1박 2일',
-    title: '숲 깊은 계곡에서 한 박자 쉬기',
-    route: '인제 계곡 → 로컬 식당 → 숲 스테이',
-    condition: '일정 다듬기',
-    href: '/concierge',
-    tone: 'blue',
-  },
-];
-
-const ecoMilestones = [
-  { id: 'bottle', label: '다회용 물병 챙기기', complete: true },
-  { id: 'cleanup', label: '해변 정화 20분 인증', complete: true },
-  { id: 'local', label: '로컬 상점 이용하기', complete: true },
-  { id: 'transit', label: '대중교통 물 여행', complete: false },
-  { id: 'share', label: '안전한 스팟 정보 나누기', complete: false },
-];
-
-function readLocalPreference() {
-  if (typeof window === 'undefined') {
-    return { id: null, status: 'unavailable' };
-  }
-
-  try {
-    return {
-      id: window.localStorage.getItem(PREFERENCE_STORAGE_KEY),
-      status: 'available',
-    };
-  } catch {
-    return { id: null, status: 'unavailable' };
+function refreshExpiredSession(error) {
+  if (isMissingSession(error)) {
+    void useSessionStore.getState().ensureSession({ force: true });
   }
 }
 
-function readDemoItinerary() {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const value = JSON.parse(window.localStorage.getItem('pongdang:demo-itinerary') || 'null');
-    return value && typeof value.spotId === 'string' ? value : null;
-  } catch {
-    return null;
-  }
+function todayValue() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
 }
 
-function getPersonaById(personaId) {
-  if (!personaId || !Array.isArray(personas)) return null;
-  return personas.find((persona) => String(persona?.id) === String(personaId)) || null;
+function dateTimeLocalValue(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 }
 
-function normalizeCollections(collections) {
-  if (!Array.isArray(collections)) return [];
-
-  return collections.map((collection, index) => {
-    const total = Math.max(0, Number(collection?.total) || 0);
-    const current = Math.min(total || Infinity, Math.max(0, Number(collection?.current) || 0));
-
-    return {
-      id: collection?.id || `collection-${index}`,
-      title: collection?.title || '이름 없는 컬렉션',
-      current: Number.isFinite(current) ? current : 0,
-      total,
-      unit: collection?.unit || '곳',
-      icon: typeof collection?.icon === 'string' ? collection.icon : '💧',
-      color: collection?.color || '#0b987a',
-    };
-  });
+function formatDate(value, locale, fallback) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return fallback;
+  return new Intl.DateTimeFormat(locale, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
 }
 
-function EmptyPanel({ icon: Icon, title, description, actionLabel, to }) {
+function safeVerificationState(value) {
+  const state = String(value || '').toLowerCase();
+  return VERIFICATION_STATES.has(state) ? state : 'pending';
+}
+
+function Feedback({ feedback, t }) {
+  if (!feedback) return null;
   return (
-    <div className="profile-empty-state">
-      <span><Icon size={21} aria-hidden="true" /></span>
+    <p
+      className={`account-feedback is-${feedback.type}`}
+      role={feedback.type === 'error' ? 'alert' : 'status'}
+    >
+      {t(feedback.messageKey)}
+    </p>
+  );
+}
+
+function EmptyState({ title, description }) {
+  return (
+    <div className="account-empty">
+      <Database size={20} aria-hidden="true" />
       <div>
         <strong>{title}</strong>
         <p>{description}</p>
       </div>
-      {actionLabel && to ? (
-        <Link to={to}>
-          {actionLabel}
-          <ArrowRight size={15} aria-hidden="true" />
-        </Link>
-      ) : null}
     </div>
   );
 }
 
-function ProfilePage() {
-  const { t } = useI18n();
-  const [localPreference, setLocalPreference] = useState(readLocalPreference);
-  const [localItinerary] = useState(readDemoItinerary);
-  const [storageMessage, setStorageMessage] = useState('');
-
-  const currentPersona = useMemo(
-    () => getPersonaById(localPreference.id),
-    [localPreference.id],
+function SpotSelect({ id, value, onChange, spots, label, optional, t }) {
+  return (
+    <label className="account-field" htmlFor={id}>
+      <span>{label}</span>
+      <select id={id} value={value} onChange={onChange} required={!optional}>
+        <option value="">{optional ? t('account.spot.optional') : t('account.spot.choose')}</option>
+        {spots.map((spot) => (
+          <option key={spot.apiId} value={spot.apiId}>
+            {spot.name} · {spot.region}
+          </option>
+        ))}
+      </select>
+    </label>
   );
-  const collections = useMemo(() => normalizeCollections(passportCollections), []);
-  const savedTrips = useMemo(() => {
-    if (!localItinerary) return demoSavedTrips;
-    const firstSpot = spots.find((spot) => spot.slug === localItinerary.spotId);
-    if (!firstSpot) return demoSavedTrips;
+}
 
-    return [
-      {
-        id: 'local-persona-itinerary',
-        eyebrow: '이 기기에 저장한 데모 일정',
-        title: `${firstSpot.name}에서 시작하는 물 여행`,
-        route: `${firstSpot.name} → 로컬 한 끼 → 실내 대안`,
-        condition: '컨시어지 데모',
-        href: `/spot/${firstSpot.slug}`,
-        tone: 'mint',
-      },
-      ...demoSavedTrips,
-    ];
-  }, [localItinerary]);
+function GuestAccount({ mode, setMode, onLogin, onRegister, busy, feedback, locale, t }) {
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [registerForm, setRegisterForm] = useState({ username: '', email: '', password: '' });
+  const tabRefs = useRef([]);
 
-  const collectionTotals = collections.reduce(
-    (totals, collection) => ({
-      current: totals.current + collection.current,
-      total: totals.total + collection.total,
-    }),
-    { current: 0, total: 0 },
-  );
-  const passportProgress = collectionTotals.total
-    ? Math.round((collectionTotals.current / collectionTotals.total) * 100)
-    : 0;
-  const ecoCompleted = ecoMilestones.filter((milestone) => milestone.complete).length;
+  const moveTab = (event, currentIndex) => {
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex + 1) % 2;
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % 2;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = 1;
+    setMode(nextIndex === 0 ? 'login' : 'register');
+    tabRefs.current[nextIndex]?.focus();
+  };
 
-  const clearPreference = () => {
-    try {
-      window.localStorage.removeItem(PREFERENCE_STORAGE_KEY);
-      setLocalPreference({ id: null, status: 'available' });
-      setStorageMessage('profile.storage.cleared');
-    } catch {
-      setLocalPreference((current) => ({ ...current, status: 'unavailable' }));
-      setStorageMessage('profile.storage.clearFailed');
-    }
+  const submitLogin = async (event) => {
+    event.preventDefault();
+    await onLogin(loginForm);
+    setLoginForm((current) => ({ ...current, password: '' }));
+  };
+
+  const submitRegister = async (event) => {
+    event.preventDefault();
+    await onRegister({
+      ...registerForm,
+      preferred_locale: uiLocaleToAccountLocale(locale),
+    });
+    setRegisterForm((current) => ({ ...current, password: '' }));
   };
 
   return (
-    <div className="profile-page">
-      <section className="profile-hero" aria-labelledby="profile-title">
-        <div className="profile-hero-glow" aria-hidden="true" />
-
-        <div className="profile-identity">
-          <div className="profile-avatar" aria-hidden="true">
-            <Droplets size={27} />
-          </div>
-          <div className="profile-identity-copy">
-            <span className="profile-demo-label"><UserRound size={13} /> GUEST · DEMO</span>
-            <h1 id="profile-title">{t('profile.hero.title')}</h1>
-            <p>{t('profile.hero.description')}</p>
-          </div>
+    <section className="account-auth-card" aria-labelledby="account-auth-title">
+      <div className="account-section-heading">
+        <div>
+          <span>{t('account.eyebrow.access')}</span>
+          <h2 id="account-auth-title">{t('account.auth.title')}</h2>
+          <p>{t('account.auth.description')}</p>
         </div>
+        <ShieldCheck size={28} aria-hidden="true" />
+      </div>
 
-        <div className="profile-hero-actions">
-          <Link className="profile-hero-primary" to="/onboarding">
-            <Sparkles size={17} aria-hidden="true" />
-            {currentPersona ? t('profile.cta.refindTaste') : t('profile.cta.findTaste')}
-          </Link>
-          <Link className="profile-hero-secondary" to="/concierge">
-            {t('profile.cta.aiTrip')}
-            <ArrowRight size={16} aria-hidden="true" />
-          </Link>
+      <div className="account-tabs" role="tablist" aria-label={t('account.auth.tabs')}>
+        <button
+          type="button"
+          role="tab"
+          id="account-login-tab"
+          aria-controls="account-login-panel"
+          aria-selected={mode === 'login'}
+          tabIndex={mode === 'login' ? 0 : -1}
+          onClick={() => setMode('login')}
+          onKeyDown={(event) => moveTab(event, 0)}
+          ref={(node) => { tabRefs.current[0] = node; }}
+        >
+          <LogIn size={16} aria-hidden="true" /> {t('account.auth.login')}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="account-register-tab"
+          aria-controls="account-register-panel"
+          aria-selected={mode === 'register'}
+          tabIndex={mode === 'register' ? 0 : -1}
+          onClick={() => setMode('register')}
+          onKeyDown={(event) => moveTab(event, 1)}
+          ref={(node) => { tabRefs.current[1] = node; }}
+        >
+          <UserPlus size={16} aria-hidden="true" /> {t('account.auth.register')}
+        </button>
+      </div>
+
+      {mode === 'login' ? (
+        <form
+          id="account-login-panel"
+          role="tabpanel"
+          aria-labelledby="account-login-tab"
+          className="account-form"
+          onSubmit={submitLogin}
+        >
+          <label className="account-field" htmlFor="login-username">
+            <span>{t('account.field.username')}</span>
+            <input
+              id="login-username"
+              name="username"
+              autoComplete="username"
+              value={loginForm.username}
+              onChange={(event) => setLoginForm({ ...loginForm, username: event.target.value })}
+              maxLength="150"
+              required
+            />
+          </label>
+          <label className="account-field" htmlFor="login-password">
+            <span>{t('account.field.password')}</span>
+            <input
+              id="login-password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              value={loginForm.password}
+              onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })}
+              required
+            />
+          </label>
+          <Feedback feedback={feedback} t={t} />
+          <button className="account-primary-button" type="submit" disabled={busy}>
+            {busy ? <LoaderCircle className="account-spinner" size={17} aria-hidden="true" /> : <LogIn size={17} aria-hidden="true" />}
+            {busy ? t('common.loading') : t('account.auth.login')}
+          </button>
+        </form>
+      ) : (
+        <form
+          id="account-register-panel"
+          role="tabpanel"
+          aria-labelledby="account-register-tab"
+          className="account-form"
+          onSubmit={submitRegister}
+        >
+          <label className="account-field" htmlFor="register-username">
+            <span>{t('account.field.username')}</span>
+            <input
+              id="register-username"
+              name="username"
+              autoComplete="username"
+              value={registerForm.username}
+              onChange={(event) => setRegisterForm({ ...registerForm, username: event.target.value })}
+              maxLength="150"
+              required
+            />
+          </label>
+          <label className="account-field" htmlFor="register-email">
+            <span>{t('account.field.email')}</span>
+            <input
+              id="register-email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              value={registerForm.email}
+              onChange={(event) => setRegisterForm({ ...registerForm, email: event.target.value })}
+              maxLength="254"
+              required
+            />
+          </label>
+          <label className="account-field" htmlFor="register-password">
+            <span>{t('account.field.newPassword')}</span>
+            <input
+              id="register-password"
+              name="new-password"
+              type="password"
+              autoComplete="new-password"
+              value={registerForm.password}
+              onChange={(event) => setRegisterForm({ ...registerForm, password: event.target.value })}
+              aria-describedby="register-password-help"
+              required
+            />
+            <small id="register-password-help">{t('account.password.help')}</small>
+          </label>
+          <Feedback feedback={feedback} t={t} />
+          <button className="account-primary-button" type="submit" disabled={busy}>
+            {busy ? <LoaderCircle className="account-spinner" size={17} aria-hidden="true" /> : <UserPlus size={17} aria-hidden="true" />}
+            {busy ? t('common.loading') : t('account.auth.register')}
+          </button>
+        </form>
+      )}
+      <p className="account-security-note"><ShieldCheck size={15} aria-hidden="true" /> {t('account.auth.security')}</p>
+    </section>
+  );
+}
+
+function ProfilePage() {
+  const { intlLocale, locale, setLocale, t } = useI18n();
+  const session = useSessionStore();
+  const { spots, spotStatus } = useWaterSpots(null, { loadConditions: false });
+  const apiSpots = useMemo(
+    () => spots.filter((spot) => Number.isInteger(Number(spot.apiId)) && Number(spot.apiId) > 0),
+    [spots],
+  );
+  const [authMode, setAuthMode] = useState('login');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authFeedback, setAuthFeedback] = useState(null);
+  const [records, setRecords] = useState({
+    status: 'idle', activities: [], passports: [], ecoActions: [], memories: [], error: null,
+  });
+  const [profileForm, setProfileForm] = useState({
+    email: '', first_name: '', last_name: '', persona_type: '', mood_state: '', home_region: '', preferred_locale: locale,
+  });
+  const [profileFeedback, setProfileFeedback] = useState(null);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [activityForm, setActivityForm] = useState({ spot: '', action: 'visit', rating: '5', review_text: '' });
+  const [activityFeedback, setActivityFeedback] = useState(null);
+  const [activityBusy, setActivityBusy] = useState(false);
+  const [ecoForm, setEcoForm] = useState({
+    spot: '', action_type: 'cleanup', note: '', evidence_url: '', occurred_on: todayValue(),
+  });
+  const [ecoFeedback, setEcoFeedback] = useState(null);
+  const [ecoBusy, setEcoBusy] = useState(false);
+  const [memoryForm, setMemoryForm] = useState({
+    spot: '', photo_url: '', taken_at: dateTimeLocalValue(), estimated_location: '',
+  });
+  const [memoryFeedback, setMemoryFeedback] = useState(null);
+  const [memoryBusy, setMemoryBusy] = useState(null);
+  const [editingMemoryId, setEditingMemoryId] = useState(null);
+  const [editingMemoryForm, setEditingMemoryForm] = useState(null);
+  const [confirmingMemoryDelete, setConfirmingMemoryDelete] = useState(null);
+  const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '', confirm: '' });
+  const [passwordFeedback, setPasswordFeedback] = useState(null);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [deleteForm, setDeleteForm] = useState({ current_password: '', acknowledged: false });
+  const [deleteFeedback, setDeleteFeedback] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  useEffect(() => {
+    void session.ensureSession();
+  }, [session]);
+
+  useEffect(() => {
+    if (session.status !== 'authenticated' || !session.user) return;
+    const accountLocale = accountLocaleToUiLocale(session.user.preferred_locale);
+    setProfileForm({
+      email: session.user.email || '',
+      first_name: session.user.first_name || '',
+      last_name: session.user.last_name || '',
+      persona_type: session.user.persona_type || '',
+      mood_state: session.user.mood_state || '',
+      home_region: session.user.home_region || '',
+      preferred_locale: accountLocale,
+    });
+    setLocale(accountLocale);
+  }, [session.status, session.user, setLocale]);
+
+  const loadRecords = useCallback(async () => {
+    setRecords((current) => ({ ...current, status: 'loading', error: null }));
+    try {
+      const [activities, passports, ecoActions, memories] = await Promise.all([
+        listActivities(),
+        listPassports(),
+        listEcoActions(),
+        listTripMemories(),
+      ]);
+      setRecords({ status: 'ready', activities, passports, ecoActions, memories, error: null });
+    } catch (error) {
+      refreshExpiredSession(error);
+      setRecords((current) => ({
+        ...current,
+        status: 'error',
+        error: classifyAccountError(error, 'records'),
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (session.status === 'authenticated') void loadRecords();
+    if (session.status === 'guest') {
+      setRecords({ status: 'idle', activities: [], passports: [], ecoActions: [], memories: [], error: null });
+    }
+  }, [loadRecords, session.status]);
+
+  const visits = records.activities.filter((item) => item?.action === 'visit');
+  const reviews = records.activities.filter((item) => item?.action === 'review');
+  const legacyActivities = records.activities.filter((item) => item?.is_legacy);
+
+  const handleLogin = async (payload) => {
+    setAuthBusy(true);
+    setAuthFeedback(null);
+    try {
+      await session.login(payload);
+    } catch (error) {
+      setAuthFeedback({ type: 'error', ...classifyAccountError(error, 'login') });
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleRegister = async (payload) => {
+    setAuthBusy(true);
+    setAuthFeedback(null);
+    try {
+      await session.register(payload);
+    } catch (error) {
+      setAuthFeedback({ type: 'error', ...classifyAccountError(error, 'register') });
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setAuthBusy(true);
+    setAuthFeedback(null);
+    try {
+      await session.logout();
+    } catch (error) {
+      refreshExpiredSession(error);
+      setAuthFeedback({ type: 'error', ...classifyAccountError(error, 'logout') });
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const submitProfile = async (event) => {
+    event.preventDefault();
+    setProfileBusy(true);
+    setProfileFeedback(null);
+    try {
+      await session.updateProfile({
+        ...profileForm,
+        preferred_locale: uiLocaleToAccountLocale(profileForm.preferred_locale),
+      });
+      setLocale(profileForm.preferred_locale);
+      setProfileFeedback({ type: 'success', messageKey: 'account.profile.saved' });
+    } catch (error) {
+      refreshExpiredSession(error);
+      setProfileFeedback({ type: 'error', ...classifyAccountError(error, 'profile') });
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const submitActivity = async (event) => {
+    event.preventDefault();
+    setActivityFeedback(null);
+    if (!activityForm.spot) {
+      setActivityFeedback({ type: 'error', messageKey: 'account.error.chooseSpot' });
+      return;
+    }
+    if (activityForm.action === 'review' && !activityForm.rating && !activityForm.review_text.trim()) {
+      setActivityFeedback({ type: 'error', messageKey: 'account.error.reviewRequired' });
+      return;
+    }
+    setActivityBusy(true);
+    try {
+      const payload = {
+        spot: Number(activityForm.spot),
+        action: activityForm.action,
+      };
+      if (activityForm.action === 'review') {
+        if (activityForm.rating) payload.rating = Number(activityForm.rating);
+        payload.review_text = activityForm.review_text.trim();
+      }
+      const created = await createActivity(payload);
+      setRecords((current) => ({ ...current, activities: [created, ...current.activities] }));
+      setActivityForm((current) => ({ ...current, review_text: '' }));
+      setActivityFeedback({ type: 'success', messageKey: 'account.activity.saved' });
+    } catch (error) {
+      refreshExpiredSession(error);
+      setActivityFeedback({ type: 'error', ...classifyAccountError(error, 'activity') });
+    } finally {
+      setActivityBusy(false);
+    }
+  };
+
+  const submitEco = async (event) => {
+    event.preventDefault();
+    setEcoBusy(true);
+    setEcoFeedback(null);
+    try {
+      const payload = {
+        action_type: ecoForm.action_type,
+        note: ecoForm.note.trim(),
+        evidence_url: ecoForm.evidence_url.trim(),
+        occurred_on: ecoForm.occurred_on,
+      };
+      if (ecoForm.spot) payload.spot = Number(ecoForm.spot);
+      const created = await createEcoAction(payload);
+      setRecords((current) => ({ ...current, ecoActions: [created, ...current.ecoActions] }));
+      setEcoForm((current) => ({ ...current, note: '', evidence_url: '' }));
+      setEcoFeedback({ type: 'success', messageKey: 'account.eco.submitted' });
+    } catch (error) {
+      refreshExpiredSession(error);
+      setEcoFeedback({ type: 'error', ...classifyAccountError(error, 'eco') });
+    } finally {
+      setEcoBusy(false);
+    }
+  };
+
+  const submitMemory = async (event) => {
+    event.preventDefault();
+    setMemoryFeedback(null);
+    if (!memoryForm.spot) {
+      setMemoryFeedback({ type: 'error', messageKey: 'account.error.chooseSpot' });
+      return;
+    }
+    const takenAt = new Date(memoryForm.taken_at);
+    if (!Number.isFinite(takenAt.getTime()) || takenAt.getTime() > Date.now()) {
+      setMemoryFeedback({ type: 'error', messageKey: 'account.memory.error.time' });
+      return;
+    }
+    setMemoryBusy('create');
+    try {
+      const created = await createTripMemory({
+        spot: Number(memoryForm.spot),
+        photo_url: memoryForm.photo_url.trim(),
+        taken_at: takenAt.toISOString(),
+        estimated_location: memoryForm.estimated_location.trim(),
+      });
+      setRecords((current) => ({ ...current, memories: [created, ...current.memories] }));
+      setMemoryForm((current) => ({
+        ...current,
+        photo_url: '',
+        taken_at: dateTimeLocalValue(),
+        estimated_location: '',
+      }));
+      setMemoryFeedback({ type: 'success', messageKey: 'account.memory.created' });
+    } catch (error) {
+      refreshExpiredSession(error);
+      setMemoryFeedback({ type: 'error', ...classifyAccountError(error, 'memory') });
+    } finally {
+      setMemoryBusy(null);
+    }
+  };
+
+  const beginMemoryEdit = (memory) => {
+    setEditingMemoryId(memory.id);
+    setEditingMemoryForm({
+      spot: String(memory.spot),
+      photo_url: memory.photo_url,
+      taken_at: dateTimeLocalValue(memory.taken_at),
+      estimated_location: memory.estimated_location,
+    });
+    setMemoryFeedback(null);
+    setConfirmingMemoryDelete(null);
+  };
+
+  const saveMemoryEdit = async (event, id) => {
+    event.preventDefault();
+    const takenAt = new Date(editingMemoryForm?.taken_at);
+    if (!editingMemoryForm?.spot || !Number.isFinite(takenAt.getTime()) || takenAt.getTime() > Date.now()) {
+      setMemoryFeedback({ type: 'error', messageKey: 'account.memory.error.time' });
+      return;
+    }
+    setMemoryBusy(`edit-${id}`);
+    setMemoryFeedback(null);
+    try {
+      const updated = await updateTripMemory(id, {
+        spot: Number(editingMemoryForm.spot),
+        photo_url: editingMemoryForm.photo_url.trim(),
+        taken_at: takenAt.toISOString(),
+        estimated_location: editingMemoryForm.estimated_location.trim(),
+      });
+      setRecords((current) => ({
+        ...current,
+        memories: current.memories.map((item) => (item.id === updated.id ? updated : item)),
+      }));
+      setEditingMemoryId(null);
+      setEditingMemoryForm(null);
+      setMemoryFeedback({ type: 'success', messageKey: 'account.memory.updated' });
+    } catch (error) {
+      refreshExpiredSession(error);
+      setMemoryFeedback({ type: 'error', ...classifyAccountError(error, 'memory') });
+    } finally {
+      setMemoryBusy(null);
+    }
+  };
+
+  const removeMemory = async (id) => {
+    setMemoryBusy(`delete-${id}`);
+    setMemoryFeedback(null);
+    try {
+      await deleteTripMemory(id);
+      setRecords((current) => ({
+        ...current,
+        memories: current.memories.filter((item) => item.id !== id),
+      }));
+      setConfirmingMemoryDelete(null);
+      setMemoryFeedback({ type: 'success', messageKey: 'account.memory.deleted' });
+    } catch (error) {
+      refreshExpiredSession(error);
+      setMemoryFeedback({ type: 'error', ...classifyAccountError(error, 'memory') });
+    } finally {
+      setMemoryBusy(null);
+    }
+  };
+
+  const submitPassword = async (event) => {
+    event.preventDefault();
+    setPasswordFeedback(null);
+    if (passwordForm.new_password !== passwordForm.confirm) {
+      setPasswordFeedback({ type: 'error', messageKey: 'account.error.passwordMismatch' });
+      return;
+    }
+    setPasswordBusy(true);
+    try {
+      await changeAccountPassword({
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password,
+      });
+      setPasswordFeedback({ type: 'success', messageKey: 'account.password.changed' });
+    } catch (error) {
+      refreshExpiredSession(error);
+      setPasswordFeedback({ type: 'error', ...classifyAccountError(error, 'password') });
+    } finally {
+      setPasswordForm({ current_password: '', new_password: '', confirm: '' });
+      setPasswordBusy(false);
+    }
+  };
+
+  const submitDelete = async (event) => {
+    event.preventDefault();
+    setDeleteBusy(true);
+    setDeleteFeedback(null);
+    try {
+      await session.removeAccount({ current_password: deleteForm.current_password });
+      setAuthMode('register');
+      setAuthFeedback({ type: 'success', messageKey: 'account.delete.completed' });
+    } catch (error) {
+      refreshExpiredSession(error);
+      setDeleteFeedback({ type: 'error', ...classifyAccountError(error, 'delete') });
+    } finally {
+      setDeleteForm({ current_password: '', acknowledged: false });
+      setDeleteBusy(false);
+    }
+  };
+
+  if (session.status === 'idle' || session.status === 'loading') {
+    return (
+      <div className="profile-page account-page-state" role="status">
+        <LoaderCircle className="account-spinner" size={24} aria-hidden="true" />
+        <p>{t('account.session.loading')}</p>
+      </div>
+    );
+  }
+
+  if (session.status === 'error') {
+    return (
+      <div className="profile-page account-page-state" role="alert">
+        <ShieldAlert size={24} aria-hidden="true" />
+        <h1>{t('account.session.errorTitle')}</h1>
+        <p>{t(session.error?.messageKey || 'account.error.network')}</p>
+        <button type="button" onClick={() => session.ensureSession({ force: true })}>
+          <RefreshCw size={16} aria-hidden="true" /> {t('common.retry')}
+        </button>
+      </div>
+    );
+  }
+
+  if (session.status === 'guest') {
+    return (
+      <div className="profile-page account-profile-page">
+        <header className="account-hero">
+          <span className="account-live-label"><Database size={14} aria-hidden="true" /> {t('account.eyebrow.guest')}</span>
+          <h1>{t('account.guest.title')}</h1>
+          <p>{t('account.guest.description')}</p>
+        </header>
+        <GuestAccount
+          mode={authMode}
+          setMode={setAuthMode}
+          onLogin={handleLogin}
+          onRegister={handleRegister}
+          busy={authBusy}
+          feedback={authFeedback}
+          locale={locale}
+          t={t}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="profile-page account-profile-page">
+      <header className="account-hero is-authenticated">
+        <div>
+          <span className="account-live-label"><ShieldCheck size={14} aria-hidden="true" /> {t('account.eyebrow.authenticated')}</span>
+          <h1>{t('account.member.title', { username: session.user.username })}</h1>
+          <p>{t('account.member.description')}</p>
+          <small>{t('account.member.since', { date: formatDate(session.user.date_joined, intlLocale, t('common.noData')) })}</small>
         </div>
+        <button type="button" className="account-secondary-button" onClick={handleLogout} disabled={authBusy}>
+          <LogOut size={16} aria-hidden="true" /> {t('account.auth.logout')}
+        </button>
+      </header>
+      <Feedback feedback={authFeedback} t={t} />
+
+      <section className="account-section" aria-labelledby="account-profile-heading">
+        <div className="account-section-heading">
+          <div>
+            <span>{t('account.eyebrow.profile')}</span>
+            <h2 id="account-profile-heading">{t('account.profile.title')}</h2>
+            <p>{t('account.profile.description')}</p>
+          </div>
+          <UserRound size={26} aria-hidden="true" />
+        </div>
+        <form className="account-form account-form-grid" onSubmit={submitProfile}>
+          <label className="account-field" htmlFor="profile-username">
+            <span>{t('account.field.username')}</span>
+            <input id="profile-username" value={session.user.username} readOnly aria-readonly="true" />
+          </label>
+          <label className="account-field" htmlFor="profile-email">
+            <span>{t('account.field.email')}</span>
+            <input id="profile-email" type="email" autoComplete="email" maxLength="254" value={profileForm.email} onChange={(event) => setProfileForm({ ...profileForm, email: event.target.value })} />
+          </label>
+          <label className="account-field" htmlFor="profile-first-name">
+            <span>{t('account.field.firstName')}</span>
+            <input id="profile-first-name" autoComplete="given-name" maxLength="150" value={profileForm.first_name} onChange={(event) => setProfileForm({ ...profileForm, first_name: event.target.value })} />
+          </label>
+          <label className="account-field" htmlFor="profile-last-name">
+            <span>{t('account.field.lastName')}</span>
+            <input id="profile-last-name" autoComplete="family-name" maxLength="150" value={profileForm.last_name} onChange={(event) => setProfileForm({ ...profileForm, last_name: event.target.value })} />
+          </label>
+          <label className="account-field" htmlFor="profile-persona">
+            <span>{t('account.field.persona')}</span>
+            <select id="profile-persona" value={profileForm.persona_type} onChange={(event) => setProfileForm({ ...profileForm, persona_type: event.target.value })}>
+              {PERSONA_TYPES.map((persona) => <option key={persona || 'none'} value={persona}>{t(`account.persona.${persona || 'none'}`)}</option>)}
+            </select>
+          </label>
+          <label className="account-field" htmlFor="profile-locale">
+            <span>{t('account.field.locale')}</span>
+            <select id="profile-locale" value={profileForm.preferred_locale} onChange={(event) => setProfileForm({ ...profileForm, preferred_locale: event.target.value })}>
+              {['ko', 'en', 'ja', 'zh'].map((value) => <option key={value} value={value}>{t(`locale.${value}`)}</option>)}
+            </select>
+          </label>
+          <label className="account-field" htmlFor="profile-region">
+            <span>{t('account.field.homeRegion')}</span>
+            <input id="profile-region" autoComplete="address-level1" maxLength="100" value={profileForm.home_region} onChange={(event) => setProfileForm({ ...profileForm, home_region: event.target.value })} />
+          </label>
+          <label className="account-field" htmlFor="profile-mood">
+            <span>{t('account.field.mood')}</span>
+            <input id="profile-mood" maxLength="50" value={profileForm.mood_state} onChange={(event) => setProfileForm({ ...profileForm, mood_state: event.target.value })} />
+          </label>
+          <div className="account-form-actions">
+            <Feedback feedback={profileFeedback} t={t} />
+            <button className="account-primary-button" type="submit" disabled={profileBusy}>
+              {profileBusy ? <LoaderCircle className="account-spinner" size={17} aria-hidden="true" /> : <ShieldCheck size={17} aria-hidden="true" />}
+              {profileBusy ? t('common.loading') : t('account.profile.save')}
+            </button>
+          </div>
+        </form>
       </section>
 
-      <section className="profile-overview" aria-label={t('profile.summary')}>
-        <article className="profile-persona-card">
-          <div className="profile-card-eyebrow">
-            <Sparkles size={14} aria-hidden="true" />
-            MY WATER TASTE
+      <section className="account-section" aria-labelledby="account-activity-heading">
+        <div className="account-section-heading">
+          <div>
+            <span>{t('account.eyebrow.activity')}</span>
+            <h2 id="account-activity-heading">{t('account.activity.title')}</h2>
+            <p>{t('account.activity.description')}</p>
           </div>
+          <MapPin size={26} aria-hidden="true" />
+        </div>
+        <form className="account-form account-inline-form" onSubmit={submitActivity}>
+          <SpotSelect id="activity-spot" value={activityForm.spot} onChange={(event) => setActivityForm({ ...activityForm, spot: event.target.value })} spots={apiSpots} label={t('account.field.spot')} t={t} />
+          <label className="account-field" htmlFor="activity-kind">
+            <span>{t('account.field.activityKind')}</span>
+            <select id="activity-kind" value={activityForm.action} onChange={(event) => setActivityForm({ ...activityForm, action: event.target.value })}>
+              <option value="visit">{t('account.activity.visit')}</option>
+              <option value="review">{t('account.activity.review')}</option>
+            </select>
+          </label>
+          {activityForm.action === 'review' ? (
+            <>
+              <label className="account-field" htmlFor="activity-rating">
+                <span>{t('account.field.rating')}</span>
+                <select id="activity-rating" value={activityForm.rating} onChange={(event) => setActivityForm({ ...activityForm, rating: event.target.value })}>
+                  <option value="">{t('account.rating.noRating')}</option>
+                  {[5, 4, 3, 2, 1].map((rating) => <option key={rating} value={rating}>{t('account.rating.value', { rating })}</option>)}
+                </select>
+              </label>
+              <label className="account-field is-wide" htmlFor="activity-review">
+                <span>{t('account.field.review')}</span>
+                <textarea id="activity-review" rows="3" maxLength="2000" value={activityForm.review_text} onChange={(event) => setActivityForm({ ...activityForm, review_text: event.target.value })} />
+              </label>
+            </>
+          ) : null}
+          <div className="account-form-actions">
+            <Feedback feedback={activityFeedback} t={t} />
+            <button className="account-primary-button" type="submit" disabled={activityBusy || apiSpots.length === 0}>
+              {activityBusy ? <LoaderCircle className="account-spinner" size={17} aria-hidden="true" /> : <MapPin size={17} aria-hidden="true" />}
+              {activityBusy ? t('common.loading') : t('account.activity.submit')}
+            </button>
+          </div>
+        </form>
+        {apiSpots.length === 0 ? <p className="account-data-note" role="status">{['idle', 'loading'].includes(spotStatus) ? t('account.spot.loading') : t('account.spot.unavailable')}</p> : null}
 
-          {currentPersona ? (
-            <div className="profile-persona-content">
-              <span className="profile-persona-icon" aria-hidden="true">
-                {typeof currentPersona.icon === 'string' ? currentPersona.icon : '💧'}
-              </span>
+        {records.status === 'loading' ? <p className="account-data-note" role="status"><LoaderCircle className="account-spinner" size={16} aria-hidden="true" /> {t('account.records.loading')}</p> : null}
+        {records.status === 'error' ? (
+          <div className="account-data-note is-error" role="alert">
+            <span>{t(records.error?.messageKey || 'account.error.response')}</span>
+            <button type="button" onClick={loadRecords}><RefreshCw size={15} aria-hidden="true" /> {t('common.retry')}</button>
+          </div>
+        ) : null}
+
+        {records.status === 'ready' ? (
+          <>
+            <div className="account-record-columns">
               <div>
-                <p>{t(`persona.${currentPersona.id}.subtitle`)}</p>
-                <h2>{t(`persona.${currentPersona.id}.title`)}</h2>
-                <div className="profile-persona-tags">
-                  {(Array.isArray(currentPersona.tags) ? currentPersona.tags : []).slice(0, 3).map((tag) => (
-                    <span key={tag}>#{tag}</span>
-                  ))}
-                </div>
+                <h3>{t('account.visits.title')}</h3>
+                {visits.length === 0 ? <EmptyState title={t('account.visits.empty')} description={t('account.visits.emptyDescription')} /> : (
+                  <ul className="account-record-list">
+                    {visits.map((visit) => (
+                      <li key={visit.id}>
+                        <MapPin size={17} aria-hidden="true" />
+                        <div><strong>{visit.spot_detail?.name || t('account.spot.unknown')}</strong><span>{formatDate(visit.created_at, intlLocale, t('common.noData'))}</span></div>
+                        <span className="account-state is-self">{t('account.activity.selfReported')}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <h3>{t('account.reviews.title')}</h3>
+                {reviews.length === 0 ? <EmptyState title={t('account.reviews.empty')} description={t('account.reviews.emptyDescription')} /> : (
+                  <ul className="account-record-list">
+                    {reviews.map((review) => (
+                      <li key={review.id} className="is-review">
+                        <div>
+                          <strong>{review.spot_detail?.name || t('account.spot.unknown')}</strong>
+                          <span>{review.rating ? t('account.rating.value', { rating: review.rating }) : t('account.rating.noRating')} · {formatDate(review.created_at, intlLocale, t('common.noData'))}</span>
+                          {review.review_text ? <p>{review.review_text}</p> : null}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
-          ) : (
-            <EmptyPanel
-              icon={Compass}
-              title={localPreference.id ? t('profile.persona.invalid') : t('profile.persona.empty')}
-              description={localPreference.id
-                ? t('profile.persona.invalidDescription')
-                : t('profile.persona.emptyDescription')}
-              actionLabel={t('profile.cta.taste')}
-              to="/onboarding"
-            />
-          )}
-        </article>
-
-        <div className="profile-stats" aria-label={t('profile.stats.label')}>
-          <article>
-            <span>{t('profile.stats.progress')}</span>
-            <strong>{passportProgress}<small>%</small></strong>
-            <p>{t('profile.stats.spots', { current: collectionTotals.current, total: collectionTotals.total || '—' })}</p>
-          </article>
-          <article>
-            <span>{t('profile.stats.saved')}</span>
-            <strong>{savedTrips.length}<small>{t('profile.stats.countUnit')}</small></strong>
-            <p>{t('profile.stats.includesDemo')}</p>
-          </article>
-          <article>
-            <span>{t('profile.stats.eco')}</span>
-            <strong>{ecoCompleted}<small>{t('profile.stats.actionUnit')}</small></strong>
-            <p>{t('profile.stats.nextBadge', { count: ecoMilestones.length - ecoCompleted })}</p>
-          </article>
-        </div>
+            {legacyActivities.length > 0 ? (
+              <div className="account-legacy-records" role="status">
+                <h3>{t('account.activity.legacyTitle')}</h3>
+                <p>{t('account.activity.legacyDescription')}</p>
+                <ul className="account-record-list">
+                  {legacyActivities.map((item) => (
+                    <li key={item.id}>
+                      <Database size={17} aria-hidden="true" />
+                      <div><strong>{item.spot_detail?.name || t('account.spot.unknown')}</strong><span>{formatDate(item.created_at, intlLocale, t('common.noData'))}</span></div>
+                      <span className="account-state is-legacy">{t('account.activity.legacyReadOnly')}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </section>
 
-      <div className="profile-dashboard-grid">
-        <section className="profile-section profile-passport-section" aria-labelledby="passport-title">
-          <div className="profile-section-heading">
-            <div>
-              <p>WATER PASSPORT</p>
-              <h2 id="passport-title">{t('profile.passport.title')}</h2>
-            </div>
-            <span className="profile-section-note">{t('profile.passport.demo')}</span>
+      <section className="account-section" aria-labelledby="account-memory-heading">
+        <div className="account-section-heading">
+          <div>
+            <span>{t('account.eyebrow.memory')}</span>
+            <h2 id="account-memory-heading">{t('account.memory.title')}</h2>
+            <p>{t('account.memory.description')}</p>
           </div>
-
-          {collections.length ? (
-            <div className="profile-collection-grid">
-              {collections.map((collection) => {
-                const progress = collection.total
-                  ? Math.round((collection.current / collection.total) * 100)
-                  : 0;
-
-                return (
-                  <article
-                    className="profile-collection-card"
-                    key={collection.id}
-                    style={{ '--collection-color': collection.color }}
-                  >
-                    <div className="profile-collection-topline">
-                      <span className="profile-collection-icon" aria-hidden="true">{collection.icon}</span>
-                      <span>{progress}%</span>
+          <Images size={26} aria-hidden="true" />
+        </div>
+        <form className="account-form account-inline-form" onSubmit={submitMemory}>
+          <SpotSelect id="memory-spot" value={memoryForm.spot} onChange={(event) => setMemoryForm({ ...memoryForm, spot: event.target.value })} spots={apiSpots} label={t('account.field.spot')} t={t} />
+          <label className="account-field" htmlFor="memory-taken-at">
+            <span>{t('account.memory.takenAt')}</span>
+            <input id="memory-taken-at" type="datetime-local" max={dateTimeLocalValue()} value={memoryForm.taken_at} onChange={(event) => setMemoryForm({ ...memoryForm, taken_at: event.target.value })} required />
+          </label>
+          <label className="account-field" htmlFor="memory-location">
+            <span>{t('account.memory.location')}</span>
+            <input id="memory-location" maxLength="200" value={memoryForm.estimated_location} onChange={(event) => setMemoryForm({ ...memoryForm, estimated_location: event.target.value })} />
+          </label>
+          <label className="account-field" htmlFor="memory-photo">
+            <span>{t('account.memory.photoUrl')}</span>
+            <input id="memory-photo" type="url" inputMode="url" placeholder="https://" maxLength="200" value={memoryForm.photo_url} onChange={(event) => setMemoryForm({ ...memoryForm, photo_url: event.target.value })} aria-describedby="memory-photo-help" />
+            <small id="memory-photo-help">{t('account.memory.photoHelp')}</small>
+          </label>
+          <div className="account-form-actions">
+            <Feedback feedback={memoryFeedback} t={t} />
+            <button className="account-primary-button" type="submit" disabled={memoryBusy !== null || apiSpots.length === 0}>
+              {memoryBusy === 'create' ? <LoaderCircle className="account-spinner" size={17} aria-hidden="true" /> : <Images size={17} aria-hidden="true" />}
+              {memoryBusy === 'create' ? t('common.loading') : t('account.memory.create')}
+            </button>
+          </div>
+        </form>
+        <p className="account-security-note"><ShieldCheck size={15} aria-hidden="true" /> {t('account.memory.privateNotice')}</p>
+        {records.status === 'ready' && records.memories.length === 0 ? <EmptyState title={t('account.memory.empty')} description={t('account.memory.emptyDescription')} /> : null}
+        {records.memories.length > 0 ? (
+          <ul className="account-memory-list">
+            {records.memories.map((memory) => (
+              <li key={memory.id}>
+                {editingMemoryId === memory.id ? (
+                  <form className="account-form account-memory-edit" onSubmit={(event) => saveMemoryEdit(event, memory.id)}>
+                    <SpotSelect id={`memory-edit-spot-${memory.id}`} value={editingMemoryForm?.spot || ''} onChange={(event) => setEditingMemoryForm({ ...editingMemoryForm, spot: event.target.value })} spots={apiSpots} label={t('account.field.spot')} t={t} />
+                    <label className="account-field" htmlFor={`memory-edit-time-${memory.id}`}>
+                      <span>{t('account.memory.takenAt')}</span>
+                      <input id={`memory-edit-time-${memory.id}`} type="datetime-local" max={dateTimeLocalValue()} value={editingMemoryForm?.taken_at || ''} onChange={(event) => setEditingMemoryForm({ ...editingMemoryForm, taken_at: event.target.value })} required />
+                    </label>
+                    <label className="account-field" htmlFor={`memory-edit-location-${memory.id}`}>
+                      <span>{t('account.memory.location')}</span>
+                      <input id={`memory-edit-location-${memory.id}`} maxLength="200" value={editingMemoryForm?.estimated_location || ''} onChange={(event) => setEditingMemoryForm({ ...editingMemoryForm, estimated_location: event.target.value })} />
+                    </label>
+                    <label className="account-field" htmlFor={`memory-edit-photo-${memory.id}`}>
+                      <span>{t('account.memory.photoUrl')}</span>
+                      <input id={`memory-edit-photo-${memory.id}`} type="url" inputMode="url" maxLength="200" value={editingMemoryForm?.photo_url || ''} onChange={(event) => setEditingMemoryForm({ ...editingMemoryForm, photo_url: event.target.value })} />
+                    </label>
+                    <div className="account-memory-actions">
+                      <button type="submit" disabled={memoryBusy !== null}>{t('account.memory.save')}</button>
+                      <button type="button" onClick={() => { setEditingMemoryId(null); setEditingMemoryForm(null); }} disabled={memoryBusy !== null}><X size={14} aria-hidden="true" /> {t('account.memory.cancel')}</button>
                     </div>
-                    <h3>{collection.title}</h3>
-                    <p>
-                      <strong>{collection.current}</strong>{collection.unit}
-                      <span> / {collection.total}{collection.unit}</span>
-                    </p>
-                    <div
-                      className="profile-collection-progress"
-                      role="progressbar"
-                      aria-label={`${collection.title} 수집 진행률`}
-                      aria-valuemin="0"
-                      aria-valuemax={collection.total || 100}
-                      aria-valuenow={collection.current}
-                    >
-                      <span style={{ width: `${progress}%` }} />
+                  </form>
+                ) : (
+                  <>
+                    <div className="account-memory-icon"><Images size={20} aria-hidden="true" /></div>
+                    <div className="account-memory-copy">
+                      <strong>{memory.spot_detail.name}</strong>
+                      <span>{formatDate(memory.taken_at, intlLocale, t('common.noData'))}</span>
+                      <p>{memory.estimated_location || t('account.memory.noLocation')}</p>
+                      {memory.photo_url ? <a href={memory.photo_url} target="_blank" rel="noreferrer">{t('account.memory.photoOpen')}</a> : <small>{t('account.memory.noPhoto')}</small>}
                     </div>
-                  </article>
-                );
-              })}
-            </div>
-          ) : (
-            <EmptyPanel
-              icon={Droplets}
-              title={t('profile.passport.empty')}
-              description={t('profile.passport.emptyDescription')}
-              actionLabel={t('profile.passport.emptyCta')}
-              to="/map"
-            />
-          )}
-        </section>
-
-        <section className="profile-section profile-eco-section" aria-labelledby="eco-title">
-          <div className="profile-eco-badge">
-            <div className="profile-eco-icon"><Leaf size={25} aria-hidden="true" /></div>
-            <div>
-              <p>NEXT BADGE</p>
-              <h2 id="eco-title">{t('profile.eco.title')}</h2>
-              <span>{t('profile.eco.progress', { current: ecoCompleted, total: ecoMilestones.length })}</span>
-            </div>
-          </div>
-
-          <div className="profile-eco-progress" aria-hidden="true">
-            <span style={{ width: `${(ecoCompleted / ecoMilestones.length) * 100}%` }} />
-          </div>
-
-          <ul className="profile-eco-list">
-            {ecoMilestones.map((milestone) => (
-              <li className={milestone.complete ? 'is-complete' : ''} key={milestone.id}>
-                <span><Check size={14} aria-hidden="true" /></span>
-                {milestone.label}
+                    <div className="account-memory-actions">
+                      <button type="button" onClick={() => beginMemoryEdit(memory)} disabled={memoryBusy !== null}><Pencil size={14} aria-hidden="true" /> {t('account.memory.edit')}</button>
+                      {confirmingMemoryDelete !== memory.id ? (
+                        <button type="button" className="is-delete" onClick={() => setConfirmingMemoryDelete(memory.id)} disabled={memoryBusy !== null}><Trash2 size={14} aria-hidden="true" /> {t('account.memory.delete')}</button>
+                      ) : (
+                        <>
+                          <button type="button" className="is-delete" onClick={() => removeMemory(memory.id)} disabled={memoryBusy !== null}>{t('account.memory.confirmDelete')}</button>
+                          <button type="button" onClick={() => setConfirmingMemoryDelete(null)} disabled={memoryBusy !== null}>{t('account.memory.cancel')}</button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
               </li>
             ))}
           </ul>
+        ) : null}
+      </section>
 
-          <Link className="profile-inline-link" to="/map">
-            {t('profile.eco.cta')}
-            <ChevronRight size={16} aria-hidden="true" />
-          </Link>
-        </section>
-      </div>
-
-      <section className="profile-section profile-trips-section" aria-labelledby="saved-trips-title">
-        <div className="profile-section-heading">
+      <section className="account-section" aria-labelledby="account-passport-heading">
+        <div className="account-section-heading">
           <div>
-            <p>SAVED JOURNEYS</p>
-            <h2 id="saved-trips-title">{t('profile.trips.title')}</h2>
+            <span>{t('account.eyebrow.passport')}</span>
+            <h2 id="account-passport-heading">{t('account.passport.title')}</h2>
+            <p>{t('account.passport.description')}</p>
           </div>
-          <Link to="/concierge">
-            {t('profile.trips.new')}
-            <ArrowRight size={15} aria-hidden="true" />
-          </Link>
+          <BadgeCheck size={26} aria-hidden="true" />
         </div>
-
-        {savedTrips.length ? (
-          <div className="profile-trip-list">
-            {savedTrips.map((trip) => (
-              <Link className={`profile-trip-card is-${trip.tone}`} to={trip.href} key={trip.id}>
-                <div className="profile-trip-date"><CalendarDays size={20} aria-hidden="true" /></div>
-                <div className="profile-trip-copy">
-                  <span>{trip.eyebrow}</span>
-                  <h3>{trip.title}</h3>
-                  <p><MapPin size={14} aria-hidden="true" /> {trip.route}</p>
-                </div>
-                <div className="profile-trip-status">
-                  <span>{trip.condition}</span>
-                  <ChevronRight size={18} aria-hidden="true" />
-                </div>
-              </Link>
+        {records.status === 'ready' && records.passports.length === 0 ? <EmptyState title={t('account.passport.empty')} description={t('account.passport.emptyDescription')} /> : null}
+        {records.passports.length > 0 ? (
+          <ul className="account-card-grid">
+            {records.passports.map((passport) => (
+              <li key={passport.id}>
+                <BadgeCheck size={23} aria-hidden="true" />
+                <strong>{passport.spot?.name || t('account.spot.unknown')}</strong>
+                <span>{formatDate(passport.verified_at, intlLocale, t('common.noData'))}</span>
+                <span className="account-state is-verified">{t('verification.verified')}</span>
+                <small>{t(`account.passport.method.${passport.verification_method || 'operator'}`)}</small>
+                {passport.evidence_url ? <a href={passport.evidence_url} target="_blank" rel="noreferrer">{t('account.passport.evidence')}</a> : null}
+              </li>
             ))}
-          </div>
-        ) : (
-          <EmptyPanel
-            icon={Route}
-            title={t('profile.trips.empty')}
-            description={t('profile.trips.emptyDescription')}
-            actionLabel={t('profile.trips.emptyCta')}
-            to="/concierge"
-          />
-        )}
+          </ul>
+        ) : null}
       </section>
 
-      <section className="profile-settings" aria-labelledby="settings-title">
-        <div className="profile-settings-heading">
-          <div className="profile-settings-icon"><ShieldCheck size={22} aria-hidden="true" /></div>
+      <section className="account-section" aria-labelledby="account-eco-heading">
+        <div className="account-section-heading">
           <div>
-            <p>PRIVACY & ACCESS</p>
-            <h2 id="settings-title">{t('profile.settings.title')}</h2>
+            <span>{t('account.eyebrow.eco')}</span>
+            <h2 id="account-eco-heading">{t('account.eco.title')}</h2>
+            <p>{t('account.eco.description')}</p>
           </div>
+          <Leaf size={26} aria-hidden="true" />
         </div>
+        <form className="account-form account-inline-form" onSubmit={submitEco}>
+          <SpotSelect id="eco-spot" value={ecoForm.spot} onChange={(event) => setEcoForm({ ...ecoForm, spot: event.target.value })} spots={apiSpots} label={t('account.field.spot')} optional t={t} />
+          <label className="account-field" htmlFor="eco-kind">
+            <span>{t('account.field.ecoKind')}</span>
+            <select id="eco-kind" value={ecoForm.action_type} onChange={(event) => setEcoForm({ ...ecoForm, action_type: event.target.value })}>
+              {ECO_ACTION_TYPES.map((kind) => <option key={kind} value={kind}>{t(`account.eco.kind.${kind}`)}</option>)}
+            </select>
+          </label>
+          <label className="account-field" htmlFor="eco-date">
+            <span>{t('account.field.occurredOn')}</span>
+            <input id="eco-date" type="date" max={todayValue()} value={ecoForm.occurred_on} onChange={(event) => setEcoForm({ ...ecoForm, occurred_on: event.target.value })} required />
+          </label>
+          <label className="account-field" htmlFor="eco-evidence">
+            <span>{t('account.field.evidenceUrl')}</span>
+            <input id="eco-evidence" type="url" inputMode="url" placeholder="https://" maxLength="500" value={ecoForm.evidence_url} onChange={(event) => setEcoForm({ ...ecoForm, evidence_url: event.target.value })} aria-describedby="eco-evidence-help" />
+            <small id="eco-evidence-help">{t('account.eco.evidenceHelp')}</small>
+          </label>
+          <label className="account-field is-wide" htmlFor="eco-note">
+            <span>{t('account.field.note')}</span>
+            <textarea id="eco-note" rows="3" maxLength="500" value={ecoForm.note} onChange={(event) => setEcoForm({ ...ecoForm, note: event.target.value })} />
+          </label>
+          <div className="account-form-actions">
+            <Feedback feedback={ecoFeedback} t={t} />
+            <button className="account-primary-button" type="submit" disabled={ecoBusy}>
+              {ecoBusy ? <LoaderCircle className="account-spinner" size={17} aria-hidden="true" /> : <Leaf size={17} aria-hidden="true" />}
+              {ecoBusy ? t('common.loading') : t('account.eco.submit')}
+            </button>
+          </div>
+        </form>
+        <p className="account-security-note"><ShieldAlert size={15} aria-hidden="true" /> {t('account.eco.pendingNotice')}</p>
+        {records.status === 'ready' && records.ecoActions.length === 0 ? <EmptyState title={t('account.eco.empty')} description={t('account.eco.emptyDescription')} /> : null}
+        {records.ecoActions.length > 0 ? (
+          <ul className="account-card-grid">
+            {records.ecoActions.map((action) => {
+              const state = safeVerificationState(action.state);
+              return (
+                <li key={action.id}>
+                  <Leaf size={22} aria-hidden="true" />
+                  <strong>{t(`account.eco.kind.${action.action_type}`)}</strong>
+                  <span>{action.spot_detail?.name || t('account.spot.noSpot')}</span>
+                  <span className={`account-state is-${state}`}>{t(`verification.${state}`)}</span>
+                  <small>{formatDate(action.occurred_on, intlLocale, t('common.noData'))}</small>
+                  {action.note ? <p>{action.note}</p> : null}
+                  {action.evidence_url ? <a href={action.evidence_url} target="_blank" rel="noreferrer">{t('account.eco.evidence')}</a> : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </section>
 
-        <div className="profile-settings-grid">
-          <article>
-            <span className="profile-setting-icon"><Database size={19} aria-hidden="true" /></span>
-            <div>
-              <strong>{t('profile.settings.local.title')}</strong>
-              <p>
-                {localPreference.status === 'available'
-                  ? t('profile.settings.local.available')
-                  : t('profile.settings.local.unavailable')}
-              </p>
-            </div>
-            <span className={`profile-setting-state is-${localPreference.status}`}>
-              {localPreference.status === 'available' ? t('profile.settings.available') : t('profile.settings.unavailable')}
-            </span>
-          </article>
-
-          <article>
-            <span className="profile-setting-icon"><Accessibility size={19} aria-hidden="true" /></span>
-            <div>
-              <strong>{t('profile.settings.a11y.title')}</strong>
-              <p>{t('profile.settings.a11y.description')}</p>
-            </div>
-            <span className="profile-setting-state is-ready">{t('profile.settings.supported')}</span>
-          </article>
-
-          <article>
-            <span className="profile-setting-icon"><LockKeyhole size={19} aria-hidden="true" /></span>
-            <div>
-              <strong>{t('profile.settings.privacy.title')}</strong>
-              <p>{t('profile.settings.privacy.description')}</p>
-            </div>
-            <span className="profile-setting-state is-ready">{t('profile.settings.private')}</span>
-          </article>
+      <section className="account-section account-security-section" aria-labelledby="account-security-heading">
+        <div className="account-section-heading">
+          <div>
+            <span>{t('account.eyebrow.security')}</span>
+            <h2 id="account-security-heading">{t('account.security.title')}</h2>
+            <p>{t('account.security.description')}</p>
+          </div>
+          <KeyRound size={26} aria-hidden="true" />
         </div>
+        <div className="account-security-grid">
+          <form className="account-form" onSubmit={submitPassword}>
+            <h3>{t('account.password.title')}</h3>
+            <label className="account-field" htmlFor="password-current">
+              <span>{t('account.field.currentPassword')}</span>
+              <input id="password-current" type="password" autoComplete="current-password" value={passwordForm.current_password} onChange={(event) => setPasswordForm({ ...passwordForm, current_password: event.target.value })} required />
+            </label>
+            <label className="account-field" htmlFor="password-new">
+              <span>{t('account.field.newPassword')}</span>
+              <input id="password-new" type="password" autoComplete="new-password" value={passwordForm.new_password} onChange={(event) => setPasswordForm({ ...passwordForm, new_password: event.target.value })} aria-describedby="password-policy-help" required />
+              <small id="password-policy-help">{t('account.password.help')}</small>
+            </label>
+            <label className="account-field" htmlFor="password-confirm">
+              <span>{t('account.field.confirmPassword')}</span>
+              <input id="password-confirm" type="password" autoComplete="new-password" value={passwordForm.confirm} onChange={(event) => setPasswordForm({ ...passwordForm, confirm: event.target.value })} required />
+            </label>
+            <Feedback feedback={passwordFeedback} t={t} />
+            <button className="account-primary-button" type="submit" disabled={passwordBusy}>
+              {passwordBusy ? <LoaderCircle className="account-spinner" size={17} aria-hidden="true" /> : <KeyRound size={17} aria-hidden="true" />}
+              {passwordBusy ? t('common.loading') : t('account.password.submit')}
+            </button>
+          </form>
 
-        <div className="profile-storage-footer">
-          <p role="status">{t(storageMessage || 'profile.storage.default')}</p>
-          <button type="button" onClick={clearPreference} disabled={!localPreference.id || localPreference.status !== 'available'}>
-            <BadgeCheck size={15} aria-hidden="true" />
-            {t('profile.storage.clear')}
-          </button>
+          <form className="account-form account-danger-zone" onSubmit={submitDelete}>
+            <h3>{t('account.delete.title')}</h3>
+            <p>{t('account.delete.description')}</p>
+            <label className="account-field" htmlFor="delete-password">
+              <span>{t('account.field.currentPassword')}</span>
+              <input id="delete-password" type="password" autoComplete="current-password" value={deleteForm.current_password} onChange={(event) => setDeleteForm({ ...deleteForm, current_password: event.target.value })} required />
+            </label>
+            <label className="account-check" htmlFor="delete-acknowledge">
+              <input id="delete-acknowledge" type="checkbox" checked={deleteForm.acknowledged} onChange={(event) => setDeleteForm({ ...deleteForm, acknowledged: event.target.checked })} required />
+              <span>{t('account.delete.acknowledge')}</span>
+            </label>
+            <Feedback feedback={deleteFeedback} t={t} />
+            <button className="account-danger-button" type="submit" disabled={deleteBusy || !deleteForm.acknowledged}>
+              {deleteBusy ? <LoaderCircle className="account-spinner" size={17} aria-hidden="true" /> : <Trash2 size={17} aria-hidden="true" />}
+              {deleteBusy ? t('common.loading') : t('account.delete.submit')}
+            </button>
+          </form>
         </div>
       </section>
+
+      <aside className="account-draft-link">
+        <CalendarDays size={22} aria-hidden="true" />
+        <div><strong>{t('account.itinerary.title')}</strong><p>{t('account.itinerary.description')}</p></div>
+        <Link to="/concierge">{t('account.itinerary.open')}</Link>
+      </aside>
     </div>
   );
 }

@@ -39,15 +39,6 @@ from .scoring import RecommendationEngine
 
 MAX_CONDITION_AGE = timedelta(minutes=15)
 MINOR_AGE_CUTOFF = 19
-_SURF_GRADE_SKILL_SCOPES = {
-    # This is the only GrdCn shape evidenced by the current KHOA contract
-    # fixture. Unknown provider prose is never expanded into a skill claim.
-    "초중급자에게적합": frozenset(
-        {ParticipantSkillLevel.BEGINNER, ParticipantSkillLevel.INTERMEDIATE}
-    ),
-}
-
-
 @dataclass(frozen=True, slots=True)
 class CatalogEvidence:
     spot: Any
@@ -65,6 +56,7 @@ class CatalogRecommendationResult:
     evaluated_at: datetime
     activity: str
     participant_profile: str
+    participant_skill_level: str
 
     def evidence_for(self, spot_id: str) -> CatalogEvidence:
         for item in self.evidence:
@@ -101,6 +93,7 @@ class DatabaseRecommendationService:
             selected_spots,
             activity=activity,
             participant_profile=participant_profile,
+            participant_skill_level=request.party.participant_skill_level,
             at=at,
         )
         evidence = tuple(
@@ -127,6 +120,7 @@ class DatabaseRecommendationService:
             evaluated_at=at,
             activity=activity,
             participant_profile=participant_profile,
+            participant_skill_level=request.party.participant_skill_level.value,
         )
 
 
@@ -135,6 +129,51 @@ def _latest_condition_scores(
     *,
     activity: str,
     participant_profile: str,
+    participant_skill_level: ParticipantSkillLevel,
+    at: datetime,
+) -> dict[int, Any]:
+    if not spots:
+        return {}
+    requested_skill = (
+        participant_skill_level.value
+        if activity == Activity.SURF.value
+        else ParticipantSkillLevel.UNSPECIFIED.value
+    )
+    selected = _condition_scores_for_skill(
+        spots,
+        activity=activity,
+        participant_profile=participant_profile,
+        participant_skill_level=requested_skill,
+        at=at,
+    )
+    if (
+        activity == Activity.SURF.value
+        and requested_skill != ParticipantSkillLevel.UNSPECIFIED.value
+        and len(selected) < len(spots)
+    ):
+        missing_spots = tuple(
+            spot for spot in spots if spot.pk not in selected
+        )
+        selected.update(
+            _condition_scores_for_skill(
+                missing_spots,
+                activity=activity,
+                participant_profile=participant_profile,
+                participant_skill_level=(
+                    ParticipantSkillLevel.UNSPECIFIED.value
+                ),
+                at=at,
+            )
+        )
+    return selected
+
+
+def _condition_scores_for_skill(
+    spots: tuple[Any, ...],
+    *,
+    activity: str,
+    participant_profile: str,
+    participant_skill_level: str,
     at: datetime,
 ) -> dict[int, Any]:
     if not spots:
@@ -147,6 +186,7 @@ def _latest_condition_scores(
             spot_id=OuterRef("spot_id"),
             activity=activity,
             participant_profile=participant_profile,
+            participant_skill_level=participant_skill_level,
             snapshot__provider=FUSION_PROVIDER,
             snapshot__spot_id=F("spot_id"),
             methodology_version=METHODOLOGY_VERSION,
@@ -162,6 +202,7 @@ def _latest_condition_scores(
             spot_id__in=[spot.pk for spot in spots],
             activity=activity,
             participant_profile=participant_profile,
+            participant_skill_level=participant_skill_level,
             snapshot__provider=FUSION_PROVIDER,
             snapshot__spot_id=F("spot_id"),
             methodology_version=METHODOLOGY_VERSION,
@@ -329,9 +370,10 @@ def _participant_profile(
     *,
     activity: str,
 ) -> str:
-    if any(age < MINOR_AGE_CUTOFF for age in request.party.ages) or (
-        activity == Activity.SWIM.value
-        and request.party.participant_skill_level is ParticipantSkillLevel.BEGINNER
+    if activity == Activity.SWIM.value and (
+        any(age < MINOR_AGE_CUTOFF for age in request.party.ages)
+        or request.party.participant_skill_level
+        is ParticipantSkillLevel.BEGINNER
     ):
         return FAMILY_PROFILE
     return GENERAL_PROFILE
@@ -365,17 +407,6 @@ def _revalidate_condition_score(
         )
         if (metric := _database_metric(row)) is not None
     )
-    if activity_value is Activity.SURF and not _surf_grade_matches_skill(
-        metrics,
-        participant_skill_level=participant_skill_level,
-        at=at,
-    ):
-        metrics = tuple(
-            metric
-            for metric in metrics
-            if metric.name
-            not in {"official_activity_grade", "official_activity_score"}
-        )
     if (
         participant_profile == FAMILY_PROFILE
         and activity_value is Activity.SWIM
@@ -406,39 +437,11 @@ def _revalidate_condition_score(
             at=at,
             environment=environment_for_spot(spot),
             participant_profile=participant_profile,
+            participant_skill_level=participant_skill_level.value,
         )
     except ValueError:
         return None
     return evaluate_water_index(ObservationSet.from_metrics(*metrics), context)
-
-
-def _surf_grade_matches_skill(
-    metrics: tuple[Metric, ...],
-    *,
-    participant_skill_level: ParticipantSkillLevel,
-    at: datetime,
-) -> bool:
-    if participant_skill_level is ParticipantSkillLevel.UNSPECIFIED:
-        return False
-    grade_detail = next(
-        (
-            metric
-            for metric in metrics
-            if metric.name == "official_grade_detail"
-            and metric.source.strip().upper() == "KHOA"
-            and metric.state is MetricState.VALID
-            and metric.is_current(at, max_age_seconds=43_200)
-            and isinstance(metric.value, str)
-        ),
-        None,
-    )
-    if grade_detail is None:
-        return False
-    normalized = "".join(grade_detail.value.split()).casefold()
-    return participant_skill_level in _SURF_GRADE_SKILL_SCOPES.get(
-        normalized,
-        frozenset(),
-    )
 
 
 def _database_metric(row: Any) -> Metric | None:

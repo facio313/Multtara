@@ -1,6 +1,6 @@
 # 추천·일정 생성 v1 결정 기록
 
-- 상태: Implemented v1 baseline; production routing/experimentation pending
+- 상태: Implemented v1 baseline with production Valhalla routing; OR-Tools/experimentation pending
 - 결정일: 2026-08-15
 - 구현 검증일: 2026-08-16
 - 범위: 콜드스타트, 후보 필터, 랭킹, 다양화, 일정 최적화, 설명, 평가
@@ -23,7 +23,7 @@ LLM은 자유문장을 구조화된 조건으로 바꾸거나 이미 결정된 J
 
 `POST /api/v1/trips/recommendations/`는 요청 시점의 Water Index를 다시 평가한 뒤, 안전·운영·연령·반려동물·접근성 하드 게이트, 연속 선호 점수, 불확실성 패널티와 결정적 MMR을 적용한다. 성인 초급 수영은 가족 보수 프로필을 사용하고, 서핑은 명시된 실력과 확인된 공식 활동 등급이 일치할 때만 적격 후보로 남는다. 결과에는 데이터 상태·출처·만료·배제 요약을 포함하며 `UNKNOWN`과 `STOP`은 추천하지 않는다.
 
-일정 모듈에는 주입형 이동시간 행렬과 시간창·체류시간·예산·도착지 제약을 보존하는 결정적 greedy baseline이 구현되어 있다. 이 baseline은 테스트 가능한 안전한 초기 해법이지 전역 최적해를 증명하지 않는다. 실제 도로 이동시간 공급자, OR-Tools 최적화, 예약·교통 불확실성, 이벤트 로그와 온라인 실험은 운영 데이터 계약이 준비된 다음 단계이며 현재 UI에서 완료된 기능으로 주장하지 않는다.
+일정 모듈에는 운영자가 설정한 HTTPS Valhalla 이동시간 행렬과 시간창·체류시간·예산·도착지 제약을 보존하는 결정적 greedy baseline이 구현되어 있다. 이 baseline은 테스트 가능한 안전한 초기 해법이지 전역 최적해를 증명하지 않는다. OR-Tools 최적화, 예약·교통 불확실성, 이벤트 로그와 온라인 실험은 운영 데이터 계약이 준비된 다음 단계이며 현재 UI에서 완료된 기능으로 주장하지 않는다.
 
 ## 1. 콜드스타트와 페르소나
 
@@ -117,6 +117,27 @@ maximize Σ x_i × group_utility_i
 OR-Tools는 travel-time dimension, 대기 slack, 시간창, optional node와 drop penalty를 지원하므로 Raspberry Pi 5 ARM64 운영환경에서 우선 사용한다. [OR-Tools VRPTW](https://developers.google.com/optimization/routing/vrptw), [Drop penalties](https://developers.google.com/optimization/routing/penalties)
 
 이동시간은 공급자 추상화 뒤 Kakao Mobility 또는 자체 Valhalla 행렬을 사용한다. Haversine 직선거리는 UI 근사치일 뿐 일정 실행 가능성의 근거로 쓰지 않는다. [Valhalla Matrix API](https://valhalla.github.io/valhalla/api/matrix/)
+
+현재 구현은 operator가 설정한 credential-free HTTPS Valhalla matrix를
+drive/walk/bicycle별 immutable snapshot으로 저장하고 만료 뒤 사용하지 않는다.
+경로 pair가 하나라도 없어 종료 지점까지 실행 가능한 동선을 증명할 수 없으면
+일정 API는 `409 NO_CURRENT_ROUTE_TO_END`로 실패한다.
+
+저장 일정은 편집 가능한 여행 계획이 아니라 당시의 물류 초안 감사 기록이다.
+schedule, route snapshot, 공개 route provenance, 방문별 Water Index snapshot/score와
+source refs, participant profile/skill, 물·경로 각각의 재검증 시각, 실행 경고를
+함께 보존한다. 조회와 실행 상태 전환 시 JSON ID의 형식만 믿지 않고 실제 route
+snapshot, condition score, observation snapshot이 존재하며 spot/activity/profile/
+skill/methodology identity와 유효기간이 일치하는지 다시 확인한다. 하나라도 만료,
+누락, dangling, 불일치이면 `evidence_status=revalidation_required`이며 재계획 전에는
+`accepted` 또는 `started` 상태로 전환할 수 없다. Retention은 이 JSON 참조가
+가리키는 score/snapshot과 그 metric lineage를 보호한다.
+
+가족 수영의 `adult_supervision_confirmed`는 요청 세션에서만 유효하고 저장 evidence나
+전역 observation으로 남기지 않는다. 저장 일정이
+`ADULT_SUPERVISION_RECONFIRMATION_REQUIRED`를 반환하면 `accepted` 또는 `started`
+상태로 바꾸는 같은 `PATCH` 요청에 `adult_supervision_confirmed=true`를 명시해야 한다.
+이 확인은 성공 뒤에도 영속하지 않으므로 다음 실행 상태 전환에서 다시 확인한다.
 
 ## 6. 설명 계약
 

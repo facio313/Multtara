@@ -527,6 +527,105 @@
   line-height: 1.55;
 }
 
+.detail-forecast-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 16px;
+  border: 1px solid #d8e8e3;
+  border-radius: 14px;
+  color: #16715f;
+  background: #f2faf7;
+}
+
+.detail-forecast-state.is-demo {
+  border-color: #e6d7b8;
+  color: #765a20;
+  background: #fff9ed;
+}
+
+.detail-forecast-state.is-error {
+  border-color: #edc8c4;
+  color: #8a3833;
+  background: #fff2f0;
+}
+
+.detail-forecast-state strong,
+.detail-forecast-state p {
+  display: block;
+  margin: 0;
+}
+
+.detail-forecast-state p {
+  margin-top: 4px;
+  color: inherit;
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.detail-forecast-state button {
+  min-height: 36px;
+  margin-left: auto;
+  padding: 7px 11px;
+  border: 1px solid currentColor;
+  border-radius: 9px;
+  color: inherit;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.detail-forecast-provenance {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+  margin: 16px 0 0;
+}
+
+.detail-forecast-provenance > div {
+  min-width: 0;
+  padding: 11px;
+  border-radius: 11px;
+  background: #f3f7f5;
+}
+
+.detail-forecast-provenance dt {
+  color: #748783;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.detail-forecast-provenance dd {
+  margin: 5px 0 0;
+  color: #274d49;
+  font-size: 0.72rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.detail-forecast-policy {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 13px 0 0;
+  color: #6a7e7a;
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+.best-day-note.is-unknown {
+  color: #755c2c;
+  background: #fff8e8;
+}
+
+.detail-forecast-state button:focus-visible,
+.forecast-panel a:focus-visible {
+  outline: 3px solid #177fdd;
+  outline-offset: 3px;
+}
+
 .facility-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1060,6 +1159,10 @@
   .detail-forecast-strip > div {
     min-width: 82px;
     scroll-snap-align: start;
+  }
+
+  .detail-forecast-provenance {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .facility-grid {

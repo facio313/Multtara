@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
@@ -11,13 +11,16 @@ import {
   Droplets,
   Info,
   Layers3,
+  LocateFixed,
   Map as MapIcon,
   MapPin,
   Search,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Thermometer,
   Waves,
+  X,
 } from 'lucide-react';
 import {
   activityOptions,
@@ -29,6 +32,14 @@ import {
   getSpotActivityView,
   scoreLabel,
 } from '../services/waterData';
+import {
+  distanceKm,
+  geolocationFailureKind,
+  liveWaterTemperatureC,
+  normalizeCoordinates,
+  sortSpotsByDistance,
+  waterTemperatureTone,
+} from '../services/mapData';
 import './MapPage.css';
 
 const KAKAO_SDK_ID = 'pongdang-kakao-map-sdk';
@@ -126,42 +137,66 @@ function MapStatusNotice({ status }) {
   );
 }
 
-function WaterTwinFallback({ filteredSpots, activity, selectedId, onSelect, dimmed = false }) {
+function WaterTwinFallback({
+  filteredSpots,
+  activity,
+  layerMode,
+  selectedId,
+  onSelect,
+  dimmed = false,
+}) {
   const { t } = useI18n();
   return (
     <div
       className={`pd-map-fallback${dimmed ? ' is-dimmed' : ''}`}
+      role="region"
       aria-label={t('map.explorer')}
     >
       <div className="pd-map-fallback-grid" aria-hidden="true" />
       <div className="pd-map-water-shape pd-map-water-east" aria-hidden="true" />
       <div className="pd-map-water-shape pd-map-water-west" aria-hidden="true" />
       <div className="pd-map-region-label pd-map-label-gangneung" aria-hidden="true">
-        GANGNEUNG MVP
+        {t('map.fallback.gangneung')}
       </div>
       <div className="pd-map-region-label pd-map-label-korea" aria-hidden="true">
-        KOREA EXPANSION
+        {t('map.fallback.korea')}
       </div>
 
       {filteredSpots.map((spot) => {
         const view = getSpotActivityView(spot, activity);
         const isSelected = selectedId === spot.id;
+        const waterTemperature = liveWaterTemperatureC(view);
+        const markerTone = layerMode === 'temperature'
+          ? `temperature-${waterTemperatureTone(waterTemperature)}`
+          : getScoreTone(view.score);
+        const markerValue = layerMode === 'temperature'
+          ? (waterTemperature === null ? '—' : `${Math.round(waterTemperature)}°`)
+          : scoreLabel(view);
+        const markerLabel = layerMode === 'temperature'
+          ? t('map.marker.temperature', {
+            name: spot.name,
+            temperature: waterTemperature === null
+              ? t('common.noData')
+              : t('map.temperature.value', { temperature: waterTemperature.toFixed(1) }),
+          })
+          : `${spot.name}, ${view.score === null ? t('common.scoreMissing') : t('common.points', { score: view.score })}, ${localizedSafety(t, view.safety.level).label}, ${localizedDataState(t, view.dataState)}`;
         return (
-          <button
-            className={`pd-map-marker pd-map-marker-${getScoreTone(view.score)} safety-${view.safety.level}${isSelected ? ' is-selected' : ''}`}
+          <Link
+            className={`pd-map-marker pd-map-marker-${markerTone}${layerMode === 'score' ? ` safety-${view.safety.level}` : ''}${isSelected ? ' is-selected' : ''}`}
             key={spot.id}
-            type="button"
+            to={`/spot/${spot.id}`}
             style={{
               '--marker-x': `${spot.visual.mapPosition.x}%`,
               '--marker-y': `${spot.visual.mapPosition.y}%`,
             }}
-            aria-pressed={isSelected}
-            aria-label={`${spot.name}, ${view.score === null ? t('common.scoreMissing') : t('common.points', { score: view.score })}, ${localizedSafety(t, view.safety.level).label}, ${localizedDataState(t, view.dataState)}`}
+            aria-current={isSelected ? 'location' : undefined}
+            aria-label={`${markerLabel}. ${t('map.marker.openDetail')}`}
             onClick={() => onSelect(spot.id)}
+            onFocus={() => onSelect(spot.id)}
           >
-            <span className="pd-map-marker-score">{scoreLabel(view)}</span>
+            <span className="pd-map-marker-score">{markerValue}</span>
             <span className="pd-map-marker-name">{spot.name}</span>
-          </button>
+          </Link>
         );
       })}
 
@@ -176,14 +211,18 @@ function WaterTwinFallback({ filteredSpots, activity, selectedId, onSelect, dimm
 }
 
 function MapPage() {
-  const { t } = useI18n();
+  const { intlLocale, t } = useI18n();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [scope, setScope] = useState(() => (searchParams.get('q')?.trim() ? 'nationwide' : 'gangneung'));
   const [activeType, setActiveType] = useState('all');
   const [activeActivity, setActiveActivity] = useState('swim');
+  const [layerMode, setLayerMode] = useState('score');
   const [query, setQuery] = useState(() => searchParams.get('q')?.trim() ?? '');
   const [selectedSpotId, setSelectedSpotId] = useState(1);
   const [mapStatus, setMapStatus] = useState(KAKAO_MAP_KEY ? 'loading' : 'missing-key');
+  const [locationState, setLocationState] = useState('idle');
+  const [userLocation, setUserLocation] = useState(null);
   const {
     spots,
     spotStatus,
@@ -198,8 +237,7 @@ function MapPage() {
 
   const filteredSpots = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase('ko-KR');
-
-    return spots
+    const candidates = spots
       .filter((spot) => scope === 'nationwide' || spot.isGangneungMvp)
       .filter((spot) => activeType === 'all' || spot.type === activeType)
       .filter((spot) => {
@@ -208,8 +246,13 @@ function MapPage() {
           .join(' ')
           .toLocaleLowerCase('ko-KR');
         return searchTarget.includes(normalizedQuery);
-      })
-      .sort((a, b) => {
+      });
+
+    if (locationState === 'ready' && userLocation) {
+      return sortSpotsByDistance(candidates, userLocation);
+    }
+
+    return candidates.sort((a, b) => {
         const aScore = getSpotActivityView(a, activeActivity).score;
         const bScore = getSpotActivityView(b, activeActivity).score;
         if (aScore === null && bScore === null) return a.name.localeCompare(b.name, 'ko-KR');
@@ -217,13 +260,60 @@ function MapPage() {
         if (bScore === null) return -1;
         return bScore - aScore;
       });
-  }, [activeActivity, activeType, query, scope, spots]);
+  }, [activeActivity, activeType, locationState, query, scope, spots, userLocation]);
 
   const selectedSpot =
     filteredSpots.find((spot) => spot.id === selectedSpotId) ?? filteredSpots[0] ?? null;
   const selectedView = selectedSpot
     ? getSpotActivityView(selectedSpot, activeActivity)
     : null;
+  const selectedDistance = selectedSpot && userLocation
+    ? distanceKm(userLocation, selectedSpot)
+    : null;
+
+  const formatDistance = (distance) => {
+    if (!Number.isFinite(distance)) return '';
+    const digits = distance < 10 ? 1 : 0;
+    return t('map.nearby.distance', {
+      distance: new Intl.NumberFormat(intlLocale, {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      }).format(distance),
+    });
+  };
+
+  const requestNearby = () => {
+    if (!navigator.geolocation) {
+      setUserLocation(null);
+      setLocationState('unsupported');
+      return;
+    }
+
+    setLocationState('requesting');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const coordinates = normalizeCoordinates(position?.coords);
+        if (!coordinates) {
+          setUserLocation(null);
+          setLocationState('error');
+          return;
+        }
+        setUserLocation(coordinates);
+        setLocationState('ready');
+        setScope('nationwide');
+      },
+      (error) => {
+        setUserLocation(null);
+        setLocationState(geolocationFailureKind(error));
+      },
+      { enableHighAccuracy: false, maximumAge: 300_000, timeout: 10_000 },
+    );
+  };
+
+  const clearNearby = () => {
+    setUserLocation(null);
+    setLocationState('idle');
+  };
 
   useEffect(() => {
     if (!KAKAO_MAP_KEY) return undefined;
@@ -275,18 +365,35 @@ function MapPage() {
     filteredSpots.forEach((spot) => {
       const position = new maps.LatLng(spot.lat, spot.lng);
       const view = getSpotActivityView(spot, activeActivity);
+      const waterTemperature = liveWaterTemperatureC(view);
+      const markerTone = layerMode === 'temperature'
+        ? `temperature-${waterTemperatureTone(waterTemperature)}`
+        : getScoreTone(view.score);
+      const markerValue = layerMode === 'temperature'
+        ? (waterTemperature === null ? '—' : `${Math.round(waterTemperature)}°`)
+        : scoreLabel(view);
       const button = document.createElement('button');
       const scoreElement = document.createElement('strong');
       const nameElement = document.createElement('span');
-      const clickHandler = () => setSelectedSpotId(spot.id);
+      const clickHandler = () => {
+        setSelectedSpotId(spot.id);
+        navigate(`/spot/${spot.id}`);
+      };
 
       button.type = 'button';
-      button.className = `pd-kakao-marker pd-kakao-marker-${getScoreTone(view.score)} safety-${view.safety.level}`;
+      button.className = `pd-kakao-marker pd-kakao-marker-${markerTone}${layerMode === 'score' ? ` safety-${view.safety.level}` : ''}`;
       button.setAttribute(
         'aria-label',
-        `${spot.name}, ${activeActivityLabel} ${view.score === null ? t('common.scoreMissing') : t('common.points', { score: view.score })}, ${localizedSafety(t, view.safety.level).label}`,
+        layerMode === 'temperature'
+          ? `${t('map.marker.temperature', {
+            name: spot.name,
+            temperature: waterTemperature === null
+              ? t('common.noData')
+              : t('map.temperature.value', { temperature: waterTemperature.toFixed(1) }),
+          })}. ${t('map.marker.openDetail')}`
+          : `${spot.name}, ${activeActivityLabel} ${view.score === null ? t('common.scoreMissing') : t('common.points', { score: view.score })}, ${localizedSafety(t, view.safety.level).label}. ${t('map.marker.openDetail')}`,
       );
-      scoreElement.textContent = scoreLabel(view);
+      scoreElement.textContent = markerValue;
       nameElement.textContent = spot.name;
       button.append(scoreElement, nameElement);
       button.addEventListener('click', clickHandler);
@@ -317,7 +424,7 @@ function MapPage() {
       });
       overlaysRef.current = [];
     };
-  }, [activeActivity, activeActivityLabel, filteredSpots, mapStatus, scope, t]);
+  }, [activeActivity, activeActivityLabel, filteredSpots, layerMode, mapStatus, navigate, scope, t]);
 
   const clearFilters = () => {
     setQuery('');
@@ -328,6 +435,13 @@ function MapPage() {
     || ['idle', 'loading'].includes(conditionStatus);
   const dataError = spotStatus === 'error' || conditionStatus === 'error';
   const dataEmpty = spotStatus === 'empty' || conditionStatus === 'empty';
+  const dataBadge = dataError
+    ? t('map.data.badge.error')
+    : dataLoading
+      ? t('map.data.badge.loading')
+      : dataEmpty
+        ? t('map.data.badge.empty')
+        : t('map.data.badge.ready');
 
   return (
     <div className="pd-map-page">
@@ -335,7 +449,7 @@ function MapPage() {
         <div className="pd-map-hero-copy">
           <p className="pd-map-eyebrow">
             <Sparkles size={14} aria-hidden="true" />
-            WATER TWIN · GANGNEUNG FIRST
+            {t('map.eyebrow')}
           </p>
           <h1>{t('map.hero.title')}</h1>
           <p>{t('map.hero.description')}</p>
@@ -344,10 +458,16 @@ function MapPage() {
         <div className={`pd-map-data-note state-${dataError ? 'error' : dataLoading ? 'loading' : dataEmpty ? 'demo' : 'live'}`} role="status" aria-live="polite">
           <span className="pd-map-demo-badge">
             <Database size={14} aria-hidden="true" />
-            {dataError ? 'DEMO FALLBACK' : dataLoading ? 'LOADING' : dataEmpty ? 'DEMO + NO DATA' : 'API + DEMO'}
+            {dataBadge}
           </span>
           <div>
-            <strong>{dataError ? t('map.data.error') : dataLoading ? t('map.data.loading') : t('map.data.ready')}</strong>
+            <strong>{dataError
+              ? t('map.data.error')
+              : dataLoading
+                ? t('map.data.loading')
+                : dataEmpty
+                  ? t('map.data.empty')
+                  : t('map.data.ready')}</strong>
             <span>{t('common.unknownStopPolicy')}</span>
           </div>
           {dataError && <button type="button" onClick={retryData}>{t('common.retry')}</button>}
@@ -370,7 +490,7 @@ function MapPage() {
           />
         </div>
 
-        <div className="pd-map-scope" aria-label={t('map.scope.label')}>
+        <div className="pd-map-scope" role="group" aria-label={t('map.scope.label')}>
           <button
             type="button"
             className={scope === 'gangneung' ? 'is-active' : ''}
@@ -405,7 +525,39 @@ function MapPage() {
           </select>
         </label>
 
-        <div className="pd-map-type-filters" aria-label={t('map.types')}>
+        <div className={`pd-map-nearby state-${locationState}`}>
+          <button
+            type="button"
+            onClick={requestNearby}
+            disabled={locationState === 'requesting'}
+            aria-describedby="pd-map-nearby-status pd-map-nearby-privacy"
+          >
+            <LocateFixed size={16} aria-hidden="true" />
+            {locationState === 'requesting'
+              ? t('map.nearby.requesting')
+              : locationState === 'ready'
+                ? t('map.nearby.refresh')
+                : t('map.nearby.use')}
+          </button>
+          {locationState === 'ready' && (
+            <button
+              type="button"
+              className="pd-map-nearby-clear"
+              onClick={clearNearby}
+              aria-label={t('map.nearby.clear')}
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          )}
+          <span id="pd-map-nearby-status" className="pd-map-nearby-status" aria-live="polite">
+            {locationState === 'idle'
+              ? t('map.nearby.idle')
+              : t(`map.nearby.${locationState}`)}
+          </span>
+          <small id="pd-map-nearby-privacy">{t('map.nearby.privacy')}</small>
+        </div>
+
+        <div className="pd-map-type-filters" role="group" aria-label={t('map.types')}>
           {spotTypeOptions.map((type) => (
             <button
               type="button"
@@ -426,14 +578,36 @@ function MapPage() {
             <div>
               <span className="pd-map-panel-icon"><Layers3 size={17} aria-hidden="true" /></span>
               <div>
-                <strong>{t('map.layer', { activity: activeActivityLabel })}</strong>
+                <strong>{layerMode === 'temperature'
+                  ? t('map.layer.temperature')
+                  : t('map.layer.score', { activity: activeActivityLabel })}</strong>
                 <span>{scope === 'gangneung' ? t('map.spots.gangneung') : t('map.spots.nationwide')} · {t('common.countPlaces', { count: filteredSpots.length })}</span>
               </div>
             </div>
-            <span className={`pd-map-sdk-state state-${mapStatus}`}>
-              <span aria-hidden="true" />
-              {mapStatus === 'ready' ? 'KAKAO MAP' : 'CONCEPT MAP'}
-            </span>
+            <div className="pd-map-layer-actions">
+              <div className="pd-map-layer-switch" role="group" aria-label={t('map.layer.switch')}>
+                <button
+                  type="button"
+                  className={layerMode === 'score' ? 'is-active' : ''}
+                  aria-pressed={layerMode === 'score'}
+                  onClick={() => setLayerMode('score')}
+                >
+                  <ShieldCheck size={14} aria-hidden="true" /> {t('map.layer.scoreButton')}
+                </button>
+                <button
+                  type="button"
+                  className={layerMode === 'temperature' ? 'is-active' : ''}
+                  aria-pressed={layerMode === 'temperature'}
+                  onClick={() => setLayerMode('temperature')}
+                >
+                  <Thermometer size={14} aria-hidden="true" /> {t('map.layer.temperatureButton')}
+                </button>
+              </div>
+              <span className={`pd-map-sdk-state state-${mapStatus}`}>
+                <span aria-hidden="true" />
+                {mapStatus === 'ready' ? t('map.sdk.kakao') : t('map.sdk.concept')}
+              </span>
+            </div>
           </div>
 
           <div className="pd-map-canvas-wrap">
@@ -443,12 +617,14 @@ function MapPage() {
               <div
                 className="pd-map-kakao-canvas"
                 ref={mapCanvasRef}
+                role="region"
                 aria-label={t('map.explorer')}
               />
             ) : (
               <WaterTwinFallback
                 filteredSpots={filteredSpots}
                 activity={activeActivity}
+                layerMode={layerMode}
                 selectedId={selectedSpot?.id}
                 onSelect={setSelectedSpotId}
                 dimmed={mapStatus === 'loading'}
@@ -462,11 +638,24 @@ function MapPage() {
             )}
 
             <div className="pd-map-legend" aria-label={t('map.legend')}>
-              <span><i className="legend-excellent" /> {t('map.legend.excellent')}</span>
-              <span><i className="legend-good" /> {t('map.legend.good')}</span>
-              <span><i className="legend-fair" /> {t('map.legend.check')}</span>
-              <span><i className="legend-caution" /> {t('map.legend.stop')}</span>
-              <span><i className="legend-unknown" /> {t('map.legend.unknown')}</span>
+              {layerMode === 'temperature' ? (
+                <>
+                  <span><i className="legend-temperature-very-cold" /> {t('map.temperature.veryCold')}</span>
+                  <span><i className="legend-temperature-cold" /> {t('map.temperature.cold')}</span>
+                  <span><i className="legend-temperature-cool" /> {t('map.temperature.cool')}</span>
+                  <span><i className="legend-temperature-mild" /> {t('map.temperature.mild')}</span>
+                  <span><i className="legend-temperature-warm" /> {t('map.temperature.warm')}</span>
+                  <span><i className="legend-unknown" /> {t('map.temperature.missing')}</span>
+                </>
+              ) : (
+                <>
+                  <span><i className="legend-excellent" /> {t('map.legend.excellent')}</span>
+                  <span><i className="legend-good" /> {t('map.legend.good')}</span>
+                  <span><i className="legend-fair" /> {t('map.legend.check')}</span>
+                  <span><i className="legend-caution" /> {t('map.legend.stop')}</span>
+                  <span><i className="legend-unknown" /> {t('map.legend.unknown')}</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -475,7 +664,9 @@ function MapPage() {
           <div className="pd-map-sheet-handle" aria-hidden="true"><ChevronUp size={18} /></div>
           <div className="pd-map-sheet-header">
             <div>
-              <p>CURATED FOR {activeActivityLabel.toUpperCase()}</p>
+              <p>{locationState === 'ready'
+                ? t('map.results.nearbyFirst')
+                : t('map.results.curatedFor', { activity: activeActivityLabel })}</p>
               <h2>{t('map.results.title', { count: filteredSpots.length })}</h2>
             </div>
             <span>{scope === 'gangneung' ? t('map.results.gangneung') : t('map.results.nationwide')}</span>
@@ -503,7 +694,10 @@ function MapPage() {
                 <span className="pd-map-featured-icon" aria-hidden="true">{selectedSpot.visual.icon}</span>
                 <div>
                   <h3>{selectedSpot.name}</h3>
-                  <p><MapPin size={14} aria-hidden="true" /> {selectedSpot.region}</p>
+                  <p>
+                    <MapPin size={14} aria-hidden="true" /> {selectedSpot.region}
+                    {selectedDistance !== null ? ` · ${formatDistance(selectedDistance)}` : ''}
+                  </p>
                 </div>
               </div>
 
@@ -561,6 +755,7 @@ function MapPage() {
               {filteredSpots.map((spot, index) => {
                 const view = getSpotActivityView(spot, activeActivity);
                 const isSelected = selectedSpot?.id === spot.id;
+                const spotDistance = userLocation ? distanceKm(userLocation, spot) : null;
                 return (
                   <article
                     className={`pd-map-result-card${isSelected ? ' is-selected' : ''}`}
@@ -576,7 +771,10 @@ function MapPage() {
                       <span className="pd-map-result-rank">{String(index + 1).padStart(2, '0')}</span>
                       <span className="pd-map-result-copy">
                         <strong>{spot.name}</strong>
-                        <small>{spot.region} · {spot.typeLabel} · {localizedDataState(t, view.dataState)}</small>
+                        <small>
+                          {spot.region} · {spot.typeLabel} · {localizedDataState(t, view.dataState)}
+                          {spotDistance !== null ? ` · ${formatDistance(spotDistance)}` : ''}
+                        </small>
                       </span>
                       <span className={`pd-map-result-score score-${getScoreTone(view.score)} safety-${view.safety.level}`}>
                         <strong>{scoreLabel(view)}</strong>

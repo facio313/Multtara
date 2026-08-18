@@ -1,4 +1,5 @@
-import api from './api.js';
+import { csrfRequest } from './accountApi.js';
+import { canonicalSpotType, spotTypeSupportsActivity } from './spotTypes.js';
 
 const PARTICIPANT_SKILL_LEVELS = new Set(['beginner', 'intermediate', 'advanced', 'unspecified']);
 
@@ -21,7 +22,9 @@ export function buildRecommendationPayload(form, ages, personaLabel = '') {
     ? form.adultSupervisionConfirmed
     : null;
 
-  return {
+  const region = typeof form.region === 'string' ? form.region.trim() : '';
+  const spotType = canonicalSpotType(form.spotType);
+  const payload = {
     activity: form.activity,
     preferences: [
       { feature: 'quiet', target: form.quiet / 100, weight: 0.45 },
@@ -38,10 +41,22 @@ export function buildRecommendationPayload(form, ages, personaLabel = '') {
     persona_label: personaLabel,
     limit: 6,
   };
+
+  if (region) payload.region = region;
+  if (spotType && spotTypeSupportsActivity(spotType, form.activity)) {
+    payload.spot_type = spotType;
+  }
+
+  return payload;
 }
 
 export async function requestRecommendations(payload, { signal } = {}) {
-  const response = await api.post('trips/recommendations/', payload, { signal });
+  const response = await csrfRequest(
+    'post',
+    'trips/recommendations/',
+    payload,
+    { signal },
+  );
   return response.data;
 }
 

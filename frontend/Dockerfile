@@ -14,5 +14,12 @@ RUN npm run build
 FROM nginx:alpine
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
+
+# The official image normally starts a root master on port 80. PongDang uses a
+# static configuration, so skip the mutating image entrypoint and run the
+# master itself as nginx on an unprivileged port. Runtime PID/cache paths are
+# writable tmpfs mounts in Compose while the image filesystem stays read-only.
+USER nginx
+EXPOSE 8080
+ENTRYPOINT []
 CMD ["nginx", "-g", "daemon off;"]

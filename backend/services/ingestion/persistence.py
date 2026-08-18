@@ -15,9 +15,18 @@ from typing import Any, Protocol
 
 from django.db import transaction
 
-from services.water_index import IndexResult, Metric
+from services.water_index import (
+    IndexResult,
+    Metric,
+    canonical_participant_skill_level,
+)
 
 from .participant_profiles import canonical_participant_profile
+
+
+_AUDIT_DERIVATION_PROVIDERS = frozenset(
+    {"PONGDANG_FUSION", "PONGDANG_DERIVED"}
+)
 
 
 class NormalizedObservation(Protocol):
@@ -69,21 +78,37 @@ def _upsert_snapshot(*, spot: Any, observation: NormalizedObservation) -> tuple[
         ObservationMetricLineage,
         _,
     ) = _condition_models()
-    snapshot, snapshot_created = ObservationSnapshot.objects.update_or_create(
-        spot=spot,
-        provider=observation.provider,
-        provider_record_id=observation.provider_record_id,
-        ingestion_version=observation.ingestion_version,
-        defaults={
-            "state": observation.state,
-            "observed_at": observation.source_observed_at,
-            "fetched_at": observation.fetched_at,
-            "valid_from": observation.valid_from,
-            "valid_until": observation.valid_until,
-            "spatial_scope": observation.spatial_scope,
-            "source_url": observation.source_url,
-        },
-    )
+    identity = {
+        "spot": spot,
+        "provider": observation.provider,
+        "provider_record_id": observation.provider_record_id,
+        "ingestion_version": observation.ingestion_version,
+    }
+    defaults = {
+        "state": observation.state,
+        "observed_at": observation.source_observed_at,
+        "fetched_at": observation.fetched_at,
+        "valid_from": observation.valid_from,
+        "valid_until": observation.valid_until,
+        "spatial_scope": observation.spatial_scope,
+        "source_url": observation.source_url,
+    }
+    if observation.provider in _AUDIT_DERIVATION_PROVIDERS:
+        snapshot, snapshot_created = ObservationSnapshot.objects.get_or_create(
+            **identity,
+            defaults=defaults,
+        )
+        if not snapshot_created:
+            # Fused/derived record ids include their complete selected evidence
+            # and methodology. Reusing one is an idempotent scheduler retry;
+            # mutating timestamps would manufacture freshness and erase audit
+            # history.
+            return snapshot, False
+    else:
+        snapshot, snapshot_created = ObservationSnapshot.objects.update_or_create(
+            **identity,
+            defaults=defaults,
+        )
 
     metrics_by_name: dict[str, Any] = {}
     for metric in observation.observations.metrics.values():
@@ -116,29 +141,40 @@ def _sync_metric_lineage(
     metric_model: Any,
     inputs: tuple[MetricLineageInput, ...],
 ) -> None:
+    if inputs and snapshot.provider not in _AUDIT_DERIVATION_PROVIDERS:
+        raise ValueError(
+            "Metric lineage can only be attached to fused or derived evidence"
+        )
     source_ids = {item.source_metric_id for item in inputs}
     sources = metric_model.objects.select_related("snapshot").in_bulk(source_ids)
     if set(sources) != source_ids:
-        raise ValueError("Fused metric lineage references a missing source metric")
+        raise ValueError("Metric lineage references a missing source metric")
 
     retained_lineage_ids: list[int] = []
     for item in inputs:
         derived_metric = metrics_by_name.get(item.derived_metric_name)
         source_metric = sources.get(item.source_metric_id)
         if derived_metric is None or source_metric is None:
-            raise ValueError("Fused metric lineage does not match a persisted metric")
+            raise ValueError("Metric lineage does not match a persisted metric")
         if item.relation not in {"selected", "conflict"}:
-            raise ValueError("Fused metric lineage relation is invalid")
+            raise ValueError("Metric lineage relation is invalid")
         if (
             isinstance(item.priority, bool)
             or not isinstance(item.priority, int)
             or not 0 <= item.priority <= 65_535
         ):
-            raise ValueError("Fused metric lineage priority is invalid")
+            raise ValueError("Metric lineage priority is invalid")
         if source_metric.snapshot.spot_id != getattr(spot, "pk", None):
-            raise ValueError("Fused metric lineage crosses WaterSpot boundaries")
+            raise ValueError("Metric lineage crosses WaterSpot boundaries")
         if source_metric.snapshot.provider == "PONGDANG_FUSION":
-            raise ValueError("Fused metric lineage must reference original evidence")
+            raise ValueError("Metric lineage cannot reference fused evidence")
+        if (
+            snapshot.provider == "PONGDANG_DERIVED"
+            and source_metric.snapshot.provider == "PONGDANG_DERIVED"
+        ):
+            raise ValueError(
+                "Suitability derivation lineage must reference original evidence"
+            )
         lineage, _ = lineage_model.objects.update_or_create(
             derived_metric=derived_metric,
             source_metric=source_metric,
@@ -179,6 +215,7 @@ def persist_evaluation(
     observation: NormalizedObservation,
     result: IndexResult,
     participant_profile: str = "general",
+    participant_skill_level: str = "unspecified",
 ) -> PersistenceResult:
     """Upsert one source record, its metrics, and its evaluated score atomically.
 
@@ -195,6 +232,11 @@ def persist_evaluation(
     )
 
     profile = canonical_participant_profile(participant_profile)
+    skill_level = canonical_participant_skill_level(participant_skill_level)
+    if result.activity.value != "surf" and skill_level != "unspecified":
+        raise ValueError(
+            "non-surf evaluations must use unspecified participant_skill_level"
+        )
     score_defaults = _score_defaults(result)
     # Locking the parent snapshot serializes repeated writes for this stable
     # provider record even though legacy ConditionScore has no unique key.
@@ -205,6 +247,7 @@ def persist_evaluation(
             snapshot=snapshot,
             activity=result.activity.value,
             participant_profile=profile,
+            participant_skill_level=skill_level,
             methodology_version=result.methodology_version,
         )
         .order_by("pk")
@@ -216,11 +259,19 @@ def persist_evaluation(
             spot=spot,
             activity=result.activity.value,
             participant_profile=profile,
+            participant_skill_level=skill_level,
             **score_defaults,
         )
         score_created = True
     else:
         score = existing_score
+        if observation.provider == "PONGDANG_FUSION":
+            return PersistenceResult(
+                snapshot_id=snapshot.pk,
+                score_id=score.pk,
+                snapshot_created=snapshot_created,
+                score_created=False,
+            )
         for field_name, value in score_defaults.items():
             setattr(score, field_name, value)
         score.spot = spot
@@ -294,7 +345,14 @@ def _score_defaults(result: IndexResult) -> dict[str, Any]:
         "decision": result.decision.value,
         "confidence": result.confidence,
         "coverage": result.coverage,
-        "score_range": list(result.score_range) if result.score_range is not None else [],
+        # A range is itself a numeric suitability claim. Preserve uncertainty
+        # inputs in gates/contributions, but never persist a public range when
+        # the fail-closed result has no publishable point score.
+        "score_range": (
+            list(result.score_range)
+            if result.score is not None and result.score_range is not None
+            else []
+        ),
         "gates": [_json_value(asdict(gate)) for gate in result.gates],
         "contributions": [
             _json_value(asdict(contribution)) for contribution in result.contributions

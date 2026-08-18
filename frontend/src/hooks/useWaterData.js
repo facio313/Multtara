@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import useSpotStore, { requestKey } from '../store/useSpotStore';
+import { findSpotByRouteId } from '../services/waterData';
 
 export function useWaterSpots(activity, options = {}) {
   const loadConditions = options.loadConditions !== false;
@@ -56,11 +57,7 @@ export function useWaterSpot(id) {
     retryData,
   } = store;
   const spot = useMemo(
-    () => spots.find((item) => (
-      String(item.id) === String(id)
-      || item.slug === id
-      || String(item.apiId) === String(id).replace(/^api-/, '')
-    )) ?? null,
+    () => findSpotByRouteId(spots, id),
     [id, spots],
   );
   const apiId = spot?.apiId ?? null;

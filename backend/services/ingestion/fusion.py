@@ -34,7 +34,8 @@ from .participant_profiles import canonical_participant_profile
 
 
 FUSION_PROVIDER = "PONGDANG_FUSION"
-FUSION_VERSION = "observation-fusion-v3"
+DERIVED_PROVIDER = "PONGDANG_DERIVED"
+FUSION_VERSION = "observation-fusion-v5"
 _TIDE_WINDOW_START_METRIC = "official_tide_window_start"
 _TIDE_WINDOW_END_METRIC = "official_tide_window_end"
 
@@ -48,6 +49,7 @@ _DEFAULT_SOURCE_PRIORITY = {
     "KHOA": 90,
     "KMA": 80,
     "FACILITY_OPERATOR": 75,
+    DERIVED_PROVIDER: 70,
     "TOUR_API": 50,
     "USER_REPORTED": 10,
 }
@@ -69,7 +71,40 @@ _METRIC_SOURCE_PRIORITY = {
         "KHOA": 105,
         "LOCAL_AUTHORITY": 110,
     },
+    "hci_beach_score": {DERIVED_PROVIDER: 110},
+    "hci_beach_thermal_component": {DERIVED_PROVIDER: 110},
+    "hci_beach_aesthetic_component": {DERIVED_PROVIDER: 110},
+    "hci_beach_precipitation_component": {DERIVED_PROVIDER: 110},
+    "hci_beach_wind_component": {DERIVED_PROVIDER: 110},
+    "hci_beach_dew_point_c": {DERIVED_PROVIDER: 110},
+    "hci_beach_humidex": {DERIVED_PROVIDER: 110},
+    "hci_beach_cloud_cover_upper_pct": {DERIVED_PROVIDER: 110},
+    "facility_operation_confidence": {DERIVED_PROVIDER: 110},
+    "indoor_weather_shelter": {DERIVED_PROVIDER: 110},
+    "flow_suitability_score": {DERIVED_PROVIDER: 110},
 }
+
+_DERIVED_METRIC_NAMES = frozenset(
+    {
+        "hci_beach_score",
+        "hci_beach_thermal_component",
+        "hci_beach_aesthetic_component",
+        "hci_beach_precipitation_component",
+        "hci_beach_wind_component",
+        "hci_beach_dew_point_c",
+        "hci_beach_humidex",
+        "hci_beach_cloud_cover_upper_pct",
+        "facility_operation_confidence",
+        "indoor_weather_shelter",
+        "flow_suitability_score",
+    }
+)
+
+# These factors depend on a particular recommendation request. Even if a bad
+# writer persists one, global fusion must never turn it into shared evidence.
+_SESSION_ONLY_METRICS = frozenset(
+    {"amenity_fit", "crowd_fit", "preferred_temperature_fit"}
+)
 
 _SAFETY_SOURCE_ALLOWLIST: dict[str, frozenset[str]] = {
     "official_activity_grade": frozenset({"KHOA"}),
@@ -186,6 +221,7 @@ def fuse_spot_observations(
     spot: Any,
     at: datetime,
     fetched_at: datetime,
+    activity: Activity | None = None,
 ) -> FusedObservation:
     """Load real snapshots for ``spot`` and select one current metric per name."""
 
@@ -196,15 +232,17 @@ def fuse_spot_observations(
     rows = (
         ObservationMetric.objects.select_related("snapshot")
         .filter(snapshot__spot=spot)
-        .filter(snapshot__state__in=("live", "stale"))
+        # A provider/collector-level stale classification is authoritative.
+        # A metric's wider validity window must never revive that snapshot.
+        .filter(snapshot__state=ObservationSnapshot.SourceState.LIVE)
         .exclude(snapshot__provider=FUSION_PROVIDER)
-        .exclude(snapshot__state=ObservationSnapshot.SourceState.DEMO)
         .order_by("name", "id")
     )
     candidates = tuple(
         candidate
         for row in rows
-        if (candidate := _candidate_from_model(row, at=at)) is not None
+        if _snapshot_applies_to_activity(row.snapshot, activity)
+        and (candidate := _candidate_from_model(row, at=at)) is not None
     )
     return fuse_candidates(
         candidates,
@@ -228,12 +266,23 @@ def fuse_candidates(
     grouped: dict[str, list[MetricCandidate]] = {}
     contextualized = _contextualize_tide_window_candidates(tuple(candidates), at=at)
     for candidate in contextualized:
+        if candidate.metric.name in _SESSION_ONLY_METRICS:
+            continue
         source = _canonical_source(candidate.metric.source)
+        provider = _canonical_source(candidate.provider)
+        if DERIVED_PROVIDER in {source, provider} and (
+            source != DERIVED_PROVIDER
+            or provider != DERIVED_PROVIDER
+            or candidate.metric.name not in _DERIVED_METRIC_NAMES
+        ):
+            continue
         allowed = _SAFETY_SOURCE_ALLOWLIST.get(candidate.metric.name)
+        if candidate.metric.name in _DERIVED_METRIC_NAMES:
+            allowed = frozenset({DERIVED_PROVIDER})
         if allowed is not None:
             if source not in allowed:
                 continue
-            if _canonical_source(candidate.provider) != source:
+            if provider != source:
                 continue
         if not _temporally_applicable(candidate.metric, at=at):
             continue
@@ -253,7 +302,6 @@ def fuse_candidates(
     observed_at = max((metric.observed_at for metric in metrics), default=None)
     state = "live" if metrics else "missing"
     record_payload = {
-        "at": at.isoformat(),
         "metric_ids": ids,
         "lineage": [
             (
@@ -265,6 +313,10 @@ def fuse_candidates(
             for edge in lineage
         ],
         "states": [metric.state.value for metric in metrics],
+        "values": [
+            (metric.name, metric.value, metric.unit, metric.source)
+            for metric in metrics
+        ],
         "version": FUSION_VERSION,
     }
     provider_record_id = hashlib.sha256(
@@ -297,15 +349,22 @@ def evaluate_fused_spot(
     at: datetime,
     fetched_at: datetime,
     participant_profile: str = "general",
+    participant_skill_level: str = "unspecified",
     dry_run: bool = False,
 ) -> FusionEvaluation:
     participant_profile = canonical_participant_profile(participant_profile)
-    observation = fuse_spot_observations(spot=spot, at=at, fetched_at=fetched_at)
+    observation = fuse_spot_observations(
+        spot=spot,
+        at=at,
+        fetched_at=fetched_at,
+        activity=activity,
+    )
     context = EvaluationContext(
         activity=activity,
         at=at,
         environment=environment_for_spot(spot),
         participant_profile=participant_profile,
+        participant_skill_level=participant_skill_level,
     )
     result = evaluate_water_index(
         observation.observations,
@@ -314,6 +373,7 @@ def evaluate_fused_spot(
     observation = _contextualize_observation(
         observation,
         context=context,
+        result=result,
     )
     persistence = None
     if not dry_run:
@@ -322,6 +382,7 @@ def evaluate_fused_spot(
             observation=observation,
             result=result,
             participant_profile=participant_profile,
+            participant_skill_level=context.participant_skill_level,
         )
     return FusionEvaluation(
         observation=observation,
@@ -349,6 +410,32 @@ def environment_for_spot_type(value: Any) -> Environment:
 
 def activity_supported_for_spot(spot: Any, activity: Activity) -> bool:
     return supports_activity_environment(activity, environment_for_spot(spot))
+
+
+def _snapshot_applies_to_activity(snapshot: Any, activity: Activity | None) -> bool:
+    """Keep KHOA activity products out of another activity's evaluation.
+
+    The existing adapter's stable record-id prefix is part of its public
+    normalized identity. KMA grid weather and non-activity-specific official
+    evidence remain shareable, while beach/surf/mudflat products are bound to
+    the activity they actually describe.
+    """
+
+    if activity is None or _canonical_source(snapshot.provider) != "KHOA":
+        return True
+    record_id = str(snapshot.provider_record_id or "").strip().lower()
+    activities_by_prefix = {
+        "beach:": frozenset({Activity.SWIM}),
+        # Rip-current evidence is a required coastal hazard for both swimming
+        # and surfing. It remains excluded from unrelated activities.
+        "rip-current:": frozenset({Activity.SWIM, Activity.SURF}),
+        "surf:": frozenset({Activity.SURF}),
+        "mudflat:": frozenset({Activity.MUDFLAT}),
+    }
+    for prefix, supported_activities in activities_by_prefix.items():
+        if record_id.startswith(prefix):
+            return activity in supported_activities
+    return True
 
 
 def _candidate_from_model(row: Any, *, at: datetime) -> MetricCandidate | None:
@@ -570,6 +657,8 @@ def _official_datetime(value: Any) -> datetime | None:
 
 
 def _temporally_applicable(metric: Metric, *, at: datetime) -> bool:
+    if metric.fetched_at > at:
+        return False
     if metric.mode is not MetricMode.FORECAST and metric.observed_at > at:
         return False
     if metric.valid_from is not None and at < metric.valid_from:
@@ -656,18 +745,48 @@ def _contextualize_observation(
     observation: FusedObservation,
     *,
     context: EvaluationContext,
+    result: IndexResult,
 ) -> FusedObservation:
     valid_until = evaluation_valid_until(observation.observations, context)
+    # Stable evidence/result identity prevents the five-minute scheduler from
+    # creating a fresh database row merely because wall-clock time advanced.
+    # Once required evidence expires, all repeated UNKNOWN evaluations share
+    # the explicit "expired" identity until evidence or outcome changes.
+    validity_identity = (
+        valid_until.isoformat() if valid_until > context.at else "expired"
+    )
     record_payload = {
         "activity": context.activity.value,
-        "at": context.at.isoformat(),
         "metric_ids": observation.source_metric_ids,
-        "participant_profile": context.participant_profile,
-        "states": [
-            metric.state.value
-            for metric in observation.observations.metrics.values()
+        "metrics": [
+            (
+                metric.name,
+                metric.value,
+                metric.unit,
+                metric.source,
+                metric.state.value,
+                metric.observed_at.isoformat(),
+                metric.valid_until.isoformat()
+                if metric.valid_until is not None
+                else None,
+            )
+            for metric in sorted(
+                observation.observations.metrics.values(),
+                key=lambda item: item.name,
+            )
         ],
-        "valid_until": valid_until.isoformat(),
+        "participant_profile": context.participant_profile,
+        "participant_skill_level": context.participant_skill_level,
+        "result": {
+            "safety_status": result.safety_status.value,
+            "decision": result.decision.value,
+            "score": result.score,
+            "confidence": result.confidence,
+            "coverage": result.coverage,
+            "missing": result.missing_metrics,
+            "stale": result.stale_or_conflicting_metrics,
+        },
+        "validity": validity_identity,
         "version": FUSION_VERSION,
     }
     provider_record_id = hashlib.sha256(

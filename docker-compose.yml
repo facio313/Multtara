@@ -2,6 +2,17 @@ services:
   db:
     image: postgres:15-alpine
     restart: unless-stopped
+    init: true
+    stop_grace_period: 1m
+    shm_size: 256mb
+    mem_limit: ${DB_MEMORY_LIMIT:-1g}
+    cpus: ${DB_CPU_LIMIT:-1.5}
+    pids_limit: ${DB_PIDS_LIMIT:-200}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCKER_LOG_MAX_FILES:-5}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -26,19 +37,43 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /app/staticfiles:rw,noexec,nosuid,nodev,size=128m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-768m}
+    cpus: ${BACKEND_CPU_LIMIT:-2.0}
+    pids_limit: ${BACKEND_PIDS_LIMIT:-256}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCKER_LOG_MAX_FILES:-5}
     depends_on:
       db:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-pongdang}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-pongdang}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:?ALLOWED_HOSTS is required}
-      - DATA_GO_KR_SERVICE_KEY=${DATA_GO_KR_SERVICE_KEY:-}
-      - TOUR_API_KEY=${TOUR_API_KEY:-}
-      - KMA_API_KEY=${KMA_API_KEY:-}
-      - KHOA_API_KEY=${KHOA_API_KEY:-}
-      - MOE_API_KEY=${MOE_API_KEY:-}
+      # Pass a real RFC 3986 database URL instead of interpolating raw
+      # credentials into one. Reserved characters in user/password components
+      # must be percent-encoded by the deployment secret manager.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?ALLOWED_HOSTS is required}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-True}
+      DATA_GO_KR_SERVICE_KEY: ${DATA_GO_KR_SERVICE_KEY:-}
+      TOUR_API_KEY: ${TOUR_API_KEY:-}
+      KMA_API_KEY: ${KMA_API_KEY:-}
+      KHOA_API_KEY: ${KHOA_API_KEY:-}
+      MOE_API_KEY: ${MOE_API_KEY:-}
+      ROUTING_MATRIX_URL: ${ROUTING_MATRIX_URL:-}
     expose:
       - "8000"
     healthcheck:
@@ -46,7 +81,7 @@ services:
         - CMD
         - python
         - -c
-        - "import os, urllib.request; host=os.environ['ALLOWED_HOSTS'].split(',')[0].strip(); request=urllib.request.Request('http://127.0.0.1:8000/api/health/ready/', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request, timeout=3).read()"
+        - "import os, urllib.request; host=os.environ['ALLOWED_HOSTS'].split(',')[0].strip().lstrip('.'); request=urllib.request.Request('http://127.0.0.1:8000/api/health/ready/', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request, timeout=3).read()"
       interval: 15s
       timeout: 5s
       retries: 5
@@ -56,19 +91,39 @@ services:
     build: ./backend
     restart: unless-stopped
     entrypoint: []
+    init: true
+    stop_grace_period: 1m
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${COLLECTOR_MEMORY_LIMIT:-512m}
+    cpus: ${COLLECTOR_CPU_LIMIT:-1.0}
+    pids_limit: ${COLLECTOR_PIDS_LIMIT:-128}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCKER_LOG_MAX_FILES:-5}
     depends_on:
       backend:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-pongdang}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-pongdang}
-      - DJANGO_SETTINGS_MODULE=config.settings.prod
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:?ALLOWED_HOSTS is required}
-      - DATA_GO_KR_SERVICE_KEY=${DATA_GO_KR_SERVICE_KEY:-}
-      - TOUR_API_KEY=${TOUR_API_KEY:-}
-      - KMA_API_KEY=${KMA_API_KEY:-}
-      - KHOA_API_KEY=${KHOA_API_KEY:-}
-      - MOE_API_KEY=${MOE_API_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?ALLOWED_HOSTS is required}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-True}
+      DATA_GO_KR_SERVICE_KEY: ${DATA_GO_KR_SERVICE_KEY:-}
+      TOUR_API_KEY: ${TOUR_API_KEY:-}
+      KMA_API_KEY: ${KMA_API_KEY:-}
+      KHOA_API_KEY: ${KHOA_API_KEY:-}
+      MOE_API_KEY: ${MOE_API_KEY:-}
+      ROUTING_MATRIX_URL: ${ROUTING_MATRIX_URL:-}
     command:
       - python
       - manage.py
@@ -76,6 +131,19 @@ services:
       - --weather-interval=${WEATHER_SYNC_INTERVAL_SECONDS:-1800}
       - --marine-interval=${MARINE_SYNC_INTERVAL_SECONDS:-3600}
       - --evaluate-interval=${WATER_INDEX_INTERVAL_SECONDS:-300}
+      - --route-matrix-interval=${ROUTE_MATRIX_INTERVAL_SECONDS:-86400}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - manage.py
+        - check_condition_pipeline_health
+        - --max-age
+        - "900"
+      interval: 1m
+      timeout: 20s
+      retries: 3
+      start_period: 2m
 
   frontend:
     build:
@@ -84,6 +152,25 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1/}
         VITE_KAKAO_MAP_KEY: ${VITE_KAKAO_MAP_KEY:-}
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /var/run:rw,noexec,nosuid,nodev,size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-128m}
+    cpus: ${FRONTEND_CPU_LIMIT:-0.5}
+    pids_limit: ${FRONTEND_PIDS_LIMIT:-64}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+        max-file: ${DOCKER_LOG_MAX_FILES:-5}
     depends_on:
       backend:
         condition: service_healthy
@@ -91,9 +178,9 @@ services:
       # Production HTTP is loopback-only by default. Terminate HTTPS in a
       # trusted host/edge proxy and forward to this address; do not expose the
       # container port directly while trusting X-Forwarded-Proto.
-      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-8080}:80"
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-8080}:8080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/ >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/ >/dev/null 2>&1"]
       interval: 30s
       timeout: 5s
       retries: 3

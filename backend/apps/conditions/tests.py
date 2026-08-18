@@ -72,6 +72,36 @@ def create_metric(snapshot, *, name="water_temperature_c", value=22.5):
     )
 
 
+def create_text_metric(
+    snapshot,
+    *,
+    name,
+    value,
+    observed_at=None,
+    fetched_at=None,
+    valid_from=None,
+    valid_until=None,
+):
+    fetched_at = fetched_at or snapshot.fetched_at
+    observed_at = observed_at or snapshot.observed_at
+    return ObservationMetric.objects.create(
+        snapshot=snapshot,
+        name=name,
+        value_type=ObservationMetric.ValueType.TEXT,
+        text_value=value,
+        mode=ObservationMetric.Mode.OBSERVED,
+        state=ObservationMetric.State.VALID,
+        confidence=0.95,
+        source="Official test authority",
+        source_url="https://example.go.kr/safety",
+        spatial_scope=snapshot.spatial_scope,
+        observed_at=observed_at,
+        fetched_at=fetched_at,
+        valid_from=valid_from if valid_from is not None else snapshot.valid_from,
+        valid_until=valid_until if valid_until is not None else snapshot.valid_until,
+    )
+
+
 class ConditionModelTests(TestCase):
     def setUp(self):
         self.spot = create_spot()
@@ -119,6 +149,32 @@ class ConditionModelTests(TestCase):
                 snapshot=snapshot,
                 activity="swim",
                 participant_profile="family",
+                methodology_version="water-index-v1.0.0",
+            )
+
+    def test_snapshot_score_uniqueness_is_surf_skill_aware(self):
+        snapshot = create_snapshot(self.spot)
+        beginner = ConditionScore.objects.create(
+            spot=self.spot,
+            snapshot=snapshot,
+            activity="surf",
+            participant_skill_level="beginner",
+            methodology_version="water-index-v1.0.0",
+        )
+        advanced = ConditionScore.objects.create(
+            spot=self.spot,
+            snapshot=snapshot,
+            activity="surf",
+            participant_skill_level="advanced",
+            methodology_version="water-index-v1.0.0",
+        )
+        self.assertNotEqual(beginner.pk, advanced.pk)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ConditionScore.objects.create(
+                spot=self.spot,
+                snapshot=snapshot,
+                activity="surf",
+                participant_skill_level="beginner",
                 methodology_version="water-index-v1.0.0",
             )
 
@@ -183,7 +239,7 @@ class ConditionModelTests(TestCase):
                 methodology_version="water-index-v1.0.0",
             )
 
-    def test_null_public_score_can_preserve_an_uncertainty_range(self):
+    def test_null_public_score_cannot_publish_an_uncertainty_range(self):
         score = ConditionScore(
             spot=self.spot,
             activity="swim",
@@ -193,7 +249,29 @@ class ConditionModelTests(TestCase):
             score_range=[20, 80],
             methodology_version="water-index-v1.0.0",
         )
-        score.full_clean()
+        with self.assertRaises(ValidationError):
+            score.full_clean()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ConditionScore.objects.create(
+                spot=self.spot,
+                activity="swim",
+                score=None,
+                safety_status=ConditionScore.SafetyStatus.STOP,
+                decision=ConditionScore.Decision.BLOCKED,
+                score_range=[80, 90],
+                methodology_version="water-index-v1.0.0",
+            )
+
+        stored = ConditionScore.objects.create(
+            spot=self.spot,
+            activity="swim",
+            score=None,
+            safety_status=ConditionScore.SafetyStatus.STOP,
+            decision=ConditionScore.Decision.BLOCKED,
+            methodology_version="water-index-v1.0.0",
+        )
+        stored.score_range = [80, 90]
+        self.assertEqual(ConditionScoreSerializer(stored).data["score_range"], [])
 
     def test_serializer_never_exposes_legacy_score_as_safe_when_status_unknown(self):
         score = ConditionScore.objects.create(
@@ -400,6 +478,34 @@ class ConditionViewSetTests(TestCase):
         self.now = timezone.now()
         self.snapshot = create_snapshot(self.spot, fetched_at=self.now)
         create_metric(self.snapshot)
+        self.access_metric = create_text_metric(
+            self.snapshot,
+            name="access_status",
+            value="open",
+        )
+        create_text_metric(
+            self.snapshot,
+            name="weather_alert_level",
+            value="none",
+        )
+        lightning_metric = create_metric(
+            self.snapshot,
+            name="lightning_clearance_minutes",
+            value=45,
+        )
+        lightning_metric.observed_at = self.now - timedelta(minutes=1)
+        lightning_metric.fetched_at = self.now
+        lightning_metric.save(update_fields=("observed_at", "fetched_at"))
+        self.river_metric = create_text_metric(
+            self.snapshot,
+            name="river_risk_level",
+            value="normal",
+        )
+        create_text_metric(
+            self.snapshot,
+            name="water_quality_status",
+            value="pass",
+        )
         self.old_score = ConditionScore.objects.create(
             spot=self.spot,
             activity="swim",
@@ -446,7 +552,11 @@ class ConditionViewSetTests(TestCase):
         with self.assertNumQueries(3):
             scores = list(queryset)
             self.assertEqual(scores[0].spot.name, "Test River API")
-            self.assertEqual(scores[0].snapshot.metrics.all()[0].value, 22.5)
+            metrics = {
+                metric.name: metric
+                for metric in scores[0].snapshot.metrics.all()
+            }
+            self.assertEqual(metrics["water_temperature_c"].value, 22.5)
 
     def test_observation_api_is_read_only_filterable_and_query_bounded(self):
         other_spot = create_spot("Other")
@@ -457,7 +567,11 @@ class ConditionViewSetTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertLessEqual(len(queries), 4)
         self.assertEqual(response.data["count"], 1)
-        self.assertEqual(response.data["results"][0]["metrics"][0]["value"], 22.5)
+        metrics = {
+            metric["name"]: metric
+            for metric in response.data["results"][0]["metrics"]
+        }
+        self.assertEqual(metrics["water_temperature_c"]["value"], 22.5)
         self.assertEqual(
             self.client.post("/api/v1/conditions/observations/", {}).status_code,
             405,
@@ -468,6 +582,7 @@ class ConditionViewSetTests(TestCase):
         ConditionScore.objects.create(
             spot=other_spot,
             activity="surf",
+            participant_skill_level="beginner",
             score=92,
             safety_status=ConditionScore.SafetyStatus.CLEAR,
             decision=ConditionScore.Decision.RECOMMENDED,
@@ -549,6 +664,320 @@ class ConditionViewSetTests(TestCase):
         )
         self.assertEqual(family_only.data["count"], 1)
         self.assertEqual(family_only.data["results"][0]["id"], family.pk)
+
+    def test_latest_api_defaults_to_unscoped_surf_and_selects_explicit_skill(self):
+        unscoped = ConditionScore.objects.create(
+            spot=self.spot,
+            activity="surf",
+            participant_skill_level="unspecified",
+            score=None,
+            safety_status=ConditionScore.SafetyStatus.CLEAR,
+            decision=ConditionScore.Decision.UNKNOWN,
+            confidence=1.0,
+            coverage=0.8,
+            methodology_version="water-index-v1.0.0",
+            evaluated_at=self.now,
+        )
+        beginner = ConditionScore.objects.create(
+            spot=self.spot,
+            activity="surf",
+            participant_skill_level="beginner",
+            score=88,
+            safety_status=ConditionScore.SafetyStatus.CLEAR,
+            decision=ConditionScore.Decision.RECOMMENDED,
+            confidence=1.0,
+            coverage=0.8,
+            score_range=[88, 88],
+            methodology_version="water-index-v1.0.0",
+            evaluated_at=self.now,
+        )
+
+        default_response = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=surf"
+        )
+        beginner_response = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}"
+            "&activity=surf&participant_skill_level=beginner"
+        )
+
+        self.assertEqual(default_response.data["count"], 1)
+        self.assertEqual(default_response.data["results"][0]["id"], unscoped.pk)
+        self.assertEqual(
+            default_response.data["results"][0]["participant_skill_level"],
+            "unspecified",
+        )
+        self.assertIsNone(default_response.data["results"][0]["score"])
+        self.assertEqual(beginner_response.data["count"], 1)
+        self.assertEqual(beginner_response.data["results"][0]["id"], beginner.pk)
+        self.assertEqual(
+            beginner_response.data["results"][0]["participant_skill_level"],
+            "beginner",
+        )
+
+    def test_latest_api_projects_expired_snapshot_to_effective_unknown(self):
+        self.snapshot.valid_from = self.now - timedelta(hours=1)
+        self.snapshot.valid_until = self.now - timedelta(seconds=1)
+        self.snapshot.save(update_fields=("valid_from", "valid_until"))
+
+        response = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.data["results"][0]
+        self.assertEqual(result["id"], self.score.pk)
+        self.assertEqual(result["safety_status"], "unknown")
+        self.assertEqual(result["decision"], "unknown")
+        self.assertIsNone(result["score"])
+        self.assertIsNone(result["suitability_score"])
+        self.assertEqual(result["score_range"], [])
+        self.assertEqual(result["snapshot"]["id"], self.snapshot.pk)
+        self.assertEqual(
+            result["gates"][0]["reason_code"],
+            "EVALUATION_SNAPSHOT_EXPIRED",
+        )
+        self.assertIn("evaluation_snapshot", result["stale_or_conflicting_metrics"])
+
+    def test_latest_api_projects_expired_required_metric_to_effective_unknown(self):
+        self.river_metric.valid_from = self.now - timedelta(hours=1)
+        self.river_metric.valid_until = self.now - timedelta(seconds=1)
+        self.river_metric.save(
+            update_fields=("valid_from", "valid_until"),
+        )
+
+        response = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.data["results"][0]
+        self.assertEqual(result["id"], self.score.pk)
+        self.assertEqual(result["safety_status"], "unknown")
+        self.assertEqual(result["decision"], "unknown")
+        self.assertIsNone(result["score"])
+        self.assertIsNone(result["suitability_score"])
+        self.assertEqual(
+            result["gates"][0]["reason_code"],
+            "REQUIRED_SAFETY_EVIDENCE_NOT_CURRENT",
+        )
+        self.assertIn("river_risk_level", result["stale_or_conflicting_metrics"])
+
+    def test_latest_api_applies_policy_max_age_before_provider_expiry(self):
+        self.river_metric.observed_at = self.now - timedelta(minutes=16)
+        self.river_metric.fetched_at = self.now - timedelta(minutes=15)
+        self.river_metric.valid_from = self.now - timedelta(hours=1)
+        self.river_metric.valid_until = self.now + timedelta(hours=1)
+        self.river_metric.save(
+            update_fields=(
+                "observed_at",
+                "fetched_at",
+                "valid_from",
+                "valid_until",
+            ),
+        )
+
+        response = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.data["results"][0]
+        self.assertEqual(result["safety_status"], "unknown")
+        self.assertEqual(result["decision"], "unknown")
+        self.assertIsNone(result["score"])
+        self.assertEqual(
+            result["gates"][0]["reason_code"],
+            "REQUIRED_SAFETY_EVIDENCE_NOT_CURRENT",
+        )
+        self.assertIn("river_risk_level", result["stale_or_conflicting_metrics"])
+
+    def test_latest_api_uses_explicit_window_for_typed_forecast_metric(self):
+        self.river_metric.mode = ObservationMetric.Mode.FORECAST
+        self.river_metric.observed_at = self.now - timedelta(hours=2)
+        self.river_metric.fetched_at = self.now - timedelta(hours=1)
+        self.river_metric.valid_from = self.now - timedelta(minutes=5)
+        self.river_metric.valid_until = self.now + timedelta(hours=1)
+        self.river_metric.save(
+            update_fields=(
+                "mode",
+                "observed_at",
+                "fetched_at",
+                "valid_from",
+                "valid_until",
+            ),
+        )
+
+        response = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.data["results"][0]
+        self.assertEqual(result["safety_status"], "clear")
+        self.assertEqual(result["decision"], "recommended")
+        self.assertEqual(result["score"], 85.0)
+
+    def test_required_metric_policy_expiry_boundary_is_inclusive(self):
+        self.river_metric.observed_at = self.now - timedelta(minutes=15)
+        self.river_metric.fetched_at = self.now - timedelta(minutes=14)
+        self.river_metric.valid_from = self.now - timedelta(hours=1)
+        self.river_metric.valid_until = self.now + timedelta(hours=1)
+        self.river_metric.save(
+            update_fields=(
+                "observed_at",
+                "fetched_at",
+                "valid_from",
+                "valid_until",
+            ),
+        )
+
+        at_boundary = ConditionScoreSerializer(
+            self.score,
+            context={"effective_as_of": self.now},
+        ).data
+        after_boundary = ConditionScoreSerializer(
+            self.score,
+            context={
+                "effective_as_of": self.now + timedelta(microseconds=1),
+            },
+        ).data
+
+        self.assertEqual(at_boundary["safety_status"], "clear")
+        self.assertEqual(at_boundary["score"], 85.0)
+        self.assertEqual(after_boundary["safety_status"], "unknown")
+        self.assertIsNone(after_boundary["score"])
+
+    def test_snapshot_expiry_boundary_is_inclusive(self):
+        self.snapshot.valid_until = self.now
+        self.snapshot.save(update_fields=("valid_until",))
+
+        at_boundary = ConditionScoreSerializer(
+            self.score,
+            context={"effective_as_of": self.now},
+        ).data
+        after_boundary = ConditionScoreSerializer(
+            self.score,
+            context={
+                "effective_as_of": self.now + timedelta(microseconds=1),
+            },
+        ).data
+
+        self.assertEqual(at_boundary["safety_status"], "clear")
+        self.assertEqual(at_boundary["score"], 85.0)
+        self.assertEqual(after_boundary["safety_status"], "unknown")
+        self.assertIsNone(after_boundary["score"])
+
+    def test_latest_api_accepts_a_current_alternative_in_required_group(self):
+        self.access_metric.valid_from = self.now - timedelta(hours=1)
+        self.access_metric.valid_until = self.now - timedelta(seconds=1)
+        self.access_metric.save(
+            update_fields=("valid_from", "valid_until"),
+        )
+        create_text_metric(
+            self.snapshot,
+            name="official_entry_status",
+            value="open",
+            valid_until=self.now + timedelta(minutes=5),
+        )
+
+        response = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.data["results"][0]
+        self.assertEqual(result["safety_status"], "clear")
+        self.assertEqual(result["decision"], "recommended")
+        self.assertEqual(result["score"], 85.0)
+
+    def test_latest_api_projects_missing_required_metric_to_effective_unknown(self):
+        self.river_metric.delete()
+
+        response = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.data["results"][0]
+        self.assertEqual(result["safety_status"], "unknown")
+        self.assertEqual(result["decision"], "unknown")
+        self.assertIsNone(result["score"])
+        self.assertEqual(
+            result["gates"][0]["reason_code"],
+            "REQUIRED_SAFETY_EVIDENCE_MISSING",
+        )
+        self.assertIn("river_risk_level", result["missing_metrics"])
+
+    def test_latest_api_projects_positive_score_without_snapshot_to_unknown(self):
+        self.score.snapshot = None
+        self.score.save(update_fields=("snapshot",))
+
+        response = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.data["results"][0]
+        self.assertEqual(result["safety_status"], "unknown")
+        self.assertEqual(result["decision"], "unknown")
+        self.assertIsNone(result["score"])
+        self.assertEqual(
+            result["gates"][0]["reason_code"],
+            "EVALUATION_SNAPSHOT_MISSING",
+        )
+        self.assertIn("evaluation_snapshot", result["missing_metrics"])
+
+    def test_historical_score_detail_preserves_stored_state_after_expiry(self):
+        self.snapshot.valid_from = self.now - timedelta(hours=1)
+        self.snapshot.valid_until = self.now - timedelta(seconds=1)
+        self.snapshot.save(update_fields=("valid_from", "valid_until"))
+
+        response = self.client.get(
+            f"/api/v1/conditions/scores/{self.score.pk}/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["safety_status"], "clear")
+        self.assertEqual(response.data["decision"], "recommended")
+        self.assertEqual(response.data["score"], 85.0)
+
+    def test_latest_api_does_not_claim_an_expired_stop_is_current(self):
+        self.score.score = None
+        self.score.safety_status = ConditionScore.SafetyStatus.STOP
+        self.score.decision = ConditionScore.Decision.BLOCKED
+        self.score.score_range = []
+        self.score.save(
+            update_fields=(
+                "score",
+                "safety_status",
+                "decision",
+                "score_range",
+            ),
+        )
+        current = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
+        )
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.data["results"][0]["safety_status"], "stop")
+        self.assertEqual(current.data["results"][0]["decision"], "blocked")
+
+        self.snapshot.valid_from = self.now - timedelta(hours=1)
+        self.snapshot.valid_until = self.now - timedelta(seconds=1)
+        self.snapshot.save(update_fields=("valid_from", "valid_until"))
+
+        latest = self.client.get(
+            f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
+        )
+        historical = self.client.get(
+            f"/api/v1/conditions/scores/{self.score.pk}/"
+        )
+
+        self.assertEqual(latest.status_code, 200)
+        self.assertEqual(latest.data["results"][0]["safety_status"], "unknown")
+        self.assertEqual(latest.data["results"][0]["decision"], "unknown")
+        self.assertIsNone(latest.data["results"][0]["score"])
+        self.assertEqual(historical.data["safety_status"], "stop")
+        self.assertEqual(historical.data["decision"], "blocked")
 
     def test_score_list_serialization_has_no_n_plus_one_queries(self):
         for index in range(3):

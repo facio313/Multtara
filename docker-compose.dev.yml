@@ -4,7 +4,7 @@
 services:
   db:
     ports:
-      - "5432:5432"
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:${DEV_POSTGRES_PORT:-5432}:5432"
 
   backend:
     build: ./backend
@@ -12,17 +12,22 @@ services:
     volumes:
       - ./backend:/app
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-pongdang}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-pongdang}
-      - DJANGO_SETTINGS_MODULE=config.settings.dev
-      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
-      - DEBUG=True
-      - DATA_GO_KR_SERVICE_KEY=${DATA_GO_KR_SERVICE_KEY:-}
-      - TOUR_API_KEY=${TOUR_API_KEY:-}
-      - KMA_API_KEY=${KMA_API_KEY:-}
-      - KHOA_API_KEY=${KHOA_API_KEY:-}
-      - MOE_API_KEY=${MOE_API_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      DEBUG: "True"
+      DATA_GO_KR_SERVICE_KEY: ${DATA_GO_KR_SERVICE_KEY:-}
+      TOUR_API_KEY: ${TOUR_API_KEY:-}
+      KMA_API_KEY: ${KMA_API_KEY:-}
+      KHOA_API_KEY: ${KHOA_API_KEY:-}
+      MOE_API_KEY: ${MOE_API_KEY:-}
     ports:
-      - "8000:8000"
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:${DEV_BACKEND_PORT:-8000}:8000"
+
+  collector:
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DEBUG: "True"
 
   frontend:
     build:
@@ -33,7 +38,14 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_BASE_URL=http://localhost:8000/api/v1/
-      - VITE_KAKAO_MAP_KEY=${VITE_KAKAO_MAP_KEY:-}
-    ports:
-      - "5173:5173"
+      VITE_API_BASE_URL: http://localhost:${DEV_BACKEND_PORT:-8000}/api/v1/
+      VITE_KAKAO_MAP_KEY: ${VITE_KAKAO_MAP_KEY:-}
+    # Replace the production 8080:80 publication inherited from the base file.
+    ports: !override
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:${DEV_FRONTEND_PORT:-5173}:5173"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:5173/ >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s

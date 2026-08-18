@@ -12,7 +12,11 @@ from django.utils import timezone
 
 from apps.spots.models import WaterSpot
 from services.ingestion.fusion import activity_supported_for_spot, evaluate_fused_spot
-from services.water_index import Activity
+from services.water_index import (
+    Activity,
+    CONCRETE_SURF_SKILL_LEVELS,
+    SURF_SKILL_LEVEL_UNSPECIFIED,
+)
 
 
 class Command(BaseCommand):
@@ -47,6 +51,18 @@ class Command(BaseCommand):
             help="Participant safety profile (default: general).",
         )
         parser.add_argument(
+            "--participant-skill-level",
+            action="append",
+            choices=(
+                SURF_SKILL_LEVEL_UNSPECIFIED,
+                *CONCRETE_SURF_SKILL_LEVELS,
+            ),
+            help=(
+                "Surf participant identity; repeatable. The default evaluates "
+                "unspecified plus every supported explicit skill."
+            ),
+        )
+        parser.add_argument(
             "--at",
             type=_parse_at,
             metavar="ISO-8601",
@@ -62,6 +78,13 @@ class Command(BaseCommand):
         explicit = tuple(Activity(value) for value in (options.get("activity") or ()))
         dry_run = bool(options.get("dry_run"))
         profile = options["profile"]
+        surf_skill_levels = tuple(
+            options.get("participant_skill_level")
+            or (
+                SURF_SKILL_LEVEL_UNSPECIFIED,
+                *CONCRETE_SURF_SKILL_LEVELS,
+            )
+        )
         decisions: Counter[str] = Counter()
         persisted = 0
 
@@ -71,16 +94,28 @@ class Command(BaseCommand):
                 for activity in activities:
                     if not activity_supported_for_spot(spot, activity):
                         continue
-                    outcome = evaluate_fused_spot(
-                        spot=spot,
-                        activity=activity,
-                        at=at,
-                        fetched_at=fetched_at,
-                        participant_profile=profile,
-                        dry_run=dry_run,
+                    # The family profile adds swimming-only safety gates.
+                    # Persisting duplicate family identities for other
+                    # activities makes request/profile provenance ambiguous.
+                    if profile == "family" and activity is not Activity.SWIM:
+                        continue
+                    skill_levels = (
+                        surf_skill_levels
+                        if activity is Activity.SURF
+                        else (SURF_SKILL_LEVEL_UNSPECIFIED,)
                     )
-                    decisions[outcome.result.safety_status.value] += 1
-                    persisted += int(outcome.persistence is not None)
+                    for skill_level in skill_levels:
+                        outcome = evaluate_fused_spot(
+                            spot=spot,
+                            activity=activity,
+                            at=at,
+                            fetched_at=fetched_at,
+                            participant_profile=profile,
+                            participant_skill_level=skill_level,
+                            dry_run=dry_run,
+                        )
+                        decisions[outcome.result.safety_status.value] += 1
+                        persisted += int(outcome.persistence is not None)
         except (TypeError, ValueError):
             raise CommandError("Stored observations could not be fused safely") from None
         except Exception:

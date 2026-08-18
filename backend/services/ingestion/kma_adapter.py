@@ -167,7 +167,10 @@ def _adapt_group(
         provider_record_id=_record_id(endpoint, records),
         state=state,
         ingestion_version=INGESTION_VERSION,
-        source_observed_at=None if forecast else observed_at,
+        # For a forecast this is the provider issue time, not an observation
+        # claim. Persisting it separately keeps issue/fetch/valid timestamps
+        # distinguishable at the forecast API boundary.
+        source_observed_at=observed_at,
         fetched_at=fetched_at,
         valid_from=valid_from,
         valid_until=valid_until,

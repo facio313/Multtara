@@ -1,0 +1,86 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { messages } from './messages.js';
+
+const REQUIRED_SCREEN_KEYS = [
+  'map.eyebrow',
+  'map.data.badge.error',
+  'map.data.badge.loading',
+  'map.data.badge.empty',
+  'map.data.badge.ready',
+  'map.data.empty',
+  'map.fallback.gangneung',
+  'map.fallback.korea',
+  'map.nearby.use',
+  'map.nearby.requesting',
+  'map.nearby.refresh',
+  'map.nearby.clear',
+  'map.nearby.idle',
+  'map.nearby.ready',
+  'map.nearby.denied',
+  'map.nearby.unsupported',
+  'map.nearby.unavailable',
+  'map.nearby.timeout',
+  'map.nearby.error',
+  'map.nearby.privacy',
+  'map.nearby.distance',
+  'map.layer.score',
+  'map.layer.temperature',
+  'map.layer.switch',
+  'map.layer.scoreButton',
+  'map.layer.temperatureButton',
+  'map.sdk.kakao',
+  'map.sdk.concept',
+  'map.marker.temperature',
+  'map.marker.openDetail',
+  'map.temperature.value',
+  'map.temperature.veryCold',
+  'map.temperature.cold',
+  'map.temperature.cool',
+  'map.temperature.mild',
+  'map.temperature.warm',
+  'map.temperature.missing',
+  'map.results.nearbyFirst',
+  'map.results.curatedFor',
+  'livecam.eyebrow.hero',
+  'livecam.eyebrow.filters',
+  'livecam.eyebrow.results',
+  'livecam.eyebrow.focus',
+  'livecam.autoplay.off',
+  'livecam.data.loading.title',
+  'livecam.data.loading.description',
+  'livecam.data.error.title',
+  'livecam.data.error.description',
+  'livecam.data.empty.title',
+  'livecam.data.empty.description',
+  'livecam.data.ready.title',
+  'livecam.data.ready.description',
+  'livecam.filters.unknown',
+  'livecam.filters.demo',
+  'livecam.status.unknown.label',
+  'livecam.status.unknown.description',
+  'livecam.poster.demoBadge',
+  'livecam.link.unknown',
+  'livecam.index.short',
+  'livecam.index.title',
+  'livecam.updated.demo',
+  'livecam.updated.unknown',
+  'livecam.updated.catalog',
+  'livecam.region.unknown',
+  'livecam.place.unknown',
+  'livecam.embed.title',
+];
+
+test('map and livecam UI additions are translated in every supported locale', () => {
+  Object.entries(messages).forEach(([locale, dictionary]) => {
+    REQUIRED_SCREEN_KEYS.forEach((key) => {
+      assert.equal(
+        typeof dictionary[key],
+        'string',
+        `${locale} is missing ${key}`,
+      );
+      assert.ok(dictionary[key].trim(), `${locale} has an empty ${key}`);
+    });
+  });
+});

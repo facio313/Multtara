@@ -155,6 +155,13 @@ EPA의 2012 Recreational Water Quality Criteria는 30일 기하평균·통계 �
 
 지원 지점에서는 KHOA의 장소·시간·숙련도별 공식 결과를 원형 보존한다. KHOA 결과는 파고, 파주기, 풍속, 수온과 숙련도 등급을 포함한다. 높은 공식 적합도가 입수 통제, 이안류, 풍랑, 태풍, 낙뢰를 무시할 수 없다.
 
+서핑 적합도는 `unspecified`, `beginner`, `intermediate`, `advanced`를 서로 다른 평가
+identity로 저장한다. 구체적인 요청 숙련도와 authoritative KHOA `GrdCn`의 구조화된
+숙련도 범위가 정확히 대응할 때만 적합도를 공개한다. 숙련도 미지정, `GrdCn` 누락,
+범위 파싱 불가, 요청 숙련도 불일치는 안전 상태가 별도로 `STOP`/`CAUTION`인 경우를
+보존하되 suitability decision과 score는 `UNKNOWN`/null로 남긴다. 한 숙련도의 결과를
+다른 숙련도나 unspecified 행에 복사하지 않는다.
+
 공식 미지원 지점에서 일반 소비자용 보편 점수를 만들지 않는다. 연구에서 사용한 숙련도별 파고 구간은 특정 지역과 해상 모델의 활동 분류에 가깝고 한국 모든 해변의 안전기준이 아니다. [Boqué Ciurana et al., 2022](https://www.mdpi.com/2071-1050/14/14/8496)
 
 지점별 해안 방향, 실제 쇄파, 파향 전달, 바람, 조위 보정이 승인된 경우에만 별도 `fallback` 알고리즘 버전으로 계산한다. 공식 결과와 fallback 결과는 같은 레이블로 섞지 않는다.
@@ -179,6 +186,12 @@ HCI:Beach = 2 × thermal_comfort
 | `29 / 100% / 30mm / 75km/h` | 15 |
 
 일평균 쾌적도가 시간별 돌풍·소나기·낙뢰·해안 통제를 가리지 않도록 안전 게이트를 먼저 적용한다. HCI 결과를 우울감 감소, 치료, 치유 확률로 표현하지 않는다.
+
+현재 producer는 동일 KMA snapshot/grid/scope/validity의 기온·상대습도·SKY·PCP·
+명시적 일강수량·풍속이 모두 있을 때만 `PONGDANG_DERIVED` HCI metric을 만든다.
+SKY/PCP 범주는 보수적인 상한·범위로 보존하며 PCP를 일강수량으로 바꾸지 않는다.
+따라서 upstream에 `daily_precipitation_mm`가 없으면 HCI를 추정하지 않고 abstain한다.
+모든 component는 사용한 원 metric으로 lineage를 남긴다.
 
 ## 9. 갯벌
 
@@ -213,6 +226,12 @@ facility_fit = 0.40 × verified_operation
 
 이는 의학 공식이 아니라 제품 가중치다. 광물 성분에서 질환 치료·면역 향상 같은 효능을 추론하지 않는다. 시설 폐쇄·보건조치 중이거나 온수 욕조 실측 수온이 40°C를 초과하면 `stop`; 위생검사나 수온이 없으면 `unknown`이다. [WHO Safe Recreational Water Environments, Volume 2](https://iris.who.int/bitstream/10665/43336/1/9241546808_eng.pdf), [CDC Legionella hot-tub module](https://www.cdc.gov/control-legionella/php/toolkit/hot-tub-module.html)
 
+전역 저장 producer는 verified catalog와 현재 공개 운영 근거가 있는
+`facility_operation_confidence`, 명시적인 실내·악천후 적합성이 모두 참일 때의
+`indoor_weather_shelter`만 만든다. amenity/crowd/선호온도는 요청에 명시된 선호와
+대응 근거가 있을 때만 `SESSION_CONTEXT` in-memory overlay로 계산하며 즉시 만료하고
+DB에 저장하지 않는다.
+
 ## 11. 래프팅·계곡
 
 최소·최적·최대 유량 또는 수위는 하천, 구간, 활동, 장비, 숙련도마다 다르다. 전국 공통 `m³/s` 또는 수위 임계값을 코드에 넣지 않는다. [Brown, Taylor & Shelby](https://pubs.usgs.gov/publication/70125918), [Carolli et al., 2017](https://doi.org/10.1016/j.scitotenv.2016.11.049)
@@ -230,6 +249,11 @@ rafting_fit = 0.60 × flow_fit
 ```
 
 운항 중지, 호우·태풍·낙뢰, 상류 집중호우, 급격한 수위상승·방류, 지점별 최대 초과, 구명조끼·안전모 미확인은 `stop`이다. [기상청 호우 행동요령](https://www.weather.go.kr/w/hazard/safety-guide/heavy-rain.do)
+
+구현은 spot당 하나의 active·verified `HydraulicCalibration`을 사용한다. 버전,
+공식 관측소 ID, exact scope, authority, 네 임계값, 공개 HTTPS 근거와 검증시각이
+모두 일치해야 `river_flow_cms`에서 `flow_suitability_score`를 파생한다. 이 점수는
+적합도일 뿐이며 operator/risk/장비/상류강우 안전 gate를 대신하지 않는다.
 
 ## 12. 점수 가중치의 지위
 
@@ -277,6 +301,19 @@ every metric has source, spatial_scope, observed_at, fetched_at, validity
 5. 데이터 누락·지연·서로 다른 기관 충돌을 주입한 chaos test
 6. 점수 대신 `unknown`이 노출되는 전체 UI·추천·일정 회귀 테스트
 7. 계절별·해변별 calibration 보고서와 모델 카드 공개
-8. 현재 snapshot/metric 단위 감사와 command 로그를 넘어, 빈 응답·부분 성공·오류를 한 실행으로 묶는 credential-free `IngestionRun` 운영 감사 모델
+8. credential-free `IngestionRun`·collector heartbeat의 provider별 지연/실패 alert와 운영 대응 훈련
+
+## 15. Daily forecast projection
+
+공개 daily forecast는 `forecast_date` 전체가 아니라 한국 표준시 12:00의 정확한
+`target_at`을 평가한다. KMA short forecast와 KHOA activity forecast는 각자의
+issue/fetch/valid time, source, spatial scope, mode를 보존한다. 현재 provider가
+제공하지 않는 날짜를 보간하지 않고, 일반 날씨 예보를 기상특보·낙뢰 해제·공식
+출입 상태로 변환하지 않는다.
+
+API는 1~7일의 각 날짜에 대해 행이 없거나 activity가 지원되지 않거나 근거의
+유효기간을 입증할 수 없으면 `availability=unavailable`, `safety_status=unknown`,
+`score=null`과 명시적 reason code를 반환한다. 저장 당시 결과가 있어도 요청 시점에
+근거가 만료됐으면 같은 fail-closed projection을 적용한다.
 
 현장 표지·구조요원·관계기관 안내가 언제나 앱보다 우선한다.

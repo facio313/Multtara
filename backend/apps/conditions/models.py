@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import math
+from urllib.parse import urlsplit
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q
 from django.utils import timezone
+
+from services.public_urls import public_https_url
 
 
 class WaterCondition(models.Model):
@@ -271,7 +276,7 @@ class ObservationMetric(models.Model):
 
 
 class ObservationMetricLineage(models.Model):
-    """An explicit edge from one fused metric to an original provider metric."""
+    """An explicit edge from a fused/derived metric to its evidence metric."""
 
     class Relation(models.TextChoices):
         SELECTED = "selected", "Selected input"
@@ -326,13 +331,23 @@ class ObservationMetricLineage(models.Model):
         if self.derived_metric_id and self.source_metric_id:
             derived_snapshot = self.derived_metric.snapshot
             source_snapshot = self.source_metric.snapshot
-            if derived_snapshot.provider != "PONGDANG_FUSION":
+            if derived_snapshot.provider not in {
+                "PONGDANG_FUSION",
+                "PONGDANG_DERIVED",
+            }:
                 errors["derived_metric"] = (
-                    "Lineage can only be attached to a fused metric."
+                    "Lineage can only be attached to a fused or derived metric."
                 )
             if source_snapshot.provider == "PONGDANG_FUSION":
                 errors["source_metric"] = (
-                    "A lineage source must be an original provider metric."
+                    "A lineage source cannot be another fused metric."
+                )
+            if (
+                derived_snapshot.provider == "PONGDANG_DERIVED"
+                and source_snapshot.provider == "PONGDANG_DERIVED"
+            ):
+                errors["source_metric"] = (
+                    "A suitability derivation must reference original evidence."
                 )
             if derived_snapshot.spot_id != source_snapshot.spot_id:
                 errors["source_metric"] = (
@@ -348,11 +363,141 @@ class ObservationMetricLineage(models.Model):
         )
 
 
+class HydraulicCalibration(models.Model):
+    """Versioned, site-specific flow calibration for rafting suitability.
+
+    These thresholds are product suitability inputs, never nationwide safety
+    limits. Only an active, verified row with public evidence may be consumed
+    by the derivation service, and the official flow station/scope must match
+    this row exactly.
+    """
+
+    class Authority(models.TextChoices):
+        MOE = "MOE", "Ministry of Environment"
+        LOCAL_AUTHORITY = "LOCAL_AUTHORITY", "Local authority"
+        OFFICIAL_LOCAL = "OFFICIAL_LOCAL", "Other official local source"
+
+    spot = models.ForeignKey(
+        "spots.WaterSpot",
+        on_delete=models.CASCADE,
+        related_name="hydraulic_calibrations",
+    )
+    version = models.CharField(max_length=64)
+    station_id = models.CharField(max_length=100)
+    spatial_scope = models.CharField(max_length=200)
+    authority = models.CharField(max_length=32, choices=Authority.choices)
+    q_min = models.FloatField()
+    q_opt_low = models.FloatField()
+    q_opt_high = models.FloatField()
+    q_max = models.FloatField()
+    evidence_url = models.URLField(max_length=500)
+    verified = models.BooleanField(default=False)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    active = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("spot_id", "-active", "-verified_at", "-id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("spot", "version"),
+                name="hyd_calibration_spot_version_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=("spot",),
+                condition=Q(active=True),
+                name="hyd_calibration_one_active_spot",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(q_min__gte=0.0)
+                    & Q(q_min__lt=F("q_opt_low"))
+                    & Q(q_opt_low__lte=F("q_opt_high"))
+                    & Q(q_opt_high__lt=F("q_max"))
+                ),
+                name="hyd_calibration_threshold_order",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(active=False)
+                    | Q(verified=True, verified_at__isnull=False)
+                ),
+                name="hyd_calibration_active_verified",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("spot", "active", "verified"),
+                name="hyd_cal_spot_active_idx",
+            ),
+            models.Index(
+                fields=("authority", "station_id"),
+                name="hyd_cal_authority_station_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        errors: dict[str, str] = {}
+        for field_name in ("version", "station_id", "spatial_scope"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                errors[field_name] = f"{field_name} is required."
+        thresholds = (self.q_min, self.q_opt_low, self.q_opt_high, self.q_max)
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            for value in thresholds
+        ):
+            errors["q_min"] = "Hydraulic thresholds must be finite numbers."
+        elif not (
+            0 <= self.q_min
+            < self.q_opt_low
+            <= self.q_opt_high
+            < self.q_max
+        ):
+            errors["q_min"] = (
+                "Thresholds must satisfy 0 <= q_min < q_opt_low <= "
+                "q_opt_high < q_max."
+            )
+        try:
+            parsed = urlsplit(self.evidence_url)
+        except (TypeError, ValueError):
+            parsed = None
+        if (
+            parsed is None
+            or not public_https_url(self.evidence_url)
+            or parsed.query
+            or parsed.fragment
+            or "\\" in self.evidence_url
+        ):
+            errors["evidence_url"] = (
+                "Evidence URL must be public HTTPS without query or fragment data."
+            )
+        if self.active and (not self.verified or self.verified_at is None):
+            errors["active"] = (
+                "An active calibration must be verified with a verification time."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self) -> str:
+        return f"{self.spot_id}:{self.version}@{self.station_id}"
+
+
 class ConditionScore(models.Model):
     class ParticipantProfile(models.TextChoices):
         UNKNOWN = "unknown", "Unknown legacy profile"
         GENERAL = "general", "General"
         FAMILY = "family", "Family"
+
+    class ParticipantSkillLevel(models.TextChoices):
+        UNSPECIFIED = "unspecified", "Unspecified"
+        BEGINNER = "beginner", "Beginner"
+        INTERMEDIATE = "intermediate", "Intermediate"
+        ADVANCED = "advanced", "Advanced"
 
     class SafetyStatus(models.TextChoices):
         CLEAR = "clear", "Clear"
@@ -381,6 +526,11 @@ class ConditionScore(models.Model):
         max_length=16,
         choices=ParticipantProfile.choices,
         default=ParticipantProfile.GENERAL,
+    )
+    participant_skill_level = models.CharField(
+        max_length=16,
+        choices=ParticipantSkillLevel.choices,
+        default=ParticipantSkillLevel.UNSPECIFIED,
     )
     score = models.FloatField(null=True, blank=True)
     safety_status = models.CharField(
@@ -413,6 +563,7 @@ class ConditionScore(models.Model):
                     "snapshot",
                     "activity",
                     "participant_profile",
+                    "participant_skill_level",
                     "methodology_version",
                 ),
                 condition=Q(snapshot__isnull=False),
@@ -437,6 +588,42 @@ class ConditionScore(models.Model):
             models.CheckConstraint(
                 condition=Q(participant_profile__in=("unknown", "general", "family")),
                 name="cond_score_profile_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        activity="surf",
+                        participant_skill_level__in=(
+                            "unspecified",
+                            "beginner",
+                            "intermediate",
+                            "advanced",
+                        ),
+                    )
+                    | (
+                        ~Q(activity="surf")
+                        & Q(participant_skill_level="unspecified")
+                    )
+                ),
+                name="cond_score_skill_activity_valid",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    ~Q(
+                        activity="surf",
+                        participant_skill_level="unspecified",
+                    )
+                    | (
+                        Q(score__isnull=True)
+                        & (
+                            Q(safety_status="clear", decision="unknown")
+                            | Q(safety_status="unknown", decision="unknown")
+                            | Q(safety_status="caution", decision="caution")
+                            | Q(safety_status="stop", decision="blocked")
+                        )
+                    )
+                ),
+                name="cond_score_surf_unscoped_policy",
             ),
             models.CheckConstraint(
                 condition=Q(
@@ -486,10 +673,20 @@ class ConditionScore(models.Model):
                 ),
                 name="condition_score_public_policy",
             ),
+            models.CheckConstraint(
+                condition=Q(score__isnull=False) | Q(score_range=[]),
+                name="cond_score_null_range_empty",
+            ),
         ]
         indexes = [
             models.Index(
-                fields=("spot", "activity", "participant_profile", "-evaluated_at"),
+                fields=(
+                    "spot",
+                    "activity",
+                    "participant_profile",
+                    "participant_skill_level",
+                    "-evaluated_at",
+                ),
                 name="cond_score_spot_act_prof_idx",
             ),
             models.Index(
@@ -503,7 +700,11 @@ class ConditionScore(models.Model):
         errors: dict[str, str] = {}
         if self.snapshot_id and self.spot_id and self.snapshot.spot_id != self.spot_id:
             errors["snapshot"] = "snapshot and score must belong to the same spot."
-        if self.score_range:
+        if self.score is None and self.score_range:
+            errors["score_range"] = (
+                "A condition score without a point score must have an empty range."
+            )
+        elif self.score_range:
             if not isinstance(self.score_range, (list, tuple)) or len(self.score_range) != 2:
                 errors["score_range"] = "score_range must contain [lower, upper]."
             else:
@@ -556,6 +757,42 @@ class ConditionScore(models.Model):
                     "Safety status, decision, and public score violate the "
                     "fail-closed Water Index contract."
                 )
+        if self.activity == "surf":
+            if (
+                self.participant_skill_level
+                == self.ParticipantSkillLevel.UNSPECIFIED
+            ):
+                valid_unscoped_state = self.score is None and (
+                    (
+                        self.safety_status
+                        in {self.SafetyStatus.CLEAR, self.SafetyStatus.UNKNOWN}
+                        and self.decision == self.Decision.UNKNOWN
+                    )
+                    or (
+                        self.safety_status == self.SafetyStatus.CAUTION
+                        and self.decision == self.Decision.CAUTION
+                    )
+                    or (
+                        self.safety_status == self.SafetyStatus.STOP
+                        and self.decision == self.Decision.BLOCKED
+                    )
+                )
+                if not valid_unscoped_state:
+                    errors["participant_skill_level"] = (
+                        "An unscoped surf evaluation cannot publish a "
+                        "participant suitability score or decision."
+                    )
+                if self.score_range:
+                    errors["score_range"] = (
+                        "An unscoped surf evaluation cannot publish a score range."
+                    )
+        elif (
+            self.participant_skill_level
+            != self.ParticipantSkillLevel.UNSPECIFIED
+        ):
+            errors["participant_skill_level"] = (
+                "Non-surf evaluations must use the unspecified skill identity."
+            )
         for field_name in (
             "gates",
             "contributions",
@@ -575,3 +812,71 @@ class CrowdLevel(models.Model):
     recommended_time = models.CharField(max_length=100, blank=True)
     parking_availability = models.CharField(max_length=100, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class IngestionRun(models.Model):
+    """Credential-free operational result for one scheduled pipeline task."""
+
+    class Status(models.TextChoices):
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+        SKIPPED = "skipped", "Skipped"
+
+    task_name = models.CharField(max_length=100)
+    status = models.CharField(
+        max_length=12,
+        choices=Status.choices,
+        default=Status.RUNNING,
+    )
+    started_at = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error_code = models.CharField(max_length=64, blank=True)
+    details = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("-started_at", "-id")
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(finished_at__isnull=True)
+                | Q(finished_at__gte=F("started_at")),
+                name="ingestion_run_time_order",
+            ),
+            models.CheckConstraint(
+                condition=Q(status="running", finished_at__isnull=True)
+                | Q(
+                    status__in=("succeeded", "failed", "skipped"),
+                    finished_at__isnull=False,
+                ),
+                name="ingestion_run_completion_state",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("task_name", "status", "-started_at"),
+                name="ingest_run_task_status_idx",
+            ),
+        ]
+
+
+class PipelineHeartbeat(models.Model):
+    """One collector heartbeat used by container and integration health checks."""
+
+    class State(models.TextChoices):
+        STARTING = "starting", "Starting"
+        RUNNING = "running", "Running"
+        DEGRADED = "degraded", "Degraded"
+        STOPPED = "stopped", "Stopped"
+
+    key = models.CharField(max_length=64, unique=True, default="condition-pipeline")
+    state = models.CharField(
+        max_length=12,
+        choices=State.choices,
+        default=State.STARTING,
+    )
+    current_tasks = models.JSONField(default=list, blank=True)
+    last_seen_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("key",)

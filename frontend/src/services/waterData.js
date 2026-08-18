@@ -1,4 +1,5 @@
 import api from './api.js';
+import { getSpotTypeMeta } from './spotTypes.js';
 
 const ACTIVITY_IDS = ['swim', 'surf', 'relax', 'mudflat', 'onsen', 'rafting'];
 const MAX_PAGES = 20;
@@ -52,16 +53,6 @@ const reasonLabels = Object.freeze({
   WATER_QUALITY_STATUS_MISSING: '최신 수질 상태가 없습니다.',
   WATER_QUALITY_UNSAFE: '수질 부적합 상태입니다.',
   WEATHER_ADVISORY: '기상 주의보가 발효 중입니다.',
-});
-
-const typeMeta = Object.freeze({
-  beach: { type: 'sea', label: '바다', icon: '🌊' },
-  sea: { type: 'sea', label: '바다', icon: '🌊' },
-  river: { type: 'river', label: '강·하천', icon: '🏞️' },
-  valley: { type: 'valley', label: '계곡', icon: '💧' },
-  hotspring: { type: 'hotspring', label: '온천', icon: '♨️' },
-  lake: { type: 'lake', label: '호수', icon: '🫧' },
-  tidal_flat: { type: 'tidal_flat', label: '갯벌', icon: '🦀' },
 });
 
 function collectionFromPayload(payload) {
@@ -128,7 +119,7 @@ function syntheticVisual(apiSpot) {
   const lng = finiteNumber(apiSpot.lng);
   const x = lng === null ? 50 + (hash % 36) - 18 : 10 + (((lng - 124) / 8) * 80);
   const y = lat === null ? 50 + ((hash >> 8) % 36) - 18 : 88 - (((lat - 33) / 6) * 76);
-  const meta = typeMeta[apiSpot.type] ?? typeMeta.river;
+  const meta = getSpotTypeMeta(apiSpot.type);
 
   return {
     gradient: `linear-gradient(145deg, hsl(${hue} 58% 34%), hsl(${hue + 22} 63% 66%), #eff2d8)`,
@@ -160,6 +151,7 @@ function demoFallbackSafety(spot) {
 
 function emptyConditions() {
   return {
+    waterTemperatureC: null,
     waterTemp: '자료 없음',
     airTemp: '자료 없음',
     waveHeight: '자료 없음',
@@ -167,6 +159,49 @@ function emptyConditions() {
     waterQuality: '자료 없음',
     crowd: '자료 없음',
     tide: { low: '—', high: '—' },
+  };
+}
+
+export function apiSpotRouteId(apiId) {
+  const normalized = String(apiId ?? '').trim();
+  if (!/^[1-9]\d*$/.test(normalized)) return null;
+  return `api-${normalized}`;
+}
+
+export function findSpotByRouteId(spots, routeId) {
+  const normalizedRouteId = String(routeId ?? '');
+  if (normalizedRouteId.startsWith('api-')) {
+    const apiId = normalizedRouteId.slice(4);
+    if (!apiId) return null;
+    return spots.find((spot) => String(spot.apiId) === apiId) ?? null;
+  }
+  return spots.find((spot) => (
+    String(spot.id) === normalizedRouteId || spot.slug === normalizedRouteId
+  )) ?? null;
+}
+
+function normalizeDemoSpot(spot) {
+  const meta = getSpotTypeMeta(spot?.type);
+  return {
+    ...spot,
+    type: meta.type,
+    typeLabel: meta.label,
+    visual: spot?.visual
+      ? { ...spot.visual, icon: meta.icon }
+      : spot?.visual,
+    apiId: null,
+    spotSource: 'demo',
+    livecamUrl: '',
+    livecam_url: '',
+    catalogVerification: 'demo',
+    catalog_verification: 'demo',
+    catalogVerifiedAt: null,
+    catalog_verified_at: null,
+    dataState: 'demo',
+    safety: demoFallbackSafety(spot),
+    conditionRecords: {},
+    observations: [],
+    latestObservation: null,
   };
 }
 
@@ -187,17 +222,20 @@ function findDemoMatch(apiSpot, demoSpots, claimedDemoIds) {
 }
 
 function mergeOneSpot(apiSpot, demoSpot) {
-  const meta = typeMeta[apiSpot.type] ?? typeMeta[demoSpot?.type] ?? typeMeta.river;
+  const meta = getSpotTypeMeta(apiSpot.type || demoSpot?.type);
   const region = stringOr(apiSpot.region, demoSpot?.region || '지역 정보 없음');
   const tags = Array.isArray(apiSpot.tags) && apiSpot.tags.length > 0
     ? apiSpot.tags.filter((tag) => typeof tag === 'string')
     : (demoSpot?.tags ?? []);
   const visual = demoSpot?.visual ?? syntheticVisual(apiSpot);
   const description = stringOr(apiSpot.description, demoSpot?.description || '관광 상세 설명을 준비하고 있습니다.');
+  const livecamUrl = stringOr(apiSpot.livecam_url);
+  const catalogVerification = stringOr(apiSpot.catalog_verification, 'unknown').toLowerCase();
+  const catalogVerifiedAt = apiSpot.catalog_verified_at ?? null;
 
   return {
     ...(demoSpot ?? {}),
-    id: demoSpot?.id ?? `api-${apiSpot.id}`,
+    id: demoSpot?.id ?? apiSpotRouteId(apiSpot.id),
     apiId: apiSpot.id,
     slug: demoSpot?.slug ?? `api-spot-${apiSpot.id}`,
     name: stringOr(apiSpot.name, demoSpot?.name || '이름 없는 물 여행지'),
@@ -212,6 +250,14 @@ function mergeOneSpot(apiSpot, demoSpot) {
     tags,
     imageUrl: stringOr(apiSpot.image_url, demoSpot?.imageUrl || ''),
     image_url: stringOr(apiSpot.image_url, demoSpot?.imageUrl || ''),
+    livecamUrl,
+    livecam_url: livecamUrl,
+    catalogVerification,
+    catalog_verification: catalogVerification,
+    catalogVerifiedAt,
+    catalog_verified_at: catalogVerifiedAt,
+    catalogSource: stringOr(apiSpot.catalog_source),
+    catalogSourceUrl: stringOr(apiSpot.catalog_source_url),
     description,
     summary: demoSpot?.summary ?? description,
     scores: demoSpot?.scores ? { ...demoSpot.scores } : emptyScores(),
@@ -228,20 +274,13 @@ function mergeOneSpot(apiSpot, demoSpot) {
     dataState: demoSpot ? 'demo' : 'missing',
     conditionRecords: {},
     observations: [],
+    latestObservation: null,
   };
 }
 
 export function mergeSpotsWithDemo(apiSpots, demoSpots) {
   if (!Array.isArray(apiSpots) || apiSpots.length === 0) {
-    return demoSpots.map((spot) => ({
-      ...spot,
-      apiId: null,
-      spotSource: 'demo',
-      dataState: 'demo',
-      safety: demoFallbackSafety(spot),
-      conditionRecords: {},
-      observations: [],
-    }));
+    return demoSpots.map(normalizeDemoSpot);
   }
 
   const claimedDemoIds = new Set();
@@ -252,15 +291,7 @@ export function mergeSpotsWithDemo(apiSpots, demoSpots) {
   });
   const demoOnlySpots = demoSpots
     .filter((spot) => !claimedDemoIds.has(spot.id))
-    .map((spot) => ({
-      ...spot,
-      apiId: null,
-      spotSource: 'demo',
-      dataState: 'demo',
-      safety: demoFallbackSafety(spot),
-      conditionRecords: {},
-      observations: [],
-    }));
+    .map(normalizeDemoSpot);
 
   return [...mergedApiSpots, ...demoOnlySpots];
 }
@@ -369,30 +400,38 @@ function metricValueLabel(metric) {
   return String(value);
 }
 
-function conditionsFromMetrics(metrics, fallback) {
+function conditionsFromMetrics(metrics) {
   const byName = Object.fromEntries(
     (Array.isArray(metrics) ? metrics : []).map((metric) => [metric.name, metric]),
   );
-  const read = (names, fallbackValue) => {
+  const read = (names, fallbackValue = '자료 없음') => {
     const metric = names.map((name) => byName[name]).find(Boolean);
     return metric ? metricValueLabel(metric) : fallbackValue;
   };
-  const base = fallback ?? emptyConditions();
+  const waterTemperatureMetric = ['water_temperature_c', 'water_temp_c']
+    .map((name) => byName[name])
+    .find(Boolean);
+  const waterTemperatureC = waterTemperatureMetric?.state === 'valid'
+    ? finiteNumber(waterTemperatureMetric.value)
+    : null;
 
   return {
-    ...base,
-    waterTemp: read(['water_temperature_c', 'water_temp_c'], base.waterTemp),
-    airTemp: read(['air_temperature_c', 'air_temp_c'], base.airTemp),
-    waveHeight: read(
-      ['wave_height_m', 'average_wave_height_m', 'maximum_wave_height_m'],
-      base.waveHeight,
-    ),
-    windSpeed: read(
-      ['wind_speed_ms', 'maximum_wind_speed_ms', 'wind_speed_m_s', 'average_wind_speed_m_s'],
-      base.windSpeed,
-    ),
-    waterQuality: read(['water_quality_status', 'water_quality_grade'], base.waterQuality),
-    crowd: read(['crowd_level'], base.crowd),
+    waterTemperatureC,
+    waterTemp: read(['water_temperature_c', 'water_temp_c']),
+    airTemp: read(['air_temperature_c', 'air_temp_c']),
+    waveHeight: read(['wave_height_m', 'average_wave_height_m', 'maximum_wave_height_m']),
+    windSpeed: read([
+      'wind_speed_ms',
+      'maximum_wind_speed_ms',
+      'wind_speed_m_s',
+      'average_wind_speed_m_s',
+    ]),
+    waterQuality: read(['water_quality_status', 'water_quality_grade']),
+    crowd: read(['crowd_level']),
+    tide: {
+      low: read(['low_tide_time'], '—'),
+      high: read(['high_tide_time'], '—'),
+    },
   };
 }
 
@@ -580,10 +619,9 @@ export function applyObservations(spots, spotApiId, observations) {
     return {
       ...spot,
       observations,
+      latestObservation: latest,
       dataState: Object.keys(spot.conditionRecords).length > 0 ? spot.dataState : latest.state,
-      conditions: Object.keys(spot.conditionRecords).length > 0
-        ? spot.conditions
-        : conditionsFromMetrics(latest.metrics, spot.conditions),
+      conditions: conditionsFromMetrics(latest.metrics),
       freshness: Object.keys(spot.conditionRecords).length > 0
         ? spot.freshness
         : {
@@ -614,14 +652,18 @@ export function getSpotActivityView(spot, activity) {
       staleMetrics: record.staleMetrics,
       limitations: record.limitations,
       methodologyVersion: record.methodologyVersion,
-      conditions: conditionsFromMetrics(record.metrics, spot.conditions),
+      conditions: conditionsFromMetrics(record.metrics),
       provenance: record.provenance,
       isDemoFallback: false,
     };
   }
 
-  const demoScore = spot?.scores?.[activity] ?? null;
-  const isDemo = spot?.spotSource === 'demo' || Boolean(demoScore !== null && spot?.apiId);
+  const observation = spot?.latestObservation ?? null;
+  const hasObservation = Boolean(observation);
+  const demoScore = hasObservation ? null : (spot?.scores?.[activity] ?? null);
+  const isDemo = !hasObservation && (
+    spot?.spotSource === 'demo' || Boolean(demoScore !== null && spot?.apiId)
+  );
   return {
     activity,
     score: demoScore,
@@ -631,21 +673,27 @@ export function getSpotActivityView(spot, activity) {
     decision: 'unknown',
     confidence: null,
     coverage: null,
-    dataState: isDemo ? 'demo' : (spot?.dataState ?? 'missing'),
+    dataState: isDemo ? 'demo' : (observation?.state ?? spot?.dataState ?? 'missing'),
     reasons: [],
     contributions: [],
     missingMetrics: [],
     staleMetrics: [],
-    limitations: isDemo ? ['고정 데모 대체값이며 실시간 안전 판단이 아닙니다.'] : [],
+    limitations: isDemo
+      ? ['고정 데모 대체값이며 실시간 안전 판단이 아닙니다.']
+      : [hasObservation
+        ? '실관측 조건은 있지만 이 활동의 Water Index 평가가 없습니다.'
+        : '이 활동의 Water Index 평가가 없습니다.'],
     methodologyVersion: isDemo ? 'demo-fixture' : '평가 없음',
-    conditions: spot?.conditions ?? emptyConditions(),
+    conditions: observation?.conditions ?? spot?.conditions ?? emptyConditions(),
     provenance: {
-      provider: isDemo ? 'PongDang demo fixture' : '출처 없음',
-      spatialScope: spot?.name ?? '공간 범위 정보 없음',
-      observedAt: spot?.freshness?.observedAt ?? null,
-      fetchedAt: null,
-      validUntil: null,
-      updatedLabel: isDemo ? (spot?.freshness?.updatedLabel ?? '고정 데모') : '관측 자료 없음',
+      provider: isDemo ? 'PongDang demo fixture' : (observation?.provider ?? '출처 없음'),
+      spatialScope: observation?.spatialScope ?? spot?.name ?? '공간 범위 정보 없음',
+      observedAt: observation?.observedAt ?? spot?.freshness?.observedAt ?? null,
+      fetchedAt: observation?.fetchedAt ?? null,
+      validUntil: observation?.validUntil ?? null,
+      updatedLabel: isDemo
+        ? (spot?.freshness?.updatedLabel ?? '고정 데모')
+        : (observation?.updatedLabel ?? '관측 자료 없음'),
     },
     isDemoFallback: isDemo,
   };

@@ -49,6 +49,10 @@ class KmaAdapterTests(unittest.TestCase):
         self.assertEqual(observation.provider, "KMA")
         self.assertEqual(observation.state, "live")
         self.assertEqual(
+            observation.source_observed_at,
+            datetime(2026, 8, 16, 13, tzinfo=KST),
+        )
+        self.assertEqual(
             observation.valid_until,
             datetime(2026, 8, 16, 15, tzinfo=KST),
         )

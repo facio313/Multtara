@@ -17,6 +17,10 @@ from typing import Mapping, TypeAlias
 
 MetricValue: TypeAlias = float | int | str | bool
 
+SURF_PARTICIPANT_SKILL_LEVELS = frozenset(
+    {"beginner", "intermediate", "advanced", "unspecified"}
+)
+
 
 class Activity(str, Enum):
     SWIM = "swim"
@@ -164,7 +168,11 @@ class Metric:
         expiries: list[datetime] = []
         if self.valid_until is not None:
             expiries.append(self.valid_until)
-        if max_age_seconds is not None:
+        # Observation freshness limits are measured from an observation time.
+        # A typed forecast instead has an explicit provider validity window;
+        # applying an observation max-age to its issue time would make a
+        # legitimate future STOP/UNKNOWN signal disappear before it starts.
+        if max_age_seconds is not None and self.mode is not MetricMode.FORECAST:
             expiries.append(
                 self.observed_at + timedelta(seconds=max_age_seconds)
             )
@@ -215,9 +223,22 @@ class EvaluationContext:
     at: datetime
     environment: Environment | None = None
     participant_profile: str = "general"
+    participant_skill_level: str = "unspecified"
 
     def __post_init__(self) -> None:
         _require_aware(self.at, "at")
+        raw_skill_level = getattr(
+            self.participant_skill_level,
+            "value",
+            self.participant_skill_level,
+        )
+        skill_level = str(raw_skill_level).strip().lower()
+        if skill_level not in SURF_PARTICIPANT_SKILL_LEVELS:
+            raise ValueError(
+                "participant_skill_level must be beginner, intermediate, "
+                "advanced, or unspecified"
+            )
+        object.__setattr__(self, "participant_skill_level", skill_level)
         if self.environment is None:
             object.__setattr__(self, "environment", _DEFAULT_ENVIRONMENT[self.activity])
         if not supports_activity_environment(self.activity, self.environment):

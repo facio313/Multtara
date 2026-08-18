@@ -459,7 +459,10 @@ function HomePage() {
         </div>
         <div className="ai-result-preview">
           {spots.filter((spot) => ['anmok-beach', 'gyeongpo-lake', 'geumjin-hotspring'].includes(spot.slug)).map((spot, index) => {
-            const view = getSpotActivityView(spot, spot.type === 'hotspring' ? 'onsen' : 'relax');
+            const view = getSpotActivityView(
+              spot,
+              ['hotspring', 'pool', 'waterpark'].includes(spot.type) ? 'onsen' : 'relax',
+            );
             return (
               <Link to={`/spot/${spot.id}`} key={spot.id}>
                 <span>0{index + 1}</span><div><strong>{spot.name}</strong><small>{localizedDataState(t, view.dataState)} · {t('common.points', { score: scoreLabel(view) })}</small></div><ChevronRight size={17} />

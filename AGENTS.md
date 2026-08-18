@@ -19,7 +19,7 @@ Each AI agent may only work within its own tool branch and below.
 | `anthropic` | Claude Code |
 | `cursor` | Cursor |
 | `codex` | OpenAI Codex |
-| `{tool}/feature-*` | Each respective agent |
+| `{tool}-{feature}` | Each respective agent |
 
 - Agents **must not** commit, merge, or push to `main` or `dev` without an explicit user request.
 - When the user explicitly asks, agents may assist with `main`/`dev` operations.
@@ -108,18 +108,18 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 ### Flow
 
 ```
-codex/feature-name ──┐
-cursor/feature-name ─┤→ {tool} → dev → main
-anthropic/feat-name ─┘
+codex-feature-name ──┐
+cursor-feature-name ─┤→ {tool} → dev → main
+anthropic-feat-name ─┘
 ```
 
 1. Branch off the tool branch for any new feature:
    ```bash
-   git checkout -b cursor/water-index cursor
+   git checkout -b cursor-water-index cursor
    ```
 2. Merge completed feature back into the tool branch:
    ```bash
-   git checkout cursor && git merge cursor/water-index
+   git checkout cursor && git merge cursor-water-index
    ```
 3. Merge tool branch into `dev` after validation (user):
    ```bash
@@ -130,7 +130,9 @@ anthropic/feat-name ─┘
 ### Naming Rules
 
 - Tool branches: `codex`, `cursor`, `anthropic`
-- Feature branches: `{tool}/{kebab-case-feature}` — e.g. `cursor/water-index`
+- Feature branches: `{tool}-{kebab-case-feature}` — e.g. `cursor-water-index`.
+  A slash cannot be used because the resident tool branches already occupy the
+  exact Git refs `codex`, `cursor`, and `anthropic`.
 - English kebab-case only.
 
 워크트리 재생성:
@@ -167,3 +169,49 @@ anthropic/feat-name ─┘
   and admin workflows, but its read API is fail-closed in production: list
   requests expose no rows and detail requests expose no records. It must never
   be presented as evidence-backed or `LIVE` forecast data.
+- Evidence-backed daily forecasts use
+  `GET /api/v1/forecasts/daily/?spot=<id>&activity=<activity>&participant_profile=general|family&participant_skill_level=unspecified|beginner|intermediate|advanced&start_date=YYYY-MM-DD&days=1..7`.
+  Each result evaluates the exact KST 12:00 target. Unsupported dates, provider
+  horizon gaps, missing expiry, and stale evidence stay `UNKNOWN` with null
+  score; never interpolate a seven-day value or infer warnings/access from
+  ordinary weather forecasts. The `family` profile is valid only for swimming;
+  non-swimming queries use `general`. A concrete skill is valid only for
+  surfing, and an unspecified skill, missing authoritative KHOA `GrdCn`, or an
+  inexact grade-to-skill match keeps surfing suitability `UNKNOWN` with a null
+  score.
+- `PONGDANG_DERIVED` is the only producer identity for HCI:Beach, verified
+  hot-spring facility fit, and site-calibrated rafting flow fit. Every stored
+  derivation retains metric-level lineage to original evidence. Request-scoped
+  amenity/crowd/temperature preference overlays use `SESSION_CONTEXT`, expire
+  immediately, and must never be persisted globally.
+- Route matrices come only from an operator-configured credential-free HTTPS
+  Valhalla endpoint or an explicit operator import. They expire, are refreshed
+  separately for drive/walk/bicycle, and Haversine distance is never an
+  executable itinerary travel time. Saved itineraries retain immutable route
+  and Water Index evidence plus participant profile/skill and both revalidation
+  deadlines. Every referenced route snapshot, condition score, observation
+  snapshot, identity, and current methodology must still exist and agree;
+  expired, missing, dangling, or mismatched evidence blocks transitions to
+  `accepted` or `started` until replanning. Family-swimming adult supervision is
+  session-only and is never stored as global evidence; the same transition
+  request must explicitly send `adult_supervision_confirmed=true` whenever the
+  returned reason codes require reconfirmation.
+- Account APIs use Django sessions and CSRF under `/api/v1/users/`. Passports are
+  operator/QR/partner-verified and read-only to clients; eco submissions begin
+  `pending` and only a staff verifier may establish verified state and time.
+  `/api/v1/content/memories/` and saved itineraries are owner-private CRUD.
+- `seed_dummy_data` creates only clearly labeled `PONGDANG_DEMO` catalog rows and
+  never seeds live observations, scores, or forecasts. Its destructive reset is
+  explicitly scoped to those demo rows.
+- Pipeline liveness/freshness (`/api/health/integrations/`) and actual current
+  safety readiness (`/api/health/safety/`) are separate signals. Retention must
+  preserve latest groups, longer STOP/CAUTION audit windows, metric lineage,
+  and every evidence row referenced by a saved itinerary.
+- Production releases are tag-bound `linux/arm64` GHCR images with immutable
+  backend/frontend digests, provenance, and SBOM attestations. Raspberry Pi
+  deployment must use `docker-compose.deploy.yml` through `pi-deploy.sh`; never
+  build application images on the Pi or deploy a mutable tag.
+- Pi deployment configuration is rooted at a validated marker directory and
+  requires Docker Compose 2.24.4 or newer. Preserve the loopback-only origin,
+  take a verified PostgreSQL backup before upgrades/rollback, and require the
+  explicit restore confirmation contract before replacing a database.

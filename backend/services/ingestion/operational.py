@@ -37,6 +37,7 @@ SOURCE_METRICS: dict[str, frozenset[str]] = {
             "water_quality_status",
             "water_temperature_c",
             "river_risk_level",
+            "river_flow_cms",
             "tide_window_open",
             "marine_hazard_status",
             "fog_status",
@@ -60,6 +61,7 @@ SOURCE_METRICS: dict[str, frozenset[str]] = {
             "water_quality_status",
             "water_temperature_c",
             "river_risk_level",
+            "river_flow_cms",
             "marine_hazard_status",
             "fog_status",
             "designated_route_status",
@@ -84,6 +86,7 @@ SOURCE_METRICS: dict[str, frozenset[str]] = {
             "water_quality_status",
             "water_temperature_c",
             "river_risk_level",
+            "river_flow_cms",
             "upstream_rain_risk",
         }
     ),
@@ -178,7 +181,7 @@ def build_operational_observation(
             Metric(
                 name=name,
                 value=value,
-                unit="canonical",
+                unit=_metric_unit(name),
                 source=canonical_source,
                 source_url=source_url,
                 station_id=provider_record_id,
@@ -232,6 +235,15 @@ def _parse_assignment(assignment: Any) -> tuple[str, str | float | bool]:
     if not math.isfinite(number):
         raise ValueError(f"metric {name} numeric value must be finite")
     return name, number
+
+
+def _metric_unit(name: str) -> str:
+    # A hydraulic producer may consume only an explicitly typed volumetric
+    # flow. Generic "canonical" numbers must never be compared with m3/s
+    # calibration thresholds.
+    if name == "river_flow_cms":
+        return "m3/s"
+    return "canonical"
 
 
 def _validate_public_source_url(value: str) -> None:

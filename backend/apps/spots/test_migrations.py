@@ -48,4 +48,5 @@ class CuratedIdentifierMigrationTests(TransactionTestCase):
             # limited to the disposable test database so the suite can restore
             # the latest schema even when the assertion above fails.
             HistoricalWaterSpot.objects.filter(pk=second.pk).delete()
-            MigrationExecutor(connection).migrate([self.migrate_to])
+            executor = MigrationExecutor(connection)
+            executor.migrate(executor.loader.graph.leaf_nodes())

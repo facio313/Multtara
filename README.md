@@ -28,8 +28,10 @@
 - Kakao Maps 키가 있으면 실제 지도를 사용하고, 없거나 실패하면 접근 가능한 Water Twin 개념도와 목록으로 전환
 - 지역·활동별 7일 예보와 차트와 의미가 같은 접근성 표
 - 실제 라이브와 데모 포스터를 혼동하지 않는 워터뷰
-- 5단계 취향 온보딩, 5개 페르소나, 로컬 저장 기반 프로필과 패스포트
+- 5단계 취향 온보딩, Django session 기반 계정·프로필, 검증 여권·에코 기록
 - 안전·운영·동행 조건을 먼저 적용하는 설명 가능한 추천 API와 명시적 데모 폴백
+- 실제 route matrix를 쓰는 물류 초안, 만료 근거 재검증, 계정별 저장 일정
+- 계정 소유자만 조회·수정·삭제할 수 있는 여행 추억 기록
 - 바다·온천·계곡·갯벌 상세, 출처·갱신시각·방법론·안전 reason code 표시
 - 320px급 모바일부터 대형 데스크톱까지 반응형 내비게이션과 safe-area 대응
 
@@ -62,22 +64,43 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ### 운영 Compose
 
 ```bash
-# 무작위 SECRET_KEY, 명시적 ALLOWED_HOSTS, PostgreSQL 비밀번호,
-# HTTPS 종단 프록시를 먼저 구성합니다.
-docker compose up -d --build
+# Git tag release가 만든 bundle을 Raspberry Pi로 전달한 뒤 실행합니다.
+sudo ./scripts/pi-setup.sh \
+  --target /opt/pongdang \
+  --deploy-user pongdang \
+  --project-name pongdang
+
+sudo -u pongdang /opt/pongdang/scripts/pi-deploy.sh deploy \
+  --target /opt/pongdang \
+  --release-file /path/to/release.env
 ```
+
+운영 장치에서 직접 build하지 않습니다. Release workflow가 생성한 `linux/arm64`
+GHCR digest image, provenance, SBOM, checksum manifest만 배포합니다. 최초 설정,
+필수 외부 입력, image rollback, PostgreSQL backup/restore와 분리 복구 drill은
+[운영 runbook](docs/operations-runbook.md)을 따릅니다.
 
 백엔드 컨테이너는 외부 포트를 열지 않으며, 프런트 Nginx도 기본적으로 호스트의 `127.0.0.1:8080`에만 바인딩됩니다. Caddy·Cloudflare Tunnel 등 신뢰 가능한 HTTPS 종단 프록시가 이 주소로 전달하도록 구성한 뒤, 공개 HTTPS 도메인에서 다음 경로를 확인합니다.
 
 - `/api/health/`: 프로세스 liveness
 - `/api/health/ready/`: PostgreSQL readiness
-- `/api/health/integrations/`: 키 값이 아닌 제공자 설정 여부
+- `/api/health/integrations/`: provider 작업 이력과 실제 freshness
+- `/api/health/safety/`: verified/non-DEMO 지점의 현재 Water Index 준비 상태
+
+Integrations 성공은 안전 근거 준비를 뜻하지 않습니다. Safety 응답의 aggregate
+`counts`·`reason_counts`를 별도로 감시하고, 현재 `CLEAR`가 하나도 없어 반환되는
+`503 degraded`를 정상 응답으로 치환하지 않습니다.
 
 백엔드는 기동 전에 마이그레이션과 정적 파일 수집을 수행하고, DB readiness가 통과한 뒤에만 프런트가 준비됩니다. `FRONTEND_BIND_ADDRESS=0.0.0.0`으로 바꾸어 Nginx를 직접 공개한 상태에서 외부 요청의 `X-Forwarded-Proto`를 신뢰하면 안 됩니다. 운영에서는 신뢰 가능한 TLS 종단 프록시만 Nginx 앞에 두고 프런트 원본 포트·PostgreSQL·Gunicorn에 대한 외부 접근을 방화벽으로 차단하세요.
 
 같은 출처 배포에서는 운영 CORS 허용 목록이 기본적으로 비어 있습니다. 프런트와 API를 분리할 때만 `CORS_ALLOWED_ORIGINS`에 쉼표로 구분한 정확한 HTTPS origin을 지정하세요. 사용자 정보, 경로, 쿼리, 프래그먼트, 와일드카드 또는 HTTP 주소가 들어간 항목은 서버 기동 시 거부됩니다.
 
-`collector` 서비스는 KMA 키가 있으면 30분마다 일반 날씨를, KHOA 키가 있으면 1시간마다 해양 자료를 수집하고 5분마다 일반·가족 프로필 Water Index를 재평가합니다. 실패한 호출은 이전 관측의 만료시간을 연장하지 않으며 다음 주기에 다시 시도합니다. 간격은 `.env`의 `*_INTERVAL_SECONDS`로 조정하되 제공자 발행주기와 일일 쿼터를 먼저 확인하세요.
+`collector` 서비스는 최대 4개 worker로 현재·예보 수집, 파생 적합도, 일반·가족
+Water Index, daily forecast, retention을 합친 9개 핵심 작업을 실행합니다. `ROUTING_MATRIX_URL`이
+있으면 drive/walk/bicycle route snapshot refresh도 24시간 기본 주기로 추가합니다.
+설정되지 않은 provider 수집은 안전하게 건너뛰고, 실패한 호출은 이전 관측의
+만료시간을 연장하지 않으며 다음 주기에 다시 시도합니다. 간격은 `.env`와 command
+기본값을 조정하기 전에 provider 발행주기와 일일 쿼터를 먼저 확인하세요.
 
 | 운영 입력 | 현재 수집 경로 |
 |---|---|
@@ -105,6 +128,25 @@ python manage.py sync_tour_spots --dry-run
 ```
 
 각 명령의 옵션은 `python manage.py help <command>`로 확인합니다. 키나 검수된 장소 매핑이 없으면 값을 추정하지 않으며, 공식 장소 ID를 인근 장소로 공간 보간하지 않습니다.
+
+추가 운영 명령은 다음 역할을 가집니다.
+
+```bash
+# HCI/온천 시설/지점별 래프팅 적합도 파생과 lineage 저장
+python manage.py derive_suitability_metrics --dry-run
+
+# KMA/KHOA 예보 근거 수집 후 exact KST 12:00 daily projection 평가
+python manage.py sync_weather_conditions --mode short
+python manage.py sync_forecast_evidence
+python manage.py evaluate_daily_forecasts
+
+# 선택형 Valhalla route matrix와 bounded history retention
+python manage.py refresh_route_matrix --transport drive --dry-run
+python manage.py prune_condition_history --dry-run
+
+# idempotent 강릉 초기 catalog. 관측·점수·예보는 생성하지 않음
+python manage.py bootstrap_gangneung_catalog --dry-run
+```
 
 전국 공통 자동 API가 없는 입수 허가·순찰·지정구역·시설 운영판정은 공식 근거를 확인한 운영자만 만료시각과 함께 기록합니다. 예시는 형식을 보여줄 뿐이며, 실제 값과 URL은 관할 기관 자료에서 가져와야 합니다.
 
@@ -136,6 +178,7 @@ Multtara/
 │   └── nginx.conf    # SPA와 동일 출처 API 프록시
 ├── docs/             # 방법론 결정 기록
 ├── docker-compose.yml
+├── docker-compose.deploy.yml
 └── docker-compose.dev.yml
 ```
 
@@ -152,6 +195,32 @@ Water Index 방법론은 [docs/water-index-methodology.md](docs/water-index-meth
 
 기존 `WaterForecast` 테이블은 초기 개발용 seed/legacy 데이터 모델로만 유지합니다. 증거 기반 조건 파이프라인의 공식 예보로 간주할 수 없으므로 운영 `/api/v1/forecasts/`는 저장 행이 있어도 빈 목록을 반환하고 상세 행을 공개하지 않습니다.
 
+## 주요 API 계약
+
+- `GET /api/v1/forecasts/daily/`: `spot`, `activity`, `participant_profile`,
+  `participant_skill_level`, 선택 `start_date`, `days=1..7`에 대해 KST 12:00
+  기준 결과를 정확히 요청 일수만큼 반환합니다. 숙련도는
+  `unspecified|beginner|intermediate|advanced`이며 구체 숙련도는 서핑에서만
+  허용됩니다. 서핑 숙련도를 지정하지 않았거나 KHOA `GrdCn`의 정확한 대응 근거가
+  없으면 적합도는 `UNKNOWN/null`입니다. `family` 프로필은 수영에서만 허용되고,
+  provider horizon 밖이거나 근거가 만료되어도 `UNKNOWN/null`입니다.
+- `POST /api/v1/trips/recommendations/`: 안전·운영·party constraint를 먼저 적용한
+  뒤 설명 가능한 적합도와 다양성 순위를 반환합니다.
+- `POST /api/v1/trips/itineraries/plan/`: 현재 route evidence만 사용하는 물류
+  초안입니다. 저장 행은 route/water provenance, participant profile/skill과
+  재검증 시각을 보존합니다. 조회 시 실제 DB의 route snapshot, condition score,
+  observation snapshot과 평가 identity를 다시 확인하며 만료·누락·불일치 후에는
+  `accepted`/`started`로 전환할 수 없습니다. 가족 수영 일정의 성인 감독은
+  저장하지 않는 세션 확인값이므로 응답의 재확인 reason code가 있을 때 상태 전환
+  `PATCH`와 함께 `adult_supervision_confirmed=true`를 다시 보내야 합니다.
+- `/api/v1/users/`: session/CSRF 계정, 활동·리뷰, 읽기 전용 검증 여권,
+  검증 lifecycle이 있는 eco action입니다.
+- `/api/v1/content/memories/`: 로그인 사용자 본인만 접근하는 여행 추억 CRUD입니다.
+
+운영 split-origin에서는 `CORS_ALLOWED_ORIGINS`의 정확한 HTTPS origin이
+`CSRF_TRUSTED_ORIGINS`와 credential cookie 정책에도 함께 적용됩니다. 같은 출처가
+기본이며, browser에 server credential을 전달하지 않습니다.
+
 ## 검증
 
 ```bash
@@ -161,7 +230,10 @@ npm run lint
 npm test
 npm run build
 
-cd ../backend
+cd ..
+scripts/test-ops-config.sh
+
+cd backend
 python manage.py check
 python manage.py makemigrations --check --dry-run
 python manage.py test
@@ -178,7 +250,7 @@ python manage.py test
 | `worktrees/codex/` | `codex` | OpenAI Codex |
 | `worktrees/anthropic/` | `anthropic` | Claude Code |
 
-흐름은 `{tool}/feature-name → {tool} → dev → main`이며 상세 규칙은 [AGENTS.md](AGENTS.md)에 있습니다.
+흐름은 `{tool}-feature-name → {tool} → dev → main`이며 상세 규칙은 [AGENTS.md](AGENTS.md)에 있습니다.
 
 ## 라이선스
 

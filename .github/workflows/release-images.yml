@@ -1,0 +1,246 @@
+name: Release ARM64 Images
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing vMAJOR.MINOR.PATCH tag that points to the selected revision
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-images-${{ github.ref }}-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate release identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      backend_image: ${{ steps.release.outputs.backend_image }}
+      frontend_image: ${{ steps.release.outputs.frontend_image }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Validate tag and image namespace
+        id: release
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag must match vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          tagged_commit="$(git rev-parse "refs/tags/${REQUESTED_TAG}^{commit}")"
+          if [[ "$tagged_commit" != "$GITHUB_SHA" ]]; then
+            echo "${REQUESTED_TAG} points to ${tagged_commit}, not workflow revision ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          image_root="ghcr.io/${GITHUB_REPOSITORY,,}"
+          {
+            echo "version=$REQUESTED_TAG"
+            echo "backend_image=$image_root/backend"
+            echo "frontend_image=$image_root/frontend"
+          } >> "$GITHUB_OUTPUT"
+
+  quality-gate:
+    name: Release quality gate
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  backend:
+    name: Backend / linux-arm64
+    needs: [prepare, quality-gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Generate OCI metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.prepare.outputs.backend_image }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=PongDang backend
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+
+      - name: Build, attest, and push backend
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          platforms: linux/arm64
+          pull: true
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=release-backend-arm64
+          cache-to: type=gha,mode=max,scope=release-backend-arm64
+
+  frontend:
+    name: Frontend / linux-arm64
+    needs: [prepare, quality-gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Generate OCI metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.prepare.outputs.frontend_image }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ needs.prepare.outputs.version }}
+            type=sha,format=long
+          labels: |
+            org.opencontainers.image.title=PongDang frontend
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+
+      - name: Build, attest, and push frontend
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          platforms: linux/arm64
+          pull: true
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_API_BASE_URL=/api/v1/
+            VITE_KAKAO_MAP_KEY=${{ vars.VITE_KAKAO_MAP_KEY }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=release-frontend-arm64
+          cache-to: type=gha,mode=max,scope=release-frontend-arm64
+
+  bundle:
+    name: Immutable deployment bundle
+    needs: [prepare, backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build digest-pinned release bundle
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          BACKEND_IMAGE: ${{ needs.prepare.outputs.backend_image }}
+          BACKEND_DIGEST: ${{ needs.backend.outputs.digest }}
+          FRONTEND_IMAGE: ${{ needs.prepare.outputs.frontend_image }}
+          FRONTEND_DIGEST: ${{ needs.frontend.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest_pattern='^sha256:[0-9a-f]{64}$'
+          [[ "$BACKEND_DIGEST" =~ $digest_pattern ]]
+          [[ "$FRONTEND_DIGEST" =~ $digest_pattern ]]
+          bundle_dir="pongdang-release-${RELEASE_VERSION}"
+          install -d -m 0755 "$bundle_dir/scripts" "$bundle_dir/docs"
+          {
+            printf 'RELEASE_VERSION=%s\n' "$RELEASE_VERSION"
+            printf 'RELEASE_COMMIT=%s\n' "$GITHUB_SHA"
+            printf 'BACKEND_IMAGE=%s@%s\n' "$BACKEND_IMAGE" "$BACKEND_DIGEST"
+            printf 'FRONTEND_IMAGE=%s@%s\n' "$FRONTEND_IMAGE" "$FRONTEND_DIGEST"
+          } > "$bundle_dir/release.env"
+          chmod 0644 "$bundle_dir/release.env"
+          (
+            cd "$bundle_dir"
+            sha256sum release.env > release.env.sha256
+          )
+          install -m 0644 docker-compose.yml docker-compose.deploy.yml .env.example "$bundle_dir/"
+          install -m 0755 \
+            scripts/deploy-common.sh \
+            scripts/pi-setup.sh \
+            scripts/pi-deploy.sh \
+            scripts/postgres-backup.sh \
+            scripts/postgres-prune-backups.sh \
+            scripts/postgres-restore.sh \
+            "$bundle_dir/scripts/"
+          install -m 0644 docs/operations-runbook.md "$bundle_dir/docs/"
+          tar -czf "${bundle_dir}.tar.gz" "$bundle_dir"
+          sha256sum "${bundle_dir}.tar.gz" > "${bundle_dir}.tar.gz.sha256"
+
+      - name: Upload release manifest and Pi deployment tools
+        uses: actions/upload-artifact@v7
+        with:
+          name: pongdang-release-${{ needs.prepare.outputs.version }}
+          path: |
+            pongdang-release-${{ needs.prepare.outputs.version }}.tar.gz
+            pongdang-release-${{ needs.prepare.outputs.version }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30

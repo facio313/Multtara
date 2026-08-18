@@ -11,7 +11,11 @@ from rest_framework.test import APIClient
 
 from apps.conditions.models import ConditionScore, ObservationMetric, ObservationSnapshot
 from apps.spots.models import WaterSpot
+from apps.trips.models import Itinerary, RouteMatrixSnapshot
+from apps.users.models import User
 from services.ingestion.fusion import FUSION_PROVIDER, FUSION_VERSION
+from services.providers.valhalla import RouteMatrixResult, RouteMatrixValue
+from services.routing import persist_route_matrix
 from apps.trips.views import MAX_CANDIDATE_POOL
 
 
@@ -57,6 +61,7 @@ class RecommendationApiTests(TestCase):
         score: float | None = 90.0,
         evaluated_at=None,
         participant_profile: str = "general",
+        participant_skill_level: str = "unspecified",
         include_family_gates: bool = False,
         missing_metrics: tuple[str, ...] = (),
         lightning_age_minutes: int = 2,
@@ -156,14 +161,24 @@ class RecommendationApiTests(TestCase):
                 valid_from=evaluated_at - timedelta(minutes=10),
                 valid_until=evaluated_at + timedelta(minutes=valid_minutes),
             )
+        persisted_score = score
+        persisted_decision = decision
+        if activity == "surf" and participant_skill_level == "unspecified":
+            # The unscoped row retains its full source snapshot for
+            # request-time, skill-matched evaluation but cannot publish a
+            # participant suitability result by itself.
+            persisted_score = None
+            if safety in {"clear", "unknown"}:
+                persisted_decision = "unknown"
         return ConditionScore.objects.create(
             spot=spot,
             snapshot=snapshot,
             activity=activity,
             participant_profile=participant_profile,
-            score=score,
+            participant_skill_level=participant_skill_level,
+            score=persisted_score,
             safety_status=safety,
-            decision=decision,
+            decision=persisted_decision,
             confidence=1.0,
             coverage=1.0,
             methodology_version=methodology_version,
@@ -227,7 +242,15 @@ class RecommendationApiTests(TestCase):
         )
         self.assertGreater(body["excluded_summary"]["SAFETY_BLOCKED"], 0)
         self.assertGreater(body["excluded_summary"]["SAFETY_UNKNOWN"], 0)
-        self.assertNotIn("source_url", str(recommendation))
+        refs = recommendation["water_index"]["source_refs"]
+        self.assertTrue(refs)
+        self.assertTrue(all(ref["source_url"] == "https://example.go.kr/status" for ref in refs))
+        self.assertNotIn("serviceKey", str(recommendation))
+        self.assertIsNotNone(recommendation["water_index"]["valid_until"])
+        self.assertEqual(
+            recommendation["explanation"]["policy_version"],
+            "recommendation-v1",
+        )
 
     def test_recommendation_image_url_is_public_and_credential_free(self) -> None:
         spot = self.spot(
@@ -737,3 +760,514 @@ class RecommendationApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["recommendations"], [])
         self.assertEqual(response.json()["excluded_summary"]["SAFETY_UNKNOWN"], 1)
+
+    def itinerary_payload(self, *, start, end, candidate, save=False):
+        return {
+            "recommendation": self.payload(region="강원", limit=3),
+            "candidate_ids": [candidate.pk],
+            "start_spot": start.pk,
+            "end_spot": end.pk,
+            "transport": "drive",
+            "plan_date": timezone.localdate().isoformat(),
+            "start_minute": 480,
+            "end_minute": 720,
+            "budget_krw": 20_000,
+            "bad_weather": False,
+            "save": save,
+            "title": "검증된 강릉 하루",
+        }
+
+    def route_matrix(self, *, start, end, candidate, observed_at=None, hours=24):
+        observed_at = observed_at or timezone.now()
+        result = RouteMatrixResult(
+            provider="valhalla",
+            source_url="https://routing.example.com/valhalla?internal=removed",
+            transport="drive",
+            values=(
+                RouteMatrixValue(start.pk, candidate.pk, 300, 2_000),
+                RouteMatrixValue(candidate.pk, end.pk, 360, 2_500),
+                RouteMatrixValue(start.pk, end.pk, 900, 8_000),
+            ),
+        )
+        return persist_route_matrix(
+            result,
+            observed_at=observed_at,
+            fetched_at=observed_at,
+            valid_for=timedelta(hours=hours),
+            spot_ids=(start.pk, end.pk, candidate.pk),
+        )[0]
+
+    def test_itinerary_plan_uses_only_persisted_current_route_evidence(self):
+        start = self.spot("출발 거점")
+        end = self.spot("종료 거점")
+        candidate = self.spot("일정 후보")
+        self.condition(candidate)
+        route_snapshot = self.route_matrix(
+            start=start,
+            end=end,
+            candidate=candidate,
+        )
+
+        response = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            self.itinerary_payload(start=start, end=end, candidate=candidate),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "draft")
+        self.assertEqual(
+            [item["candidate_id"] for item in body["plan"]["visits"]],
+            [str(candidate.pk)],
+        )
+        self.assertEqual(
+            body["route_evidence"]["snapshot_ids"],
+            [route_snapshot.pk],
+        )
+        self.assertEqual(body["route_evidence"]["data_state"], "live")
+        self.assertEqual(
+            body["route_evidence"]["source_urls"],
+            ["https://routing.example.com/valhalla"],
+        )
+        self.assertIsNotNone(body["safety_revalidation_required_at"])
+        self.assertEqual(len(body["water_evidence"]), 1)
+        self.assertEqual(body["water_evidence"][0]["spot_id"], candidate.pk)
+        self.assertEqual(body["water_evidence"][0]["safety_status"], "clear")
+        self.assertTrue(body["water_evidence"][0]["source_refs"])
+        self.assertIn("revalidated", body["execution_notice"])
+        self.assertIsNone(body["saved_itinerary_id"])
+
+    def test_unvisited_expired_candidate_does_not_expire_visited_water_evidence(self):
+        start = self.spot("방문 근거 출발")
+        end = self.spot("방문 근거 종료")
+        visited = self.spot("실제 방문 후보")
+        unvisited = self.spot("만료되어 탈락한 후보")
+        self.condition(visited)
+        expired = self.condition(unvisited)
+        expired_at = self.now - timedelta(minutes=1)
+        ObservationSnapshot.objects.filter(pk=expired.snapshot_id).update(
+            valid_until=expired_at,
+        )
+        ObservationMetric.objects.filter(snapshot_id=expired.snapshot_id).update(
+            valid_until=expired_at,
+        )
+        self.route_matrix(start=start, end=end, candidate=visited)
+        payload = self.itinerary_payload(
+            start=start,
+            end=end,
+            candidate=visited,
+        )
+        payload["candidate_ids"] = [visited.pk, unvisited.pk]
+
+        response = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(
+            [item["candidate_id"] for item in body["plan"]["visits"]],
+            [str(visited.pk)],
+        )
+        self.assertEqual(
+            [item["spot_id"] for item in body["water_evidence"]],
+            [visited.pk],
+        )
+        self.assertEqual(
+            body["safety_revalidation_required_at"],
+            body["water_evidence"][0]["valid_until"],
+        )
+
+    def test_missing_or_expired_route_matrix_fails_closed(self):
+        start = self.spot("경로 없는 출발")
+        end = self.spot("경로 없는 종료")
+        candidate = self.spot("경로 없는 후보")
+        self.condition(candidate)
+        self.route_matrix(
+            start=start,
+            end=end,
+            candidate=candidate,
+            observed_at=timezone.now() - timedelta(days=2),
+            hours=1,
+        )
+
+        response = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            self.itinerary_payload(start=start, end=end, candidate=candidate),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["reason_code"], "NO_CURRENT_ROUTE_TO_END")
+        self.assertEqual(response.json()["route_evidence"]["data_state"], "missing")
+
+    def test_unsafe_candidate_is_skipped_even_when_its_route_exists(self):
+        start = self.spot("안전 게이트 출발")
+        end = self.spot("안전 게이트 종료")
+        candidate = self.spot("통제 후보")
+        self.condition(candidate, safety="stop", decision="blocked", score=None)
+        self.route_matrix(start=start, end=end, candidate=candidate)
+
+        response = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            self.itinerary_payload(start=start, end=end, candidate=candidate),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["plan"]["visits"], [])
+        self.assertEqual(
+            response.json()["plan"]["skipped"][0]["reason_code"],
+            "HARD_GATE_FAILED",
+        )
+
+    def test_saved_itinerary_is_private_immutable_and_omits_party_details(self):
+        start = self.spot("저장 출발")
+        end = self.spot("저장 종료")
+        candidate = self.spot("저장 후보")
+        self.condition(candidate)
+        self.route_matrix(start=start, end=end, candidate=candidate)
+        owner = User.objects.create_user(
+            username="itinerary-owner",
+            password="Very-Long!Itinerary-Passphrase-2026",
+        )
+
+        anonymous = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            self.itinerary_payload(
+                start=start,
+                end=end,
+                candidate=candidate,
+                save=True,
+            ),
+            format="json",
+        )
+        self.assertEqual(anonymous.status_code, 401)
+
+        self.client.force_authenticate(owner)
+        saved_response = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            self.itinerary_payload(
+                start=start,
+                end=end,
+                candidate=candidate,
+                save=True,
+            ),
+            format="json",
+        )
+        self.assertEqual(saved_response.status_code, 200)
+        saved = Itinerary.objects.get(pk=saved_response.json()["saved_itinerary_id"])
+        self.assertEqual(saved.party_size, 1)
+        self.assertEqual(saved.participant_profile, "general")
+        self.assertEqual(saved.participant_skill_level, "unspecified")
+        self.assertNotIn("party", saved.request_snapshot)
+        self.assertNotIn("ages", str(saved.request_snapshot))
+        self.assertEqual(
+            saved.request_snapshot["participant_profile"],
+            "general",
+        )
+        self.assertEqual(
+            saved.request_snapshot["participant_skill_level"],
+            "unspecified",
+        )
+        self.assertEqual(saved.route_evidence["data_state"], "live")
+        self.assertEqual(saved.water_evidence[0]["spot_id"], candidate.pk)
+        self.assertEqual(
+            saved.water_evidence[0]["participant_skill_level"],
+            "unspecified",
+        )
+        self.assertIsNotNone(saved.route_revalidation_required_at)
+        self.assertIsNotNone(saved.safety_revalidation_required_at)
+        original_schedule = saved.schedule
+
+        detail = self.client.get(f"/api/v1/trips/itineraries/{saved.pk}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["evidence_status"]["state"], "current")
+        self.assertEqual(detail.json()["participant_profile"], "general")
+        self.assertEqual(detail.json()["participant_skill_level"], "unspecified")
+        self.assertEqual(detail.json()["route_evidence"]["data_state"], "live")
+        self.assertEqual(detail.json()["water_evidence"][0]["spot_id"], candidate.pk)
+
+        patched = self.client.patch(
+            f"/api/v1/trips/itineraries/{saved.pk}/",
+            {
+                "title": "수정한 제목",
+                "status": "accepted",
+                "schedule": {"visits": ["tampered"]},
+            },
+            format="json",
+        )
+        self.assertEqual(patched.status_code, 200)
+        saved.refresh_from_db()
+        self.assertEqual(saved.title, "수정한 제목")
+        self.assertEqual(saved.schedule, original_schedule)
+
+        invalid_transition = self.client.patch(
+            f"/api/v1/trips/itineraries/{saved.pk}/",
+            {"status": "completed"},
+            format="json",
+        )
+        self.assertEqual(invalid_transition.status_code, 400)
+
+        other = User.objects.create_user(
+            username="itinerary-other",
+            password="Very-Long!Itinerary-Passphrase-2026",
+        )
+        self.client.force_authenticate(other)
+        self.assertEqual(
+            self.client.get(f"/api/v1/trips/itineraries/{saved.pk}/").status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get("/api/v1/trips/itineraries/").json()["results"],
+            [],
+        )
+        self.assertEqual(RouteMatrixSnapshot.objects.count(), 1)
+
+    def test_saved_surf_itinerary_preserves_skill_evaluation_identity(self):
+        start = self.spot("서핑 일정 출발")
+        end = self.spot("서핑 일정 종료")
+        candidate = self.spot("서핑 일정 후보")
+        condition = self.condition(
+            candidate,
+            activity="surf",
+            official_grade_detail="초중급자에게 적합",
+        )
+        self.route_matrix(start=start, end=end, candidate=candidate)
+        owner = User.objects.create_user(
+            username="surf-itinerary-owner",
+            password="Very-Long!Surf-Itinerary-Passphrase-2026",
+        )
+        self.client.force_authenticate(owner)
+        payload = self.itinerary_payload(
+            start=start,
+            end=end,
+            candidate=candidate,
+            save=True,
+        )
+        payload["recommendation"]["activity"] = "surf"
+        payload["recommendation"]["party"].update(
+            {
+                "ages": [12, 38],
+                "participant_skill_level": "beginner",
+            }
+        )
+
+        response = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["participant_skill_level"], "beginner")
+        saved = Itinerary.objects.get(pk=response.json()["saved_itinerary_id"])
+        self.assertEqual(saved.participant_profile, "general")
+        self.assertEqual(saved.participant_skill_level, "beginner")
+        self.assertEqual(
+            saved.request_snapshot["participant_skill_level"],
+            "beginner",
+        )
+        self.assertEqual(len(saved.water_evidence), 1)
+        row = saved.water_evidence[0]
+        self.assertEqual(row["participant_skill_level"], "beginner")
+        self.assertEqual(
+            row["condition_score_participant_skill_level"],
+            "unspecified",
+        )
+        self.assertEqual(row["condition_score_id"], condition.pk)
+        self.assertEqual(
+            saved.evidence_revalidation_reasons(at=timezone.now()),
+            (),
+        )
+
+    def test_saved_itinerary_rejects_deleted_or_mismatched_evidence_references(self):
+        start = self.spot("근거 무결성 출발")
+        end = self.spot("근거 무결성 종료")
+        candidate = self.spot("근거 무결성 후보")
+        self.condition(candidate)
+        self.route_matrix(start=start, end=end, candidate=candidate)
+        owner = User.objects.create_user(
+            username="evidence-integrity-owner",
+            password="Very-Long!Evidence-Integrity-Passphrase-2026",
+        )
+        self.client.force_authenticate(owner)
+        created = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            self.itinerary_payload(
+                start=start,
+                end=end,
+                candidate=candidate,
+                save=True,
+            ),
+            format="json",
+        )
+        self.assertEqual(created.status_code, 200)
+        saved = Itinerary.objects.get(pk=created.json()["saved_itinerary_id"])
+        score_id = saved.water_evidence[0]["condition_score_id"]
+        ConditionScore.objects.filter(pk=score_id).delete()
+
+        detail = self.client.get(f"/api/v1/trips/itineraries/{saved.pk}/")
+        transition = self.client.patch(
+            f"/api/v1/trips/itineraries/{saved.pk}/",
+            {"status": "accepted"},
+            format="json",
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn(
+            "WATER_EVIDENCE_REFERENCE_INVALID",
+            detail.json()["evidence_status"]["reason_codes"],
+        )
+        self.assertEqual(transition.status_code, 400)
+
+        # A syntactically valid but missing route ID is equally non-executable.
+        saved.water_evidence = []
+        saved.schedule = {"visits": []}
+        saved.route_evidence["snapshot_ids"] = [999_999]
+        saved.route_snapshot_ids = [999_999]
+        saved.save(
+            update_fields=(
+                "water_evidence",
+                "schedule",
+                "route_evidence",
+                "route_snapshot_ids",
+            )
+        )
+        reasons = saved.evidence_revalidation_reasons(at=timezone.now())
+        self.assertIn("ROUTE_EVIDENCE_REFERENCE_INVALID", reasons)
+
+    def test_family_swim_transition_uses_non_persisted_supervision_reconfirmation(self):
+        start = self.spot("가족 수영 출발")
+        end = self.spot("가족 수영 종료")
+        candidate = self.spot("가족 수영 후보")
+        self.condition(
+            candidate,
+            participant_profile="family",
+            safety="unknown",
+            decision="unknown",
+            score=None,
+            include_family_gates=True,
+        )
+        self.route_matrix(start=start, end=end, candidate=candidate)
+        owner = User.objects.create_user(
+            username="family-itinerary-owner",
+            password="Very-Long!Family-Itinerary-Passphrase-2026",
+        )
+        self.client.force_authenticate(owner)
+        payload = self.itinerary_payload(
+            start=start,
+            end=end,
+            candidate=candidate,
+            save=True,
+        )
+        payload["recommendation"]["party"].update(
+            {
+                "ages": [8, 38],
+                "adult_supervision_confirmed": True,
+            }
+        )
+        created = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(created.status_code, 200)
+        saved = Itinerary.objects.get(pk=created.json()["saved_itinerary_id"])
+        self.assertEqual(saved.participant_profile, "family")
+        self.assertNotIn("adult_supervision_confirmed", saved.request_snapshot)
+        self.assertTrue(
+            saved.water_evidence[0][
+                "session_context_reconfirmation_required"
+            ]
+        )
+
+        detail = self.client.get(f"/api/v1/trips/itineraries/{saved.pk}/")
+        self.assertIn(
+            "ADULT_SUPERVISION_RECONFIRMATION_REQUIRED",
+            detail.json()["evidence_status"]["reason_codes"],
+        )
+        without_confirmation = self.client.patch(
+            f"/api/v1/trips/itineraries/{saved.pk}/",
+            {"status": "accepted"},
+            format="json",
+        )
+        self.assertEqual(without_confirmation.status_code, 400)
+
+        accepted = self.client.patch(
+            f"/api/v1/trips/itineraries/{saved.pk}/",
+            {
+                "status": "accepted",
+                "adult_supervision_confirmed": True,
+            },
+            format="json",
+        )
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(accepted.json()["status"], "accepted")
+        self.assertNotIn("adult_supervision_confirmed", accepted.json())
+        self.assertIn(
+            "ADULT_SUPERVISION_RECONFIRMATION_REQUIRED",
+            accepted.json()["evidence_status"]["reason_codes"],
+        )
+
+        started = self.client.patch(
+            f"/api/v1/trips/itineraries/{saved.pk}/",
+            {
+                "status": "started",
+                "adult_supervision_confirmed": True,
+            },
+            format="json",
+        )
+        self.assertEqual(started.status_code, 200)
+        self.assertEqual(started.json()["status"], "started")
+
+    def test_saved_itinerary_cannot_advance_after_evidence_expiry(self):
+        start = self.spot("만료 출발")
+        end = self.spot("만료 종료")
+        candidate = self.spot("만료 후보")
+        self.condition(candidate)
+        self.route_matrix(start=start, end=end, candidate=candidate)
+        owner = User.objects.create_user(
+            username="expired-itinerary-owner",
+            password="Very-Long!Itinerary-Passphrase-2026",
+        )
+        self.client.force_authenticate(owner)
+        created = self.client.post(
+            "/api/v1/trips/itineraries/plan/",
+            self.itinerary_payload(
+                start=start,
+                end=end,
+                candidate=candidate,
+                save=True,
+            ),
+            format="json",
+        )
+        self.assertEqual(created.status_code, 200)
+        saved = Itinerary.objects.get(pk=created.json()["saved_itinerary_id"])
+        Itinerary.objects.filter(pk=saved.pk).update(
+            safety_revalidation_required_at=timezone.now() - timedelta(seconds=1),
+            route_revalidation_required_at=timezone.now() - timedelta(seconds=1),
+        )
+
+        detail = self.client.get(f"/api/v1/trips/itineraries/{saved.pk}/")
+        transition = self.client.patch(
+            f"/api/v1/trips/itineraries/{saved.pk}/",
+            {"status": "accepted"},
+            format="json",
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(
+            detail.json()["evidence_status"]["state"],
+            "revalidation_required",
+        )
+        self.assertIn(
+            "SAFETY_EVIDENCE_REVALIDATION_REQUIRED",
+            detail.json()["evidence_status"]["reason_codes"],
+        )
+        self.assertEqual(transition.status_code, 400)
+        self.assertIn("ITINERARY_REVALIDATION_REQUIRED", str(transition.json()))

@@ -82,3 +82,22 @@ class EvaluateWaterConditionsCommandTests(TestCase):
         self.assertIn("evaluations=0", stdout.getvalue())
         self.assertEqual(ObservationSnapshot.objects.count(), 0)
         self.assertEqual(ConditionScore.objects.count(), 0)
+
+    def test_family_profile_is_not_persisted_for_non_swim_activity(self) -> None:
+        stdout = StringIO()
+
+        call_command(
+            "evaluate_water_conditions",
+            "--spot",
+            str(self.spot.pk),
+            "--activity",
+            "surf",
+            "--profile",
+            "family",
+            "--at",
+            "2026-08-16T14:00:00+09:00",
+            stdout=stdout,
+        )
+
+        self.assertIn("evaluations=0", stdout.getvalue())
+        self.assertEqual(ConditionScore.objects.count(), 0)

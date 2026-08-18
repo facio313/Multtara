@@ -1,0 +1,18 @@
+# Production image overlay. Raspberry Pi deployments must always load this
+# file after docker-compose.yml. It removes every local build context and
+# accepts only release-manifest image references selected by pi-deploy.sh.
+services:
+  backend:
+    build: !reset null
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE immutable digest is required}
+    pull_policy: always
+
+  collector:
+    build: !reset null
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE immutable digest is required}
+    pull_policy: always
+
+  frontend:
+    build: !reset null
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE immutable digest is required}
+    pull_policy: always

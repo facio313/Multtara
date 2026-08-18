@@ -21,6 +21,13 @@ from .domain import (
     SafetyStatus,
 )
 from .profiles import PROFILES, ScoreProfile
+from .surf_skill import (
+    SURF_GRADE_DETAIL_MISSING,
+    SURF_OFFICIAL_GRADE_MISSING,
+    SURF_SKILL_LEVEL_REQUIRED,
+    SurfSkillEvidenceAssessment,
+    assess_surf_skill_evidence,
+)
 
 
 METHODOLOGY_VERSION = "water-index-v1.0.0"
@@ -65,9 +72,12 @@ _ALWAYS_EVALUATED_SIGNALS = frozenset(SAFETY_MAX_AGE_SECONDS)
 def safety_evidence_valid_until(metric: Metric) -> datetime | None:
     """Return the earliest provider or policy expiry for a safety metric.
 
-    An explicit provider validity interval never extends the activity policy's
-    maximum age. ``None`` means the metric has neither kind of expiry and must
-    not be treated as current safety evidence.
+    An observed value's explicit provider interval never extends the activity
+    policy's maximum age. A typed forecast is governed by its required provider
+    validity window: measuring observation freshness from the forecast issue
+    time would expire future evidence before its validity starts. ``None``
+    means the metric has no usable expiry and must not be treated as current
+    safety evidence.
     """
 
     if metric.name not in SAFETY_MAX_AGE_SECONDS:
@@ -76,7 +86,7 @@ def safety_evidence_valid_until(metric: Metric) -> datetime | None:
     if metric.valid_until is not None:
         expiries.append(metric.valid_until)
     max_age_seconds = SAFETY_MAX_AGE_SECONDS[metric.name]
-    if max_age_seconds is not None:
+    if max_age_seconds is not None and metric.mode.value != "forecast":
         expiries.append(metric.observed_at + timedelta(seconds=max_age_seconds))
     return min(expiries) if expiries else None
 
@@ -228,10 +238,28 @@ def _requirements(context: EvaluationContext) -> tuple[Requirement, ...]:
         and context.environment is Environment.MARINE_BEACH
     ):
         return (
+            Requirement(
+                "safety.access.required",
+                ("official_entry_status", "access_status"),
+                "ACCESS_STATUS_MISSING",
+            ),
             *outdoor_alerts,
             Requirement("safety.marine_hazard.required", ("marine_hazard_status",), "MARINE_HAZARD_STATUS_MISSING"),
         )
     return outdoor_alerts
+
+
+def required_safety_metric_groups(
+    context: EvaluationContext,
+) -> tuple[tuple[str, ...], ...]:
+    """Return the alternative metric groups required to clear safety gates.
+
+    Consumers that project a persisted evaluation at a later time must use the
+    same requirement grammar as the evaluator.  Keeping this as a small public
+    projection avoids duplicating activity/profile rules at API boundaries.
+    """
+
+    return tuple(requirement.any_of for requirement in _requirements(context))
 
 
 def _canonical(value: object) -> str:
@@ -605,7 +633,34 @@ def evaluate_water_index(
     """Evaluate one activity without ever converting uncertainty into safety."""
 
     profile = PROFILES[context.activity]
-    gates, safety_missing, safety_stale = _evaluate_requirements(observations, context)
+    surf_assessment: SurfSkillEvidenceAssessment | None = None
+    score_observations = observations
+    if context.activity is Activity.SURF:
+        surf_assessment = assess_surf_skill_evidence(
+            observations,
+            participant_skill_level=context.participant_skill_level,
+            at=context.at,
+        )
+        if not surf_assessment.matched:
+            # The raw KHOA evidence remains available for audit/re-evaluation,
+            # but an unscoped or mismatched grade cannot enter the suitability
+            # calculation for this participant identity.
+            score_observations = ObservationSet(
+                {
+                    name: metric
+                    for name, metric in observations.metrics.items()
+                    if name
+                    not in {
+                        "official_activity_grade",
+                        "official_activity_score",
+                    }
+                }
+            )
+
+    safety_gates, safety_missing, safety_stale = _evaluate_requirements(
+        observations,
+        context,
+    )
     (
         score,
         score_range,
@@ -614,11 +669,38 @@ def evaluate_water_index(
         contributions,
         factor_missing,
         factor_stale,
-    ) = _evaluate_score(observations, context, profile)
+    ) = _evaluate_score(score_observations, context, profile)
 
-    has_block = any(gate.severity is RuleSeverity.BLOCK for gate in gates)
-    has_unknown = any(gate.severity is RuleSeverity.UNKNOWN for gate in gates)
-    has_caution = any(gate.severity is RuleSeverity.CAUTION for gate in gates)
+    suitability_gates: tuple[RuleResult, ...] = ()
+    if surf_assessment is not None and not surf_assessment.matched:
+        factor_missing.discard("official_activity_grade")
+        reason_code = surf_assessment.reason_code
+        if reason_code == SURF_SKILL_LEVEL_REQUIRED:
+            metric_name = "participant_skill_level"
+            factor_missing.add(metric_name)
+        elif reason_code == SURF_OFFICIAL_GRADE_MISSING:
+            metric_name = "official_activity_grade"
+            factor_missing.add(metric_name)
+        elif reason_code == SURF_GRADE_DETAIL_MISSING:
+            metric_name = "official_grade_detail"
+            factor_missing.add(metric_name)
+        else:
+            metric_name = "official_grade_detail"
+            factor_stale.add(metric_name)
+        suitability_gates = (
+            RuleResult(
+                rule_id="suitability.surf.skill_grade",
+                severity=RuleSeverity.UNKNOWN,
+                metric_name=metric_name,
+                reason_code=reason_code,
+            ),
+        )
+
+    # Suitability uncertainty must suppress the score/decision without claiming
+    # that independently complete hazard gates are themselves unknown.
+    has_block = any(gate.severity is RuleSeverity.BLOCK for gate in safety_gates)
+    has_unknown = any(gate.severity is RuleSeverity.UNKNOWN for gate in safety_gates)
+    has_caution = any(gate.severity is RuleSeverity.CAUTION for gate in safety_gates)
 
     if has_block:
         safety_status = SafetyStatus.STOP
@@ -660,6 +742,15 @@ def evaluate_water_index(
         public_score = score
         public_score_range = score_range
 
+    if surf_assessment is not None and not surf_assessment.matched:
+        # A numeric uncertainty interval is still a participant suitability
+        # claim. Do not publish [0, 100] (or any narrower range) when the KHOA
+        # GrdCn evidence is not valid for this exact skill identity.
+        public_score = None
+        public_score_range = None
+        if safety_status is SafetyStatus.CLEAR:
+            decision = Decision.UNKNOWN
+
     return IndexResult(
         methodology_version=METHODOLOGY_VERSION,
         activity=context.activity,
@@ -671,7 +762,7 @@ def evaluate_water_index(
         confidence=confidence,
         coverage=coverage,
         evaluated_at=context.at,
-        gates=tuple(gates),
+        gates=(*safety_gates, *suitability_gates),
         contributions=tuple(contributions),
         missing_metrics=tuple(sorted(safety_missing | factor_missing)),
         stale_or_conflicting_metrics=tuple(sorted(safety_stale | factor_stale)),
