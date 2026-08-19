@@ -76,7 +76,14 @@ KHOA 추가(바다누리 후속, **무료**, API별 활용신청): 해수욕지�
 
 인증: Django **세션 쿠키**(httpOnly, SameSite=Lax) + **세션 CSRF**. JWT/로컬스토리지 토큰 없음. 비밀번호 Argon2, 최소 12자, 실패 5회 잠금. 소셜 로그인은 아직 없음.  
 Passport: `POST /api/v1/passport/checkin/` (로그인 필요, 장소당 1회). **위도·경도 필수**, 5km 안만 허용. 선택 `eco_action` 또는 `POST /api/v1/passport/eco/`.  
-Safety card: `POST /api/v1/safety-card/` (로그인 필요). 컨디션 스냅샷을 저장하고 기기에도 남겨 오프라인으로 본다.
+Safety card: `POST /api/v1/safety-card/` (로그인 필요). 컨디션 스냅샷을 저장하고 기기에도 남겨 오프라인으로 본다.  
+물소리: `GET /api/v1/spots/{id}/sound/` · `GET /api/v1/spots/sounds/` — 파고·풍속·강수로 ASMR 0~100 예측, `SoundProfile` 저장. 녹음 URL이 없으면 프론트가 절차적 백색소음 재생.  
+골든 캘린더: `GET /api/v1/spots/{id}/golden-moments/` · `GET /api/v1/spots/golden-calendar/` — 만조(조석+매일 50분 이동)와 일몰 ±30분. `GoldenMoment` 저장.  
+장기 통계: `GET /api/v1/spots/{id}/analytics/` — 일별 `WaterCondition` 이력 평균·수온 분위·수질 추이. 하루 1행 스냅샷.  
+추억 재현: `GET`/`POST /api/v1/memories/` · `GET /api/v1/memories/{id}/replay/` — 사진 업로드 또는 체크인 시 스냅샷. 비전 AI 없이 당시 vs 현재 비교.  
+동행: `GET /api/v1/spots/{id}/companion/?lat=&lng=&transport=` — 파고/간조/수위/일몰 ETA 규칙 조언, LLM 없음.  
+물멍 지도: `GET /api/v1/spots/mulmung/?mood=static|dynamic`.  
+콘텐츠 재계산: `python manage.py compute_golden`.
 
 ---
 

@@ -1,6 +1,7 @@
 import math
 
 from django.db.models import Avg, OuterRef, Prefetch, Subquery
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets
 from rest_framework.decorators import action
@@ -11,8 +12,12 @@ from apps.conditions.models import ConditionScore, CrowdLevel, WaterCondition
 from apps.conditions.serializers import ConditionScoreSerializer, WaterConditionSerializer
 from apps.forecasts.models import WaterForecast
 from apps.forecasts.serializers import WaterForecastSerializer
+from services.asmr_score import asmr_payload, sound_library
+from services.companion import companion_payload
 from services.concierge import concierge_spots
+from services.golden_moment import calendar_for_month, golden_moments, persist_golden_moments
 from services.recommend import recommend_spots
+from services.spot_analytics import analytics_payload
 from services.spot_extras import quality_trust as quality_trust_payload
 from .models import WaterSpot
 from .serializers import WaterSpotSerializer
@@ -25,6 +30,9 @@ ACTIVITY_SPOT_TYPES = {
     "onsen": ("hotspring",),
     "rafting": ("riverside", "valley"),
 }
+
+STATIC_MULMUNG = {"lake", "hotspring", "pool"}
+DYNAMIC_MULMUNG = {"waterfall", "valley", "waterpark", "riverside"}
 
 
 class SpotPagination(PageNumberPagination):
@@ -268,3 +276,76 @@ class WaterSpotViewSet(viewsets.ReadOnlyModelViewSet):
             key=lambda row: (order.get((row.get("safety") or {}).get("level"), 9), row["name"]),
         )
         return Response(rows)
+
+    def _mulmung_mood(self, spot):
+        if spot.type in STATIC_MULMUNG:
+            return "static"
+        if spot.type in DYNAMIC_MULMUNG:
+            return "dynamic"
+        condition = next(iter(spot.conditions.all()), None)
+        wave = getattr(condition, "wave_height", None) or 0
+        if spot.type == "sea":
+            return "dynamic" if wave >= 0.8 else "static"
+        return "static"
+
+    @action(detail=True, methods=["get"])
+    def sound(self, request, pk=None):
+        return Response(asmr_payload(self.get_object()))
+
+    @action(detail=False, methods=["get"])
+    def sounds(self, request):
+        return Response(sound_library())
+
+    @action(detail=True, methods=["get"], url_path="golden-moments")
+    def golden_moment_list(self, request, pk=None):
+        spot = self.get_object()
+        persist_golden_moments(spot)
+        return Response(golden_moments(spot))
+
+    @action(detail=False, methods=["get"], url_path="golden-calendar")
+    def golden_calendar(self, request):
+        today = timezone.localdate()
+        year, month = today.year, today.month
+        raw = request.query_params.get("month") or ""
+        if raw:
+            try:
+                if "-" in raw:
+                    year_s, month_s = raw.split("-")[:2]
+                    year, month = int(year_s), int(month_s)
+                else:
+                    month = int(raw)
+            except ValueError:
+                pass
+        return Response(calendar_for_month(year, month))
+
+    @action(detail=True, methods=["get"])
+    def analytics(self, request, pk=None):
+        return Response(analytics_payload(self.get_object()))
+
+    @action(detail=True, methods=["get"])
+    def companion(self, request, pk=None):
+        spot = self.get_object()
+        try:
+            lat = float(request.query_params["lat"]) if request.query_params.get("lat") else None
+            lng = float(request.query_params["lng"]) if request.query_params.get("lng") else None
+        except (TypeError, ValueError):
+            lat = lng = None
+        transport = request.query_params.get("transport") or "car"
+        return Response(
+            companion_payload(spot, origin_lat=lat, origin_lng=lng, transport=transport)
+        )
+
+    @action(detail=False, methods=["get"])
+    def mulmung(self, request):
+        mood = request.query_params.get("mood")
+        matches = []
+        for spot in self.filter_queryset(self.get_queryset()):
+            current = self._mulmung_mood(spot)
+            if mood in {"static", "dynamic"} and current != mood:
+                continue
+            matches.append(spot)
+        page = self.paginate_queryset(matches)
+        serializer = self.get_serializer(page if page is not None else matches, many=True)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)

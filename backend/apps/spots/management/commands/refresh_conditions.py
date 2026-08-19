@@ -4,6 +4,7 @@ from django.core.management.base import BaseCommand
 
 from apps.spots.management.commands._common import add_spot_arguments, iter_spots
 from services.conditions_sync import sync_marine, sync_quality, sync_tour, sync_weather
+from services.persist_content import persist_spot_content
 from services.public_data import PublicDataError
 from services.water_forecast import upsert_forecast_for_spot
 from services.water_index import upsert_scores_for_spot
@@ -58,5 +59,6 @@ class Command(BaseCommand):
                 continue
             upsert_scores_for_spot(spot)
             upsert_forecast_for_spot(spot)
+            persist_spot_content(spot)
 
         self.stdout.write(self.style.SUCCESS(f"Refreshed {len(spots)} spots."))

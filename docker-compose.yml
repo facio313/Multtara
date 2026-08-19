@@ -40,6 +40,8 @@ services:
       - KHOA_API_KEY=${KHOA_API_KEY:-}
     ports:
       - "8000:8000"
+    volumes:
+      - media_data:/app/media
 
   refresher:
     build: ./backend
@@ -70,4 +72,6 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  media_data:
     driver: local

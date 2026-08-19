@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from apps.spots.models import WaterSpot
 from .models import Passport, UserActivity
 from .stamps import passport_payload, stamp_payload, within_checkin_range
+from services.memory_replay import record_memory
 
 
 class CheckinThrottle(ScopedRateThrottle):
@@ -81,6 +82,7 @@ class PassportCheckinView(APIView):
             eco_action=serializer.validated_data.get("eco_action") or "",
         )
         UserActivity.objects.create(user=request.user, spot=spot, action="visited")
+        record_memory(request.user, spot)
         payload = passport_payload(request.user)
         payload["stamp"] = stamp_payload(stamp)
         return Response(payload, status=201)

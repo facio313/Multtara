@@ -24,6 +24,9 @@ export async function refreshCsrf() {
 }
 
 api.interceptors.request.use((config) => {
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    delete config.headers['Content-Type'];
+  }
   const method = (config.method || 'get').toLowerCase();
   if (csrfToken && ['post', 'put', 'patch', 'delete'].includes(method)) {
     config.headers['X-CSRFToken'] = csrfToken;

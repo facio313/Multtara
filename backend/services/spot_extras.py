@@ -1,17 +1,28 @@
-"""Code-only extras: facilities, catch, onsen, crowd, ASMR, golden tide, analytics."""
+"""Code-only extras: facilities, catch, onsen, crowd, and quality trust."""
 
 from __future__ import annotations
-
-import math
-from datetime import date, time
-from typing import Any
 
 from django.utils import timezone
 
 from apps.conditions.models import WaterCondition
-from apps.forecasts.models import WaterForecast
 from apps.spots.models import CatchGuide, HotspringDetail, NearbyFacility, WaterSpot
 from apps.users.models import UserActivity
+from services.asmr_score import asmr_payload
+from services.golden_moment import approximate_sunset, golden_moments
+from services.spot_analytics import analytics_payload
+
+__all__ = [
+    "analytics_payload",
+    "approximate_sunset",
+    "asmr_payload",
+    "catch_payload",
+    "estimate_crowd",
+    "facilities_payload",
+    "golden_moments",
+    "hotspring_payload",
+    "quality_trust",
+    "seed_spot_extras",
+]
 
 FACILITY_LABELS = {
     "shower": "샤워장",
@@ -59,15 +70,6 @@ DEFAULT_CATCH = {
 DEFAULT_HOTSPRING = {
     "minerals": "나트륨, 탄산, 황",
     "benefits": "피부, 피로, 신경통",
-}
-
-SOUND_TYPE = {
-    "sea": "wave",
-    "tidal_flat": "tidal",
-    "valley": "valley",
-    "waterfall": "waterfall",
-    "lake": "rain",
-    "riverside": "valley",
 }
 
 
@@ -151,122 +153,6 @@ def estimate_crowd(spot: WaterSpot, stored: dict | None = None) -> dict:
         "recommended_time": rec,
         "parking_availability": parking,
         "source": "estimated",
-    }
-
-
-def asmr_payload(spot: WaterSpot) -> dict:
-    condition = _latest_condition(spot)
-    sound = SOUND_TYPE.get(spot.type, "wave")
-    wave = getattr(condition, "wave_height", None) or 0
-    wind = getattr(condition, "wind_speed", None) or 0
-    rain = getattr(condition, "rainfall_recent", None) or 0
-    if sound == "wave":
-        score = min(100, 40 + wave * 28 + wind * 4)
-    elif sound == "valley":
-        score = min(100, 55 + rain * 1.2)
-    elif sound == "waterfall":
-        score = min(100, 70 + rain * 0.8)
-    else:
-        score = min(100, 50 + wind * 3)
-    return {"sound_type": sound, "asmr_score": round(score), "audio_url": ""}
-
-
-def _parse_clock(value: Any) -> time | None:
-    text = str(value or "").strip()
-    if len(text) >= 4 and ":" in text:
-        try:
-            hour, minute = text.split(":")[:2]
-            return time(int(hour), int(minute[:2]))
-        except ValueError:
-            return None
-    return None
-
-
-def approximate_sunset(lat: float, lng: float, day: date) -> time:
-    n = day.timetuple().tm_yday
-    decl = math.radians(23.44 * math.sin(math.radians((360 / 365) * (n - 81))))
-    lat_r = math.radians(lat)
-    cos_ha = -math.tan(lat_r) * math.tan(decl)
-    cos_ha = max(-1.0, min(1.0, cos_ha))
-    ha = math.degrees(math.acos(cos_ha))
-    solar = 12 + ha / 15 - (lng / 15)
-    kst = solar + 9
-    kst = kst % 24
-    hour = int(kst)
-    minute = int((kst - hour) * 60)
-    return time(hour, max(0, min(59, minute)))
-
-
-def golden_moments(spot: WaterSpot, condition: WaterCondition | None = None) -> list[dict]:
-    condition = condition or _latest_condition(spot)
-    schedule = getattr(condition, "tide_schedule", None) or {}
-    highs = schedule.get("high_tide") or []
-    today = timezone.localdate()
-    sunset = approximate_sunset(spot.lat, spot.lng, today)
-    sunset_min = sunset.hour * 60 + sunset.minute
-    rows = []
-    for raw in highs:
-        clock = _parse_clock(raw)
-        if clock is None:
-            continue
-        delta = abs((clock.hour * 60 + clock.minute) - sunset_min)
-        if delta <= 90:
-            rows.append(
-                {
-                    "date": today.isoformat(),
-                    "time": clock.strftime("%H:%M"),
-                    "sunset": sunset.strftime("%H:%M"),
-                    "type": "high_tide_sunset",
-                    "label": "만조×일몰",
-                }
-            )
-    if not rows and spot.type in {"sea", "tidal_flat", "lake"}:
-        rows.append(
-            {
-                "date": today.isoformat(),
-                "time": sunset.strftime("%H:%M"),
-                "sunset": sunset.strftime("%H:%M"),
-                "type": "sunset",
-                "label": "일몰",
-            }
-        )
-    return rows[:2]
-
-
-def analytics_payload(spot: WaterSpot) -> dict:
-    temps = [
-        row.water_temp
-        for row in WaterCondition.objects.filter(spot=spot).exclude(water_temp=None)[:60]
-    ]
-    grades = list(
-        WaterCondition.objects.filter(spot=spot)
-        .exclude(water_quality_grade="")
-        .order_by("-fetched_at")
-        .values_list("water_quality_grade", flat=True)[:8]
-    )
-    forecasts = list(
-        WaterForecast.objects.filter(spot=spot).order_by("forecast_date").values_list(
-            "forecast_date", "predicted_index"
-        )
-    )
-    best_season = "여름" if spot.type in {"sea", "waterpark", "pool"} else "가을"
-    if forecasts:
-        best = max(forecasts, key=lambda item: item[1] or 0)
-        month = best[0].month
-        best_season = {12: "겨울", 1: "겨울", 2: "겨울", 3: "봄", 4: "봄", 5: "봄", 6: "여름", 7: "여름", 8: "여름"}.get(
-            month, "가을"
-        )
-    trend = ""
-    if len(grades) >= 2 and grades[0] != grades[-1]:
-        trend = "개선" if str(grades[0]) < str(grades[-1]) else "주의"
-    elif grades:
-        trend = "유지"
-    avg = round(sum(temps) / len(temps), 1) if temps else None
-    return {
-        "avg_water_temp": avg,
-        "quality_trend": trend,
-        "crowd_trend": "주말 혼잡" if spot.type in {"sea", "waterpark"} else "보통",
-        "best_season": best_season,
     }
 
 

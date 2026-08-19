@@ -1,0 +1,24 @@
+.sound-player {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.sound-player .auth-submit {
+  border: 0;
+  background: var(--ink);
+  color: var(--on-ink);
+  border-radius: 10px;
+  padding: 0.65rem 0.95rem;
+  font-weight: 650;
+}
+
+.sound-player .auth-submit.is-playing {
+  background: var(--accent);
+}
+
+.sound-player.is-compact .auth-submit {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.88rem;
+}

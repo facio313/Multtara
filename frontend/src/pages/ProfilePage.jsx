@@ -47,6 +47,7 @@ const ProfilePage = () => {
     safetyCards,
     itineraries,
     itineraryPlan,
+    memories,
     ready,
     login,
     register,
@@ -54,6 +55,7 @@ const ProfilePage = () => {
     changePassword,
     updateProfile,
     createItinerary,
+    replayMemory,
   } = useAuthStore();
   const [mode, setMode] = useState('login');
   const [authForm, setAuthForm] = useState(EMPTY_AUTH);
@@ -68,6 +70,8 @@ const ProfilePage = () => {
     budget: '',
     activity: '',
   });
+
+  const [replay, setReplay] = useState(null);
 
   useEffect(() => {
     setMessage('');
@@ -468,6 +472,45 @@ const ProfilePage = () => {
             </ul>
           )}
           {itineraryPlan?.note && <p className="muted">{itineraryPlan.note}</p>}
+        </section>
+      )}
+
+      {memories.length > 0 && (
+        <section>
+          <h2 className="section-title">추억 재현</h2>
+          <ul className="stamp-list">
+            {memories.map((row) => (
+              <li key={row.id}>
+                <button
+                  type="button"
+                  className="text-back"
+                  onClick={async () => {
+                    const result = await replayMemory(row.id);
+                    if (result.ok) setReplay(result.data);
+                  }}
+                >
+                  <strong>{row.name}</strong>
+                  <em>{row.estimated_location || row.region}</em>
+                </button>
+              </li>
+            ))}
+          </ul>
+          {replay && (
+            <div className="replay-compare">
+              <p>{replay.caption}</p>
+              <div className="replay-grid">
+                <figure>
+                  {replay.then.photo_url ? <img src={replay.then.photo_url} alt="당시" /> : null}
+                  <figcaption>당시 {replay.then.water_temp != null ? `${replay.then.water_temp}°C` : ''}</figcaption>
+                </figure>
+                <figure>
+                  {replay.now.photo_url ? <img src={replay.now.photo_url} alt="현재" /> : null}
+                  <figcaption>현재 {replay.now.water_temp != null ? `${replay.now.water_temp}°C` : ''}</figcaption>
+                </figure>
+              </div>
+              {replay.now.headline && <p className="muted">{replay.now.headline}</p>}
+            </div>
+          )}
         </section>
       )}
 

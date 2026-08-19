@@ -2,9 +2,11 @@
 PongDang (퐁당) — Root URL configuration.
 """
 
+from django.conf import settings
 from django.contrib import admin
 from django.http import JsonResponse
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve
 
 
 def health_check(request):
@@ -16,6 +18,7 @@ api_v1_patterns = [
     path("passport/", include("apps.users.passport_urls")),
     path("safety-card/", include("apps.trips.safety_urls")),
     path("itinerary/", include("apps.trips.itinerary_urls")),
+    path("memories/", include("apps.content.urls")),
     path("spots/", include("apps.spots.urls")),
     path("conditions/", include("apps.conditions.urls")),
     path("forecasts/", include("apps.forecasts.urls")),
@@ -25,4 +28,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/", include((api_v1_patterns, "api-v1"))),
     path("api/health/", health_check),
+    re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
 ]

@@ -4,7 +4,9 @@ import { ArrowLeft } from 'lucide-react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import api from '../services/api';
 import SpotPhoto from '../components/SpotPhoto';
+import WaterSoundPlayer from '../components/WaterSoundPlayer';
 import useAuthStore from '../stores/authStore';
+import useGeolocation from '../hooks/useGeolocation';
 import { scoreLabel, scoreTone } from '../utils/scoreColor';
 import { ACTIVITY_LABELS, spotTypeLabel } from '../utils/spotType';
 import { formatMinutes, safetyTone } from '../utils/twin';
@@ -18,7 +20,7 @@ function formatValue(value, unit) {
 }
 
 const QUALITY_LABELS = { 1: '좋음', 2: '보통', 3: '나쁨' };
-const RISK_LABELS = { low: '낮음', medium: '보통', high: '높음' };
+const RISK_LABELS = { low: '관심', medium: '주의', high: '위험', 관심: '관심', 주의: '주의', 위험: '위험', 경계: '위험' };
 const MARINE_INDEX_LABELS = { beach: '해수욕', surf: '서핑', mudflat: '갯벌', rip: '이안류' };
 const CROWD_LABELS = { high: '혼잡', medium: '보통', low: '여유' };
 const SOUND_LABELS = { wave: '파도', valley: '계곡', waterfall: '폭포', tidal: '갯벌', rain: '비' };
@@ -36,9 +38,12 @@ const SpotDetailPage = () => {
   const checkin = useAuthStore((state) => state.checkin);
   const logEco = useAuthStore((state) => state.logEco);
   const saveSafetyCard = useAuthStore((state) => state.saveSafetyCard);
+  const saveMemory = useAuthStore((state) => state.saveMemory);
   const safetyCards = useAuthStore((state) => state.safetyCards);
+  const position = useGeolocation();
   const [spot, setSpot] = useState(null);
   const [forecast, setForecast] = useState([]);
+  const [companion, setCompanion] = useState(null);
   const [loading, setLoading] = useState(true);
   const [checkinMessage, setCheckinMessage] = useState('');
   const [checkingIn, setCheckingIn] = useState(false);
@@ -47,6 +52,9 @@ const SpotDetailPage = () => {
   const [shareWith, setShareWith] = useState('');
   const [ecoChecked, setEcoChecked] = useState(false);
   const [ecoBusy, setEcoBusy] = useState(false);
+  const [memoryFile, setMemoryFile] = useState(null);
+  const [memoryMessage, setMemoryMessage] = useState('');
+  const [memoryBusy, setMemoryBusy] = useState(false);
 
   useEffect(() => {
     const fetchSpot = async () => {
@@ -65,6 +73,32 @@ const SpotDetailPage = () => {
     };
     fetchSpot();
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadCompanion = () => {
+      const params = {};
+      if (position?.lat != null && position?.lng != null) {
+        params.lat = position.lat;
+        params.lng = position.lng;
+        params.transport = 'car';
+      }
+      api
+        .get(`/spots/${id}/companion/`, { params })
+        .then((response) => {
+          if (!cancelled) setCompanion(response.data);
+        })
+        .catch(() => {
+          if (!cancelled) setCompanion(null);
+        });
+    };
+    loadCompanion();
+    const timer = setInterval(loadCompanion, 120000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [id, position]);
 
   if (loading) {
     return <div className="page"><p className="empty">불러오는 중</p></div>;
@@ -121,6 +155,16 @@ const SpotDetailPage = () => {
     setCardMessage(result.message);
   };
 
+  const submitMemory = async (event) => {
+    event.preventDefault();
+    setMemoryBusy(true);
+    setMemoryMessage('');
+    const result = await saveMemory(spot.id, memoryFile);
+    setMemoryBusy(false);
+    setMemoryMessage(result.ok ? '추억을 남겼습니다. 내 정보에서 과거와 현재를 비교하세요.' : result.message);
+    if (result.ok) setMemoryFile(null);
+  };
+
   return (
     <div className="page detail-page">
       <button className="text-back" onClick={() => navigate(-1)}>
@@ -150,6 +194,21 @@ const SpotDetailPage = () => {
           <p className="muted">{scoreLabel(swimScore)} · 물놀이 지수</p>
         </div>
       </header>
+
+      {companion?.headline && (
+        <section className={`companion-card is-${safetyTone(companion.safety?.level)}`}>
+          <h2 className="section-title">지금 동행</h2>
+          <p className="companion-head">{companion.headline}</p>
+          <ul className="companion-list">
+            {(companion.advice || []).slice(0, 4).map((row) => (
+              <li key={`${row.kind}-${row.text}`}>{row.text}</li>
+            ))}
+          </ul>
+          {companion.eta_minutes != null && (
+            <p className="muted">예상 이동 {companion.eta_minutes}분 · 일몰 {companion.sunset}</p>
+          )}
+        </section>
+      )}
 
       <section className="passport-checkin">
         {!user && (
@@ -358,7 +417,7 @@ const SpotDetailPage = () => {
         </section>
       )}
 
-      {spot.asmr && (
+          {spot.asmr && (
         <section>
           <h2 className="section-title">물소리</h2>
           <dl className="facts">
@@ -370,13 +429,30 @@ const SpotDetailPage = () => {
               <dt>ASMR</dt>
               <dd>{spot.asmr.asmr_score ?? '-'}</dd>
             </div>
+            <div>
+              <dt>분위기</dt>
+              <dd>{spot.asmr.mood || '-'}</dd>
+            </div>
           </dl>
+          {spot.asmr.blurb && <p className="muted tide">{spot.asmr.blurb}</p>}
+          {spot.asmr.audio_url ? (
+            <audio controls src={spot.asmr.audio_url}>
+              소리를 재생할 수 없습니다.
+            </audio>
+          ) : (
+            <WaterSoundPlayer
+              soundType={spot.asmr.sound_type}
+              score={spot.asmr.asmr_score}
+              label={SOUND_LABELS[spot.asmr.sound_type]}
+            />
+          )}
         </section>
       )}
 
-      {spot.analytics && (
+          {spot.analytics && (
         <section>
           <h2 className="section-title">한눈에</h2>
+          {spot.analytics.headline && <p className="muted">{spot.analytics.headline}</p>}
           <dl className="facts">
             <div>
               <dt>평균 수온</dt>
@@ -390,7 +466,41 @@ const SpotDetailPage = () => {
               <dt>추천 계절</dt>
               <dd>{spot.analytics.best_season || '-'}</dd>
             </div>
+            <div>
+              <dt>혼잡 추이</dt>
+              <dd>{spot.analytics.crowd_trend || '-'}</dd>
+            </div>
           </dl>
+          {spot.analytics.series?.length > 1 && (
+            <div className="chart-wrap">
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={spot.analytics.series} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
+                  <XAxis dataKey="month" stroke="#a3a3a3" tickLine={false} axisLine={false} />
+                  <YAxis stroke="#a3a3a3" tickLine={false} axisLine={false} />
+                  <Tooltip />
+                  <Area type="monotone" dataKey="avg_water_temp" stroke="#2b2eff" fill="#ececff" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </section>
+      )}
+
+      {user && (
+        <section>
+          <h2 className="section-title">추억 남기기</h2>
+          <p className="muted">사진을 올리면 나중에 현재 모습과 비교합니다. 위치는 이 장소로 저장됩니다.</p>
+          <form className="memory-form" onSubmit={submitMemory}>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={(event) => setMemoryFile(event.target.files?.[0] || null)}
+            />
+            <button type="submit" className="auth-submit" disabled={memoryBusy}>
+              {memoryBusy ? '저장 중' : '추억 저장'}
+            </button>
+            {memoryMessage && <p className="muted">{memoryMessage}</p>}
+          </form>
         </section>
       )}
 

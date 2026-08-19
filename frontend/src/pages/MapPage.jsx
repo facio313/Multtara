@@ -19,6 +19,12 @@ const TYPE_FILTERS = [
   { id: 'lake', label: '호수' },
 ];
 
+const MOOD_FILTERS = [
+  { id: '', label: '무드 전체' },
+  { id: 'static', label: '정적 물멍' },
+  { id: 'dynamic', label: '동적 물멍' },
+];
+
 const LAYERS = [
   { id: 'index', label: '지수' },
   { id: 'temp', label: '수온' },
@@ -30,17 +36,20 @@ const MapPage = () => {
   const [search, setSearch] = useState('');
   const [spotType, setSpotType] = useState('');
   const [petsOnly, setPetsOnly] = useState(false);
+  const [mood, setMood] = useState('');
   const [layer, setLayer] = useState('index');
   const [mapEngine, setMapEngine] = useState(() => (kakaoMapKey() ? 'kakao' : 'leaflet'));
 
   useEffect(() => {
     const fetchSpots = async () => {
       try {
-        const response = await api.get('/spots/', {
+        const path = mood ? '/spots/mulmung/' : '/spots/';
+        const response = await api.get(path, {
           params: {
             page_size: 100,
             ...(spotType ? { type: spotType } : {}),
             ...(petsOnly ? { pet_allowed: true } : {}),
+            ...(mood ? { mood } : {}),
           },
         });
         setSpots(unwrapList(response.data));
@@ -53,7 +62,7 @@ const MapPage = () => {
     };
     setLoading(true);
     fetchSpots();
-  }, [spotType, petsOnly]);
+  }, [spotType, petsOnly, mood]);
 
   const filteredSpots = useMemo(
     () =>
@@ -101,6 +110,17 @@ const MapPage = () => {
           >
             반려동물
           </button>
+        </div>
+        <div className="chip-row">
+          {MOOD_FILTERS.map((item) => (
+            <button
+              key={item.id || 'mood-all'}
+              className={`chip ${mood === item.id ? 'active' : ''}`}
+              onClick={() => setMood(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
         <div className="chip-row">
           {LAYERS.map((item) => (

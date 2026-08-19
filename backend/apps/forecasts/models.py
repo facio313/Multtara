@@ -16,7 +16,15 @@ class WaterForecast(models.Model):
         unique_together = ("spot", "forecast_date")
 
 class GoldenMoment(models.Model):
-    spot = models.ForeignKey('spots.WaterSpot', on_delete=models.CASCADE)
+    spot = models.ForeignKey(
+        "spots.WaterSpot",
+        on_delete=models.CASCADE,
+        related_name="golden_moments",
+    )
     date = models.DateField()
     time = models.TimeField()
     type = models.CharField(max_length=100)
+
+    class Meta:
+        ordering = ["date", "time"]
+        unique_together = ("spot", "date", "type")

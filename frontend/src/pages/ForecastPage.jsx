@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { scoreLabel, scoreTone } from '../utils/scoreColor';
 import './ForecastPage.css';
@@ -12,6 +13,7 @@ const ForecastPage = () => {
   const [message, setMessage] = useState('');
   const [bestDate, setBestDate] = useState('');
   const [source, setSource] = useState('');
+  const [golden, setGolden] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,6 +46,10 @@ const ForecastPage = () => {
       }
     };
     load();
+    api
+      .get('/spots/golden-calendar/')
+      .then((response) => setGolden(Array.isArray(response.data) ? response.data : []))
+      .catch(() => setGolden([]));
   }, [selectedRegion]);
 
   return (
@@ -93,6 +99,26 @@ const ForecastPage = () => {
           </div>
         ))}
       </div>
+
+      {golden.length > 0 && (
+        <section>
+          <h2 className="section-title">이번 달 인생샷</h2>
+          <p className="muted">만조와 일몰이 30분 안으로 겹치는 날입니다.</p>
+          <ul className="spot-rows">
+            {golden.slice(0, 12).map((row) => (
+              <li key={`${row.spot_id}-${row.date}-${row.time}`} className="spot-row">
+                <span className="spot-copy">
+                  <strong>{row.date} {row.time}</strong>
+                  <em>
+                    <Link to={`/spot/${row.spot_id}`}>{row.name}</Link> · {row.region}
+                  </em>
+                </span>
+                <span className="muted">{row.label}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </div>
   );
 };

@@ -203,6 +203,41 @@
   font-weight: 650;
 }
 
+.companion-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+}
+
+.companion-card.is-danger {
+  border-color: var(--danger);
+}
+
+.companion-card.is-caution {
+  background: var(--accent-soft);
+}
+
+.companion-head {
+  margin: 0.35rem 0 0.6rem;
+  font-size: 1.05rem;
+}
+
+.companion-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.memory-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
 @media (max-width: 768px) {
   .detail-photo {
     height: 200px;

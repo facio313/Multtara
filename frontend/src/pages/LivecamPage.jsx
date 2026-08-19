@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { unwrapList } from '../services/api';
 import SpotPhoto from '../components/SpotPhoto';
+import WaterSoundPlayer from '../components/WaterSoundPlayer';
 import { scoreTone } from '../utils/scoreColor';
 import { spotTypeLabel } from '../utils/spotType';
 import './LivecamPage.css';
@@ -18,6 +19,7 @@ const FILTERS = [
 const LivecamPage = () => {
   const [filter, setFilter] = useState('전체');
   const [cams, setCams] = useState([]);
+  const [sounds, setSounds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [watching, setWatching] = useState(null);
 
@@ -27,6 +29,10 @@ const LivecamPage = () => {
       .then((response) => setCams(unwrapList(response.data)))
       .catch(() => setCams([]))
       .finally(() => setLoading(false));
+    api
+      .get('/spots/sounds/')
+      .then((response) => setSounds(Array.isArray(response.data) ? response.data : []))
+      .catch(() => setSounds([]));
   }, []);
 
   const selected = FILTERS.find((item) => item.id === filter) || FILTERS[0];
@@ -110,6 +116,34 @@ const LivecamPage = () => {
         })}
       </div>
 
+      {sounds.length > 0 && (
+        <section>
+          <h2 className="section-title">물소리 라이브러리</h2>
+          <p className="muted">오늘 파고·풍속으로 예측한 ASMR 지수입니다.</p>
+          <ul className="spot-rows">
+            {sounds.slice(0, 8).map((row) => (
+              <li key={row.id} className="spot-row">
+                <span className="spot-copy">
+                  <strong>
+                    <Link to={`/spot/${row.id}`}>{row.name}</Link>
+                  </strong>
+                  <em>
+                    {row.region} · {row.sound_label} · {row.mood}
+                  </em>
+                </span>
+                <span className={`score is-${scoreTone(row.asmr_score)}`}>{row.asmr_score}</span>
+                <WaterSoundPlayer
+                  compact
+                  soundType={row.sound_type}
+                  score={row.asmr_score}
+                  label="듣기"
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {watching?.livecam?.embed_url && (
         <div className="cam-theater" role="dialog" aria-label="라이브 물멍">
           <iframe
@@ -124,6 +158,14 @@ const LivecamPage = () => {
               {watching.water_index ?? '-'}
             </span>
             <button type="button" onClick={() => setWatching(null)}>닫기</button>
+            {watching.asmr && (
+              <WaterSoundPlayer
+                compact
+                soundType={watching.asmr.sound_type}
+                score={watching.asmr.asmr_score}
+                label="물소리"
+              />
+            )}
           </div>
         </div>
       )}

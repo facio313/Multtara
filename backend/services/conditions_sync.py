@@ -27,12 +27,33 @@ CONDITION_FIELDS = {
     "marine_indices",
 }
 
+HISTORY_COPY_FIELDS = (
+    "water_temp",
+    "air_temp",
+    "wind_speed",
+    "wave_height",
+    "water_quality_grade",
+    "rainfall_recent",
+    "water_level",
+    "tide_schedule",
+    "rip_current_risk",
+    "uv_index",
+    "weather_alert",
+    "marine_indices",
+)
+
 
 def working_condition(spot: WaterSpot) -> WaterCondition:
     latest = WaterCondition.objects.filter(spot=spot).order_by("-fetched_at").first()
     if latest is None:
         return WaterCondition(spot=spot)
-    return latest
+    fetched = timezone.localtime(latest.fetched_at).date()
+    if fetched == timezone.localdate():
+        return latest
+    copy = WaterCondition(spot=spot)
+    for name in HISTORY_COPY_FIELDS:
+        setattr(copy, name, getattr(latest, name))
+    return copy
 
 
 def apply_fields(condition: WaterCondition, fields: dict) -> list[str]:
