@@ -62,6 +62,7 @@ def normalize_unscoped_surf_scores(apps, schema_editor):
     ConditionScore.objects.using(database).filter(score__isnull=True).update(
         score_range=[]
     )
+    schema_editor.connection.check_constraints()
 
 
 class Migration(migrations.Migration):

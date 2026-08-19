@@ -162,7 +162,7 @@ class Command(BaseCommand):
                     ):
                         continue
                     running[task.name] = executor.submit(
-                        self._execute,
+                        self._execute_in_worker,
                         task,
                         dry_run=options["dry_run"],
                     )
@@ -191,11 +191,17 @@ class Command(BaseCommand):
             executor.shutdown(wait=False, cancel_futures=True)
             self._heartbeat(state=PipelineHeartbeat.State.STOPPED, current_tasks=[])
 
+    def _execute_in_worker(self, task: PipelineTask, *, dry_run: bool) -> bool:
+        close_old_connections()
+        try:
+            return self._execute(task, dry_run=dry_run)
+        finally:
+            close_old_connections()
+
     def _execute(self, task: PipelineTask, *, dry_run: bool) -> bool:
         arguments = list(task.arguments)
         if dry_run:
             arguments.append("--dry-run")
-        close_old_connections()
         run = IngestionRun.objects.create(
             task_name=task.name,
             status=IngestionRun.Status.RUNNING,
@@ -221,8 +227,6 @@ class Command(BaseCommand):
             run.error_code = ""
             run.save(update_fields=("status", "finished_at", "error_code"))
             return True
-        finally:
-            close_old_connections()
 
     @staticmethod
     def _heartbeat(*, state: str, current_tasks: list[str]) -> None:
