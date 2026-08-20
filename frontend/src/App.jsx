@@ -17,6 +17,7 @@ const LivecamPage = lazy(() => import('./pages/LivecamPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const OnboardingPage = lazy(() => import('./pages/OnboardingPage'));
 const ConciergePage = lazy(() => import('./pages/ConciergePage'));
+const routerBaseName = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
 
 function RouteEffects() {
   const { pathname } = useLocation();
@@ -77,7 +78,7 @@ function App() {
   const { t } = useI18n();
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={routerBaseName}>
       <div className="app-shell">
         <a className="skip-link" href="#main-content">{t('app.skip')}</a>
         <RouteEffects />

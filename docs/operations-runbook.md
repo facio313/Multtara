@@ -20,6 +20,9 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
   HTTPS edge와 방화벽이 필요하다.
 - Frontend image는 `USER nginx`와 비특권 container port `8080`을 사용하고 모든
   Linux capability를 제거한다. 쓰기가 필요한 PID/cache 경로만 tmpfs로 제공한다.
+- `bonifacio.work` portfolio 배포는 `/multtara/` 아래에서만 노출한다. release
+  frontend는 같은 asset/API prefix로 빌드하며 Django session/CSRF cookie도
+  고유 이름과 `Path=/multtara/`로 다른 프로젝트와 격리한다.
 
 ## 2. 최초 사용자 결정 및 외부 준비
 
@@ -37,6 +40,11 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
 8. 신뢰 가능한 HTTPS termination 및 Pi firewall 규칙.
 9. off-device backup 대상과 조직의 RPO/RTO. 로컬 기본 retention은 14일이며
    off-device 복사 자체는 이 저장소가 구성하지 않는다.
+
+현재 portfolio 서버의 운영값은 `APPLICATION_BASE_PATH=/multtara`,
+`VITE_APP_BASE_PATH=/multtara/`, `VITE_API_BASE_URL=/multtara/api/v1/`,
+`FRONTEND_PORT=5182`다. DB는 다른 프로젝트와 공유하지 않고 전용 Compose volume을
+사용한다.
 
 Docker Engine, Docker Compose 2.24.4 이상, Python 3, `sha256sum`, `flock`을 설치하고,
 Pi OS가 64-bit ARM인지 확인한다.
@@ -161,10 +169,10 @@ sudo -u pongdang docker compose \
   -f docker-compose.yml \
   ps
 
-curl --fail --silent --show-error https://YOUR_DOMAIN/api/health/
-curl --fail --silent --show-error https://YOUR_DOMAIN/api/health/ready/
-curl --include --silent --show-error https://YOUR_DOMAIN/api/health/integrations/
-curl --include --silent --show-error https://YOUR_DOMAIN/api/health/safety/
+curl --fail --silent --show-error https://YOUR_DOMAIN/multtara/api/health/
+curl --fail --silent --show-error https://YOUR_DOMAIN/multtara/api/health/ready/
+curl --include --silent --show-error https://YOUR_DOMAIN/multtara/api/health/integrations/
+curl --include --silent --show-error https://YOUR_DOMAIN/multtara/api/health/safety/
 ```
 
 Collector는 파생 적합도와 retention을 포함한 9개 핵심 주기 작업과, `ROUTING_MATRIX_URL` 설정 시
@@ -174,12 +182,12 @@ drive/walk/bicycle snapshot을 갱신하는 선택형 route 작업을 최대 4�
 상태가 아닌지 검사한다. Docker의 `unhealthy` 표시는 자동 재시작을 보장하지
 않으므로 외부 감시에서 연속 실패와 container restart count를 함께 경보한다.
 
-`/api/health/integrations/`의 `503`과 `status=degraded`는 웹 프로세스가 죽었다는
+공개 `/multtara/api/health/integrations/`의 `503`과 `status=degraded`는 웹 프로세스가 죽었다는
 뜻이 아니라, 필수 pipeline 실행 이력이 아직 없거나 실제 freshness 기준을
 충족하지 못했다는 fail-closed 신호다. 이를 정상 `200`으로 치환하지 말고 provider별
 상태를 조사한다.
 
-수집 성공과 안전 근거 준비는 서로 다른 신호다. `/api/health/safety/`는
+수집 성공과 안전 근거 준비는 서로 다른 신호다. 공개 `/multtara/api/health/safety/`는
 verified/non-DEMO catalog의 현재 Water Index를 재검증하고 aggregate `counts`와
 `reason_counts`를 반환한다. 현재 `CLEAR`가 하나도 없으면 `503 degraded`이며,
 integrations가 `200`이어도 이 결과를 무시하지 않는다. 외부 alert에서는 다음
@@ -195,7 +203,7 @@ sudo -u pongdang docker compose \
   python manage.py audit_safety_readiness --json --require-current-clear
 ```
 
-DB disk 사용량, backup age, `/api/health/ready/`도 외부 감시에 연결한다.
+DB disk 사용량, backup age, 공개 `/multtara/api/health/ready/`도 외부 감시에 연결한다.
 `json-file` log는 기본 10 MiB × 5개로 제한되지만 host journal과 HTTPS edge log도
 별도 retention을 둔다.
 

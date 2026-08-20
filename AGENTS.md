@@ -155,6 +155,15 @@ anthropic-feat-name ─┘
 - `DATA_GO_KR_SERVICE_KEY`, `TOUR_API_KEY`, `KMA_API_KEY`, `KHOA_API_KEY`, `MOE_API_KEY`, DB credentials, and Django `SECRET_KEY` are **server-only**. They must be read by Django and must never appear in frontend source, browser bundles, logs, or API payloads.
 - `VITE_KAKAO_MAP_KEY` is the Kakao Maps **public JavaScript key**. Restrict its allowed domains in Kakao Developers. Do not reuse it as a server REST key.
 - `VITE_API_BASE_URL` defaults to `/api/v1/`; same-origin production traffic is proxied by Nginx. A separate absolute origin is allowed only for split deployments.
+- The `bonifacio.work` portfolio deployment is rooted at `/multtara/`: release
+  images use `VITE_APP_BASE_PATH=/multtara/` and
+  `VITE_API_BASE_URL=/multtara/api/v1/`, Django uses
+  `APPLICATION_BASE_PATH=/multtara`, and the trusted edge strips that prefix
+  before forwarding to the loopback origin on `127.0.0.1:5182`.
+- On the shared `bonifacio.work` hostname, keep auth cookies isolated as
+  `pongdang_sessionid` and `pongdang_csrftoken` with `Path=/multtara/`. The
+  frontend XSRF cookie setting must remain identical to Django's CSRF cookie
+  name; do not fall back to the generic `sessionid`/`csrftoken` names.
 - Production CORS is same-origin by default (`CORS_ALLOWED_ORIGINS` is empty). A
   split deployment may opt in only exact HTTPS origins without userinfo, paths,
   queries, fragments, or wildcards; invalid entries must fail startup.
@@ -211,6 +220,11 @@ anthropic-feat-name ─┘
   backend/frontend digests, provenance, and SBOM attestations. Raspberry Pi
   deployment must use `docker-compose.deploy.yml` through `pi-deploy.sh`; never
   build application images on the Pi or deploy a mutable tag.
+- A successful tag release requests the restricted server command
+  `deploy multtara <version> <commit> <backend-digest> <frontend-digest>`.
+  The server fixes the GHCR namespace, deploys at `/opt/pongdang-multtara` with
+  Compose project `pongdang-multtara`, and uses its own PostgreSQL volume and
+  network. It must never attach to or recreate the shared `cksDB` service.
 - Pi deployment configuration is rooted at a validated marker directory and
   requires Docker Compose 2.24.4 or newer. Preserve the loopback-only origin,
   take a verified PostgreSQL backup before upgrades/rollback, and require the

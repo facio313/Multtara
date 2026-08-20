@@ -80,12 +80,17 @@ GHCR digest image, provenance, SBOM, checksum manifest만 배포합니다. 최�
 필수 외부 입력, image rollback, PostgreSQL backup/restore와 분리 복구 drill은
 [운영 runbook](docs/operations-runbook.md)을 따릅니다.
 
+`bonifacio.work`에서는 전용 target `/opt/pongdang-multtara`, Compose project
+`pongdang-multtara`, loopback `127.0.0.1:5182`와 독립 PostgreSQL volume을 사용합니다.
+tag release가 digest를 만든 뒤 제한된 서버 명령으로 자동 배포하며, 공개 prefix는
+`/multtara/`입니다. 다른 프로젝트의 `cksDB`나 네트워크를 공유하지 않습니다.
+
 백엔드 컨테이너는 외부 포트를 열지 않으며, 프런트 Nginx도 기본적으로 호스트의 `127.0.0.1:8080`에만 바인딩됩니다. Caddy·Cloudflare Tunnel 등 신뢰 가능한 HTTPS 종단 프록시가 이 주소로 전달하도록 구성한 뒤, 공개 HTTPS 도메인에서 다음 경로를 확인합니다.
 
-- `/api/health/`: 프로세스 liveness
-- `/api/health/ready/`: PostgreSQL readiness
-- `/api/health/integrations/`: provider 작업 이력과 실제 freshness
-- `/api/health/safety/`: verified/non-DEMO 지점의 현재 Water Index 준비 상태
+- `/multtara/api/health/`: 프로세스 liveness
+- `/multtara/api/health/ready/`: PostgreSQL readiness
+- `/multtara/api/health/integrations/`: provider 작업 이력과 실제 freshness
+- `/multtara/api/health/safety/`: verified/non-DEMO 지점의 현재 Water Index 준비 상태
 
 Integrations 성공은 안전 근거 준비를 뜻하지 않습니다. Safety 응답의 aggregate
 `counts`·`reason_counts`를 별도로 감시하고, 현재 `CLEAR`가 하나도 없어 반환되는

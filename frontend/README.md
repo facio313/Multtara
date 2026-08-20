@@ -8,6 +8,8 @@ React 19와 Vite 8로 만든 강릉 우선 물 여행 SPA입니다. 같은 출�
 
 - `VITE_API_BASE_URL`: 기본값 `/api/v1/`. 분리 개발 환경에서는 예: `http://localhost:8000/api/v1/`.
 - `VITE_KAKAO_MAP_KEY`: 브라우저에 노출되는 Kakao Maps JavaScript 키. Kakao Developers에서 허용 도메인을 제한해야 합니다.
+- `VITE_APP_BASE_PATH`: 기본값 `/`. portfolio 배포는 `/multtara/`로 고정해 asset과 client route를 같은 prefix 아래에 둡니다.
+- `VITE_CSRF_COOKIE_NAME`: 기본값 `pongdang_csrftoken`. 같은 도메인의 다른 Django 앱과 cookie가 충돌하지 않게 backend 설정과 일치해야 합니다.
 
 공공데이터 키, DB 비밀번호, Django `SECRET_KEY`는 프런트 환경변수나 번들에 넣지 않습니다.
 

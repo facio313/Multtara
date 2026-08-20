@@ -21,6 +21,16 @@ class ProductionSplitSessionSettingsContractTests(SimpleTestCase):
         self.assertIn('SESSION_COOKIE_SAMESITE = "None"', source)
         self.assertIn('CSRF_COOKIE_SAMESITE = "None"', source)
 
+    def test_subpath_and_cookie_isolation_are_explicit(self):
+        source = (Path(__file__).parent / "settings" / "prod.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('FORCE_SCRIPT_NAME = APPLICATION_BASE_PATH or None', source)
+        self.assertIn('SESSION_COOKIE_NAME = "pongdang_sessionid"', source)
+        self.assertIn('CSRF_COOKIE_NAME = "pongdang_csrftoken"', source)
+        self.assertIn('SESSION_COOKIE_PATH = f"{APPLICATION_BASE_PATH}/"', source)
+
 
 class ProductionDatabaseSettingsTests(SimpleTestCase):
     def test_complete_postgresql_url_is_accepted(self):

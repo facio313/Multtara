@@ -3,9 +3,11 @@ import axios from 'axios';
 const runtimeEnv = import.meta.env ?? {};
 const rawBaseUrl = runtimeEnv.VITE_API_BASE_URL?.trim() || '/api/v1/';
 const apiBaseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : `${rawBaseUrl}/`;
+const csrfCookieName = runtimeEnv.VITE_CSRF_COOKIE_NAME?.trim() || 'pongdang_csrftoken';
 
 export const runtimeConfig = Object.freeze({
   apiBaseUrl,
+  csrfCookieName,
   kakaoMapConfigured: Boolean(runtimeEnv.VITE_KAKAO_MAP_KEY?.trim()),
 });
 
@@ -14,7 +16,7 @@ const api = axios.create({
   timeout: 10000,
   withCredentials: true,
   withXSRFToken: true,
-  xsrfCookieName: 'csrftoken',
+  xsrfCookieName: csrfCookieName,
   xsrfHeaderName: 'X-CSRFToken',
   headers: {
     'Content-Type': 'application/json',

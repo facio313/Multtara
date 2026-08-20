@@ -2,6 +2,8 @@
 PongDang (퐁당) — Production settings.
 """
 
+import re
+
 from decouple import config
 from django.core.exceptions import ImproperlyConfigured
 
@@ -37,6 +39,23 @@ if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
     raise ImproperlyConfigured(
         "Production requires explicit ALLOWED_HOSTS and does not allow '*'."
     )
+
+APPLICATION_BASE_PATH = config("APPLICATION_BASE_PATH", default="").strip()
+if APPLICATION_BASE_PATH and not re.fullmatch(
+    r"/[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*", APPLICATION_BASE_PATH
+):
+    raise ImproperlyConfigured(
+        "APPLICATION_BASE_PATH must be empty or an absolute URL path without a trailing slash."
+    )
+FORCE_SCRIPT_NAME = APPLICATION_BASE_PATH or None
+STATIC_URL = f"{APPLICATION_BASE_PATH}/static/"
+
+# Unique names avoid collisions with other Django applications on the shared
+# bonifacio.work origin. Restrict both cookies to this application's subpath.
+SESSION_COOKIE_NAME = "pongdang_sessionid"
+CSRF_COOKIE_NAME = "pongdang_csrftoken"
+SESSION_COOKIE_PATH = f"{APPLICATION_BASE_PATH}/" if APPLICATION_BASE_PATH else "/"
+CSRF_COOKIE_PATH = SESSION_COOKIE_PATH
 
 # Same-origin is the production default. Split deployments must opt in with
 # exact HTTPS origins; the parser rejects URL components that are not origins.

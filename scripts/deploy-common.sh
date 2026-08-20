@@ -177,8 +177,20 @@ pongdang_validate_secret_env() {
   local secret_lower
 
   [[ -f "$file" && ! -L "$file" ]] || pongdang_die "secret environment file is missing or unsafe: $file"
-  [[ -z "$(LC_ALL=C tr -d '\11\12\15\40-\176' < "$file")" ]] \
-    || pongdang_die "secret environment file contains control characters"
+  pongdang_require_command python3
+  python3 - "$file" <<'PY' \
+    || pongdang_die "secret environment file is not valid UTF-8 or contains control characters"
+import sys
+import unicodedata
+from pathlib import Path
+
+try:
+    content = Path(sys.argv[1]).read_text(encoding="utf-8")
+except UnicodeError:
+    raise SystemExit(1) from None
+if any(unicodedata.category(character) == "Cc" and character not in "\t\n" for character in content):
+    raise SystemExit(1)
+PY
   ! LC_ALL=C grep -q $'\r' "$file" || pongdang_die "secret environment file uses CRLF; use Unix line endings"
   mode="$(stat -c '%a' "$file")"
   owner="$(stat -c '%u' "$file")"
@@ -201,6 +213,8 @@ pongdang_validate_secret_env() {
     || pongdang_die "SECURE_SSL_REDIRECT must appear exactly once"
   PONGDANG_FRONTEND_BIND="$(pongdang_env_value "$file" FRONTEND_BIND_ADDRESS)" \
     || pongdang_die "FRONTEND_BIND_ADDRESS must appear exactly once"
+  PONGDANG_APPLICATION_BASE_PATH="$(pongdang_optional_env_value "$file" APPLICATION_BASE_PATH)" \
+    || pongdang_die "APPLICATION_BASE_PATH may appear at most once"
   PONGDANG_ROUTING_MATRIX_URL="$(pongdang_optional_env_value "$file" ROUTING_MATRIX_URL)" \
     || pongdang_die "ROUTING_MATRIX_URL may appear at most once"
 
@@ -216,7 +230,6 @@ pongdang_validate_secret_env() {
     || pongdang_die "POSTGRES_PASSWORD still contains a placeholder"
   [[ "$PONGDANG_DATABASE_URL" != *YOUR_PASSWORD* && "$PONGDANG_DATABASE_URL" != *REPLACE_* ]] \
     || pongdang_die "DATABASE_URL still contains a placeholder"
-  pongdang_require_command python3
   if ! PONGDANG_CHECK_DATABASE_URL="$PONGDANG_DATABASE_URL" \
       PONGDANG_CHECK_POSTGRES_DB="$PONGDANG_POSTGRES_DB" \
       PONGDANG_CHECK_POSTGRES_USER="$PONGDANG_POSTGRES_USER" \
@@ -273,6 +286,10 @@ PY
   [[ "$PONGDANG_SSL_REDIRECT" == "True" ]] || pongdang_die "SECURE_SSL_REDIRECT must be True on the Pi"
   [[ "$PONGDANG_FRONTEND_BIND" == "127.0.0.1" ]] \
     || pongdang_die "FRONTEND_BIND_ADDRESS must remain 127.0.0.1 behind the trusted HTTPS edge"
+  if [[ -n "$PONGDANG_APPLICATION_BASE_PATH" ]]; then
+    [[ "$PONGDANG_APPLICATION_BASE_PATH" =~ ^/[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*$ ]] \
+      || pongdang_die "APPLICATION_BASE_PATH must be an absolute URL path without a trailing slash"
+  fi
   if [[ -n "$PONGDANG_ROUTING_MATRIX_URL" ]]; then
     [[ "$PONGDANG_ROUTING_MATRIX_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~:/%-]*)?/?$ ]] \
       || pongdang_die "ROUTING_MATRIX_URL must be a credential-free HTTPS base URL"

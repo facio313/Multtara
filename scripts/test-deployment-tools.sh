@@ -127,6 +127,7 @@ cp docker-compose.yml docker-compose.deploy.yml "$TARGET/"
   printf 'FRONTEND_BIND_ADDRESS=127.0.0.1\n'
   printf 'ROUTING_MATRIX_URL=\n'
   printf 'BACKUP_RETENTION_DAYS=14\n'
+  printf '# 운영 UTF-8 주석은 허용한다.\n'
 } > "$TARGET/.env"
 chmod 0600 "$TARGET/.env"
 

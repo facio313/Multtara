@@ -24,6 +24,10 @@ asgi = (root / "backend/config/asgi.py").read_text()
 manage = (root / "backend/manage.py").read_text()
 ci_workflow = (root / ".github/workflows/ci.yml").read_text()
 release_workflow = (root / ".github/workflows/release-images.yml").read_text()
+vite_config = (root / "frontend/vite.config.js").read_text()
+app_source = (root / "frontend/src/App.jsx").read_text()
+index_html = (root / "frontend/index.html").read_text()
+api_source = (root / "frontend/src/services/api.js").read_text()
 
 compile(wsgi, str(root / "backend/config/wsgi.py"), "exec")
 compile(asgi, str(root / "backend/config/asgi.py"), "exec")
@@ -45,6 +49,7 @@ def location_block(path: str) -> str:
 
 require("DATABASE_URL=postgresql://${POSTGRES_" not in compose, "raw DB credentials are assembled into a URL")
 require(compose.count("DATABASE_URL: ${DATABASE_URL:?") == 2, "backend and collector must receive DATABASE_URL")
+require(compose.count("APPLICATION_BASE_PATH: ${APPLICATION_BASE_PATH:-}") == 2, "application base path must reach both Django processes")
 require(compose.count("CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}") == 2, "CORS setting is not passed to both Django processes")
 require(compose.count("SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-True}") == 2, "SSL redirect setting is not passed to both Django processes")
 require(compose.count("ROUTING_MATRIX_URL: ${ROUTING_MATRIX_URL:-}") == 2, "routing URL must reach backend and collector only")
@@ -59,11 +64,17 @@ require("ports: !override" in dev_compose, "development frontend does not replac
 require("http://127.0.0.1:5173/" in dev_compose, "development frontend healthcheck does not probe Vite")
 require("listen 8080;" in nginx, "production Nginx does not use an unprivileged port")
 require("USER nginx" in frontend_dockerfile and "ENTRYPOINT []" in frontend_dockerfile, "production Nginx runtime is not explicitly unprivileged")
+require("ARG VITE_APP_BASE_PATH=/" in frontend_dockerfile, "frontend image does not accept an application base path")
+require("ARG VITE_CSRF_COOKIE_NAME=pongdang_csrftoken" in frontend_dockerfile, "frontend image does not pin the isolated CSRF cookie")
+require("base: process.env.VITE_APP_BASE_PATH || '/'" in vite_config, "Vite base path is not configurable")
+require("<BrowserRouter basename={routerBaseName}>" in app_source, "React routes do not honor the Vite base path")
+require(index_html.count("%BASE_URL%") >= 3, "HTML metadata/assets are not rooted at the Vite base path")
+require("VITE_CSRF_COOKIE_NAME" in api_source and "pongdang_csrftoken" in api_source, "Axios CSRF cookie does not match Django")
 require("127.0.0.1}:${FRONTEND_PORT:-8080}:8080" in compose, "production Nginx mapping does not target port 8080")
 require(dev_compose.count("DJANGO_SETTINGS_MODULE: config.settings.dev") == 2, "backend and collector do not share the explicit development settings path")
-require("location = /admin" in nginx and "return 308 /admin/;" in nginx, "bare /admin is not routed to the operator surface")
+require("location = /admin" in nginx, "bare /admin is not routed to the operator surface")
 
-for path in ("/admin/", "/static/"):
+for path in ("= /admin", "/admin/", "/static/"):
     block = location_block(path)
     for directive in (
         "proxy_pass http://backend:8000;",
@@ -89,6 +100,9 @@ require(
     release_workflow.count("needs: [prepare, quality-gate]") == 2,
     "release images can be published before the quality gate succeeds",
 )
+require("VITE_APP_BASE_PATH=/multtara/" in release_workflow, "release assets are not built for the portfolio subpath")
+require("VITE_API_BASE_URL=/multtara/api/v1/" in release_workflow, "release API is not isolated below the portfolio subpath")
+require("deploy multtara $DEPLOY_VERSION $DEPLOY_SHA $BACKEND_DIGEST $FRONTEND_DIGEST" in release_workflow, "release workflow does not request the restricted Multtara deployment")
 
 # Ensure the override tag is attached only to the intended ports declaration.
 require(len(re.findall(r"^\s+ports: !override$", dev_compose, flags=re.MULTILINE)) == 1, "unexpected !override usage")
@@ -117,6 +131,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     DATABASE_URL='postgresql://pongdang:p%40ss%2Fword@db:5432/pongdang' \
     SECRET_KEY='0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN' \
     ALLOWED_HOSTS='localhost,127.0.0.1' \
+    APPLICATION_BASE_PATH='/multtara' \
     FRONTEND_BIND_ADDRESS='127.0.0.1' \
     FRONTEND_PORT='8080' \
     DEV_BIND_ADDRESS='127.0.0.1' \
@@ -170,6 +185,7 @@ PY
     DATABASE_URL='postgresql://pongdang:p%40ss%2Fword@db:5432/pongdang' \
     SECRET_KEY='0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN' \
     ALLOWED_HOSTS='localhost,127.0.0.1' \
+    APPLICATION_BASE_PATH='/multtara' \
     FRONTEND_BIND_ADDRESS='127.0.0.1' \
     FRONTEND_PORT='8080' \
     BACKEND_IMAGE='ghcr.io/example/pongdang/backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
