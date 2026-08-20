@@ -7,6 +7,7 @@ import {
 import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom';
 import Navigation from './components/layout/Navigation';
 import { useI18n } from './i18n';
+import useSessionStore from './store/useSessionStore';
 import './App.css';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
@@ -76,6 +77,10 @@ function RouteFallback() {
 
 function App() {
   const { t } = useI18n();
+
+  useEffect(() => {
+    void useSessionStore.getState().ensureSession();
+  }, []);
 
   return (
     <BrowserRouter basename={routerBaseName}>

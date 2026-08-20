@@ -30,6 +30,12 @@ class ProductionSplitSessionSettingsContractTests(SimpleTestCase):
         self.assertIn('SESSION_COOKIE_NAME = "pongdang_sessionid"', source)
         self.assertIn('CSRF_COOKIE_NAME = "pongdang_csrftoken"', source)
         self.assertIn('SESSION_COOKIE_PATH = f"{APPLICATION_BASE_PATH}/"', source)
+        self.assertIn(
+            'PONGDANG_SSO_ENABLED = config("PONGDANG_SSO_ENABLED"',
+            (Path(__file__).parent / "settings" / "base.py").read_text(
+                encoding="utf-8"
+            ),
+        )
 
 
 class ProductionDatabaseSettingsTests(SimpleTestCase):

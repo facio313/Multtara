@@ -300,6 +300,12 @@ export async function loginAccount(payload) {
   return normalizeAccountUser(response.data);
 }
 
+export async function ssoLoginAccount() {
+  const response = await csrfRequest('post', 'users/sso/');
+  invalidateCsrfToken();
+  return normalizeAccountUser(response.data);
+}
+
 export async function logoutAccount() {
   await csrfRequest('post', 'users/logout/');
   invalidateCsrfToken();

@@ -66,10 +66,14 @@ require("listen 8080;" in nginx, "production Nginx does not use an unprivileged 
 require("USER nginx" in frontend_dockerfile and "ENTRYPOINT []" in frontend_dockerfile, "production Nginx runtime is not explicitly unprivileged")
 require("ARG VITE_APP_BASE_PATH=/" in frontend_dockerfile, "frontend image does not accept an application base path")
 require("ARG VITE_CSRF_COOKIE_NAME=pongdang_csrftoken" in frontend_dockerfile, "frontend image does not pin the isolated CSRF cookie")
+require("ARG VITE_SSO_ENABLED=false" in frontend_dockerfile, "frontend image cannot select the portfolio SSO contract")
 require("base: process.env.VITE_APP_BASE_PATH || '/'" in vite_config, "Vite base path is not configurable")
 require("<BrowserRouter basename={routerBaseName}>" in app_source, "React routes do not honor the Vite base path")
 require(index_html.count("%BASE_URL%") >= 3, "HTML metadata/assets are not rooted at the Vite base path")
 require("VITE_CSRF_COOKIE_NAME" in api_source and "pongdang_csrftoken" in api_source, "Axios CSRF cookie does not match Django")
+require("VITE_SSO_ENABLED" in api_source, "frontend runtime does not expose the SSO mode")
+require("PONGDANG_SSO_ENABLED: ${PONGDANG_SSO_ENABLED:-false}" in compose, "backend SSO setting is not wired")
+require(nginx.count("proxy_set_header Remote-User $http_remote_user;") >= 2, "frontend proxy does not preserve trusted SSO identity")
 require("127.0.0.1}:${FRONTEND_PORT:-8080}:8080" in compose, "production Nginx mapping does not target port 8080")
 require(dev_compose.count("DJANGO_SETTINGS_MODULE: config.settings.dev") == 2, "backend and collector do not share the explicit development settings path")
 require("location = /admin" in nginx, "bare /admin is not routed to the operator surface")
@@ -102,6 +106,7 @@ require(
 )
 require("VITE_APP_BASE_PATH=/multtara/" in release_workflow, "release assets are not built for the portfolio subpath")
 require("VITE_API_BASE_URL=/multtara/api/v1/" in release_workflow, "release API is not isolated below the portfolio subpath")
+require("VITE_SSO_ENABLED=true" in release_workflow, "release frontend does not enable portfolio SSO")
 require("deploy multtara $DEPLOY_VERSION $DEPLOY_SHA $BACKEND_DIGEST $FRONTEND_DIGEST" in release_workflow, "release workflow does not request the restricted Multtara deployment")
 
 # Ensure the override tag is attached only to the intended ports declaration.

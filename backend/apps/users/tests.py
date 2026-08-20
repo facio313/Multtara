@@ -5,7 +5,7 @@ from django.contrib.admin.sites import AdminSite
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -234,6 +234,70 @@ class UserSessionApiTests(TestCase):
         self.assertNotIn("password", created.json())
         self.assertEqual(created.json()["email"], "pond@example.com")
         self.assertEqual(client.get("/api/v1/users/me/").status_code, 200)
+
+    @override_settings(PONGDANG_SSO_ENABLED=True)
+    def test_sso_exchange_creates_session_and_disables_local_credentials(self):
+        client, token = self._csrf_client()
+        missing = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(missing.status_code, 401)
+
+        exchanged = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+            HTTP_REMOTE_USER="portfolio-owner",
+            HTTP_REMOTE_EMAIL="owner@example.test",
+            HTTP_REMOTE_NAME="Portfolio Owner",
+        )
+        self.assertEqual(exchanged.status_code, 200)
+        self.assertEqual(exchanged.json()["username"], "portfolio-owner")
+        user = User.objects.get(username="portfolio-owner")
+        self.assertFalse(user.has_usable_password())
+        self.assertEqual(client.get("/api/v1/users/me/").status_code, 200)
+
+        csrf_token = client.cookies["csrftoken"].value
+        local_register = client.post(
+            "/api/v1/users/register/",
+            {
+                "username": "other",
+                "email": "other@example.test",
+                "password": self.password,
+            },
+            format="json",
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+        self.assertEqual(local_register.status_code, 403)
+        self.assertIn("single sign-on", local_register.json()["detail"])
+        local_login = client.post(
+            "/api/v1/users/login/",
+            {"username": "portfolio-owner", "password": self.password},
+            format="json",
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+        self.assertEqual(local_login.status_code, 403)
+        self.assertIn("single sign-on", local_login.json()["detail"])
+        local_password = client.post(
+            "/api/v1/users/password/",
+            {"current_password": self.password, "new_password": self.password + "-new"},
+            format="json",
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+        self.assertEqual(local_password.status_code, 403)
+        self.assertIn("single sign-on", local_password.json()["detail"])
+        local_delete = client.delete(
+            "/api/v1/users/me/",
+            {"current_password": self.password},
+            format="json",
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+        self.assertEqual(local_delete.status_code, 403)
+        self.assertIn("single sign-on", local_delete.json()["detail"])
 
     def test_login_profile_password_logout_and_account_delete(self):
         user = User.objects.create_user(

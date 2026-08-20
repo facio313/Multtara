@@ -7,8 +7,10 @@ import {
   loginAccount,
   logoutAccount,
   registerAccount,
+  ssoLoginAccount,
   updateAccount,
 } from '../services/accountApi.js';
+import { runtimeConfig } from '../services/api.js';
 
 const useSessionStore = create((set, get) => ({
   status: 'idle',
@@ -24,6 +26,16 @@ const useSessionStore = create((set, get) => ({
       return user;
     } catch (error) {
       if (isMissingSession(error)) {
+        if (runtimeConfig.ssoEnabled) {
+          try {
+            const user = await ssoLoginAccount();
+            set({ status: 'authenticated', user, error: null });
+            return user;
+          } catch (ssoError) {
+            set({ status: 'error', user: null, error: classifyAccountError(ssoError, 'session') });
+            return null;
+          }
+        }
         set({ status: 'guest', user: null, error: null });
         return null;
       }

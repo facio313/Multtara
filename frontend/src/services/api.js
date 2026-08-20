@@ -9,6 +9,7 @@ export const runtimeConfig = Object.freeze({
   apiBaseUrl,
   csrfCookieName,
   kakaoMapConfigured: Boolean(runtimeEnv.VITE_KAKAO_MAP_KEY?.trim()),
+  ssoEnabled: runtimeEnv.VITE_SSO_ENABLED === 'true',
 });
 
 const api = axios.create({

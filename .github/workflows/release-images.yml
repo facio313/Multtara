@@ -179,6 +179,7 @@ jobs:
             VITE_APP_BASE_PATH=/multtara/
             VITE_API_BASE_URL=/multtara/api/v1/
             VITE_CSRF_COOKIE_NAME=pongdang_csrftoken
+            VITE_SSO_ENABLED=true
             VITE_KAKAO_MAP_KEY=${{ vars.VITE_KAKAO_MAP_KEY }}
           provenance: mode=max
           sbom: true

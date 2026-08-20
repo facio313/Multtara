@@ -47,6 +47,7 @@ import {
   updateTripMemory,
 } from '../services/memoryApi';
 import useSessionStore from '../store/useSessionStore';
+import { runtimeConfig } from '../services/api';
 import './ProfilePage.css';
 
 const PERSONA_TYPES = ['', 'active', 'family', 'wellness', 'local', 'stay'];
@@ -418,6 +419,9 @@ function ProfilePage() {
     setAuthFeedback(null);
     try {
       await session.logout();
+      if (runtimeConfig.ssoEnabled) {
+        window.location.assign(`/sso/logout?rd=${encodeURIComponent(`${window.location.origin}/sso/`)}`);
+      }
     } catch (error) {
       refreshExpiredSession(error);
       setAuthFeedback({ type: 'error', ...classifyAccountError(error, 'logout') });
@@ -663,6 +667,15 @@ function ProfilePage() {
   }
 
   if (session.status === 'guest') {
+    if (runtimeConfig.ssoEnabled) {
+      return (
+        <div className="profile-page account-page-state" role="alert">
+          <ShieldAlert size={24} aria-hidden="true" />
+          <h1>{t('account.session.errorTitle')}</h1>
+          <a href={`/sso/?rd=${encodeURIComponent(window.location.href)}`}>{t('common.retry')}</a>
+        </div>
+      );
+    }
     return (
       <div className="profile-page account-profile-page">
         <header className="account-hero">
@@ -715,7 +728,7 @@ function ProfilePage() {
           </label>
           <label className="account-field" htmlFor="profile-email">
             <span>{t('account.field.email')}</span>
-            <input id="profile-email" type="email" autoComplete="email" maxLength="254" value={profileForm.email} onChange={(event) => setProfileForm({ ...profileForm, email: event.target.value })} />
+            <input id="profile-email" type="email" autoComplete="email" maxLength="254" value={profileForm.email} onChange={(event) => setProfileForm({ ...profileForm, email: event.target.value })} readOnly={runtimeConfig.ssoEnabled} aria-readonly={runtimeConfig.ssoEnabled || undefined} />
           </label>
           <label className="account-field" htmlFor="profile-first-name">
             <span>{t('account.field.firstName')}</span>
@@ -1031,7 +1044,7 @@ function ProfilePage() {
         ) : null}
       </section>
 
-      <section className="account-section account-security-section" aria-labelledby="account-security-heading">
+      {!runtimeConfig.ssoEnabled ? <section className="account-section account-security-section" aria-labelledby="account-security-heading">
         <div className="account-section-heading">
           <div>
             <span>{t('account.eyebrow.security')}</span>
@@ -1081,7 +1094,7 @@ function ProfilePage() {
             </button>
           </form>
         </div>
-      </section>
+      </section> : null}
 
       <aside className="account-draft-link">
         <CalendarDays size={22} aria-hidden="true" />

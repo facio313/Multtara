@@ -132,3 +132,8 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
+
+# This is enabled only when the origin is loopback-bound behind the portfolio
+# Nginx + Authelia auth_request boundary. The application never trusts client
+# identity headers on an independently exposed origin.
+PONGDANG_SSO_ENABLED = config("PONGDANG_SSO_ENABLED", default=False, cast=bool)

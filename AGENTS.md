@@ -164,6 +164,14 @@ anthropic-feat-name ─┘
   `pongdang_sessionid` and `pongdang_csrftoken` with `Path=/multtara/`. The
   frontend XSRF cookie setting must remain identical to Django's CSRF cookie
   name; do not fall back to the generic `sessionid`/`csrftoken` names.
+- Production authentication is the portfolio Authelia SSO gate. Release images
+  set `VITE_SSO_ENABLED=true`, Compose sets `PONGDANG_SSO_ENABLED=true`, and
+  the host edge must discard client-supplied identity headers before
+  overwriting `Remote-User`, `Remote-Email`, `Remote-Name`, and
+  `Remote-Groups`. The loopback frontend proxy forwards those headers to the
+  Django SSO exchange endpoint, which creates the isolated PongDang session.
+  Local registration, password login/change, and account deletion are disabled
+  in production SSO mode; central logout is the only browser logout path.
 - Production CORS is same-origin by default (`CORS_ALLOWED_ORIGINS` is empty). A
   split deployment may opt in only exact HTTPS origins without userinfo, paths,
   queries, fragments, or wildcards; invalid entries must fail startup.

@@ -85,6 +85,13 @@ GHCR digest image, provenance, SBOM, checksum manifest만 배포합니다. 최�
 tag release가 digest를 만든 뒤 제한된 서버 명령으로 자동 배포하며, 공개 prefix는
 `/multtara/`입니다. 다른 프로젝트의 `cksDB`나 네트워크를 공유하지 않습니다.
 
+운영 계정은 `bonifacio.work/sso/`의 Authelia 통합 로그인을 사용합니다. 호스트
+Nginx가 인증한 `Remote-*` 헤더만 loopback 원본에 전달하며, Django는 이를 전용
+`pongdang_sessionid` 세션으로 교환합니다. 운영에서는 별도 회원가입·비밀번호
+로그인/변경·계정 삭제가 비활성화되고 로그아웃은 중앙 `/sso/logout`으로
+연결됩니다. 개발 환경은 두 SSO 변수를 `false`로 두면 기존 로컬 계정 흐름을
+사용할 수 있습니다.
+
 백엔드 컨테이너는 외부 포트를 열지 않으며, 프런트 Nginx도 기본적으로 호스트의 `127.0.0.1:8080`에만 바인딩됩니다. Caddy·Cloudflare Tunnel 등 신뢰 가능한 HTTPS 종단 프록시가 이 주소로 전달하도록 구성한 뒤, 공개 HTTPS 도메인에서 다음 경로를 확인합니다.
 
 - `/multtara/api/health/`: 프로세스 liveness
