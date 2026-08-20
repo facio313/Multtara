@@ -36,6 +36,10 @@ services:
 
   backend:
     build: ./backend
+    # Rootless Docker maps the deployment user's host UID/GID to container
+    # root. Keep the application UID non-root and use only container group 0
+    # to read the host-owned mode-0640 edge-secret bind.
+    user: "${PONGDANG_BACKEND_RUNTIME_USER:-pongdang:root}"
     restart: unless-stopped
     init: true
     stop_grace_period: 45s
@@ -43,6 +47,11 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
       - /app/staticfiles:rw,noexec,nosuid,nodev,size=128m,mode=1777
+    volumes:
+      - type: bind
+        source: ${PONGDANG_SSO_EDGE_SECRET_MOUNT:-/dev/null}
+        target: /run/secrets/pongdang_sso_edge_secret
+        read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -70,6 +79,8 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-True}
       PONGDANG_SSO_ENABLED: ${PONGDANG_SSO_ENABLED:-false}
+      PONGDANG_SSO_EDGE_SECRET: ${PONGDANG_SSO_EDGE_SECRET:-}
+      PONGDANG_SSO_EDGE_SECRET_FILE: ${PONGDANG_SSO_EDGE_SECRET_FILE:-}
       DATA_GO_KR_SERVICE_KEY: ${DATA_GO_KR_SERVICE_KEY:-}
       TOUR_API_KEY: ${TOUR_API_KEY:-}
       KMA_API_KEY: ${KMA_API_KEY:-}

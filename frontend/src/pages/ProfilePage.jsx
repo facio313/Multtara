@@ -419,14 +419,16 @@ function ProfilePage() {
     setAuthFeedback(null);
     try {
       await session.logout();
-      if (runtimeConfig.ssoEnabled) {
-        window.location.assign(`/sso/logout?rd=${encodeURIComponent(`${window.location.origin}/sso/`)}`);
-      }
     } catch (error) {
       refreshExpiredSession(error);
       setAuthFeedback({ type: 'error', ...classifyAccountError(error, 'logout') });
     } finally {
       setAuthBusy(false);
+      // The central session remains authoritative even when the local session
+      // has already expired or its logout request fails.
+      if (runtimeConfig.ssoEnabled) {
+        window.location.assign(`/sso/logout?rd=${encodeURIComponent(`${window.location.origin}/sso/`)}`);
+      }
     }
   };
 

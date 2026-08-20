@@ -168,10 +168,27 @@ anthropic-feat-name ─┘
   set `VITE_SSO_ENABLED=true`, Compose sets `PONGDANG_SSO_ENABLED=true`, and
   the host edge must discard client-supplied identity headers before
   overwriting `Remote-User`, `Remote-Email`, `Remote-Name`, and
-  `Remote-Groups`. The loopback frontend proxy forwards those headers to the
-  Django SSO exchange endpoint, which creates the isolated PongDang session.
+  `Remote-Groups`. It also injects the per-app `X-Portfolio-Edge-Secret`; the
+  loopback frontend proxy forwards those headers to Django. The exchange binds
+  exact `Remote-User` to an immutable unique nullable `sso_subject`, links an
+  existing account only once through one unambiguous email match, and never
+  treats a username collision as identity. Every SSO-mode authenticated API
+  request revalidates both the subject and edge secret before accepting the
+  isolated PongDang session.
+  Prefer a regular, non-symlink, host-owned mode-0640, 32--4096-byte secret mounted with
+  `PONGDANG_SSO_EDGE_SECRET_MOUNT` and read from
+  `PONGDANG_SSO_EDGE_SECRET_FILE`; use the direct environment value only when
+  no file is configured. A file-backed deployment sets
+  `PONGDANG_BACKEND_RUNTIME_USER=pongdang:root` so the application keeps its
+  non-root UID while rootless Docker maps the host private group to container
+  group 0. Never expose the secret to frontend build/runtime variables, logs,
+  API responses, or another
+  portfolio application.
   Local registration, password login/change, and account deletion are disabled
-  in production SSO mode; central logout is the only browser logout path.
+  in production SSO mode; central logout is the only browser logout path. The
+  portfolio account-management surface is `/sso/admin/`; inner Nginx must
+  return 404 for both `/admin` and every `/admin/` subpath so an independent
+  Django admin session is never exposed through `/multtara/`.
 - Production CORS is same-origin by default (`CORS_ALLOWED_ORIGINS` is empty). A
   split deployment may opt in only exact HTTPS origins without userinfo, paths,
   queries, fragments, or wildcards; invalid entries must fail startup.
@@ -230,7 +247,9 @@ anthropic-feat-name ─┘
 - Production releases are tag-bound `linux/arm64` GHCR images with immutable
   backend/frontend digests, provenance, and SBOM attestations. Raspberry Pi
   deployment must use `docker-compose.deploy.yml` through `pi-deploy.sh`; never
-  build application images on the Pi or deploy a mutable tag.
+  build application images on the Pi or deploy a mutable tag. A release tag
+  must resolve to the exact workflow revision, and that revision must already
+  be an ancestor of `origin/main`; the release workflow fails closed otherwise.
 - A successful tag release requests the restricted server command
   `deploy multtara <version> <commit> <backend-digest> <frontend-digest>`.
   The server fixes the GHCR namespace, deploys at `/opt/pongdang-multtara` with

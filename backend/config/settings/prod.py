@@ -9,6 +9,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F401, F403
 from .validation import (
+    load_production_sso_edge_secret,
     parse_production_cors_allowed_origins,
     parse_production_database_url,
 )
@@ -71,6 +72,12 @@ CORS_ALLOW_CREDENTIALS = bool(CORS_ALLOWED_ORIGINS)
 if CORS_ALLOWED_ORIGINS:
     SESSION_COOKIE_SAMESITE = "None"
     CSRF_COOKIE_SAMESITE = "None"
+
+PONGDANG_SSO_EDGE_SECRET = load_production_sso_edge_secret(  # noqa: F405
+    PONGDANG_SSO_ENABLED,  # noqa: F405
+    PONGDANG_SSO_EDGE_SECRET,  # noqa: F405
+    PONGDANG_SSO_EDGE_SECRET_FILE,  # noqa: F405
+)
 
 # This table predates the evidence-backed condition pipeline and may contain
 # seed/demo values. Keep its public API closed in production even when rows

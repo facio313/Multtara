@@ -11,9 +11,18 @@ class PongDangUserAdmin(UserAdmin):
     fieldsets = UserAdmin.fieldsets + (
         (
             "PongDang profile",
-            {"fields": ("persona_type", "mood_state", "home_region", "preferred_locale")},
+            {
+                "fields": (
+                    "persona_type",
+                    "mood_state",
+                    "home_region",
+                    "preferred_locale",
+                    "sso_subject",
+                )
+            },
         ),
     )
+    readonly_fields = UserAdmin.readonly_fields + ("sso_subject",)
 
 
 @admin.register(UserActivity)

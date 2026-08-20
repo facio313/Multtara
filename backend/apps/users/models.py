@@ -23,6 +23,31 @@ class User(AbstractUser):
         choices=Locale.choices,
         default=Locale.KOREAN,
     )
+    # The identity provider subject is the durable account key.  Email and
+    # display names may be reused or changed, so neither is safe as the ongoing
+    # session binding.  ``NULL`` preserves local-development and legacy users;
+    # once linked, the model deliberately refuses replacement or removal.
+    sso_subject = models.CharField(
+        max_length=254,
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+    )
+
+    def save(self, *args, **kwargs):
+        if self.pk and not self._state.adding:
+            previous_subject = (
+                type(self)
+                ._base_manager.filter(pk=self.pk)
+                .values_list("sso_subject", flat=True)
+                .first()
+            )
+            if previous_subject is not None and previous_subject != self.sso_subject:
+                raise ValidationError(
+                    {"sso_subject": "A linked SSO subject is immutable."}
+                )
+        return super().save(*args, **kwargs)
 
 
 class UserActivity(models.Model):
@@ -201,9 +226,7 @@ class EcoAction(models.Model):
         if self.evidence_url:
             sanitized = public_https_url(self.evidence_url)
             if not sanitized:
-                errors["evidence_url"] = (
-                    "Evidence URL must be a public HTTPS URL."
-                )
+                errors["evidence_url"] = "Evidence URL must be a public HTTPS URL."
             else:
                 # Never retain URL credentials, query tokens, or fragments.
                 self.evidence_url = sanitized

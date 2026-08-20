@@ -28,6 +28,10 @@ vite_config = (root / "frontend/vite.config.js").read_text()
 app_source = (root / "frontend/src/App.jsx").read_text()
 index_html = (root / "frontend/index.html").read_text()
 api_source = (root / "frontend/src/services/api.js").read_text()
+profile_source = (root / "frontend/src/pages/ProfilePage.jsx").read_text()
+readme = (root / "README.md").read_text()
+agents = (root / "AGENTS.md").read_text()
+operations_runbook = (root / "docs/operations-runbook.md").read_text()
 
 compile(wsgi, str(root / "backend/config/wsgi.py"), "exec")
 compile(asgi, str(root / "backend/config/asgi.py"), "exec")
@@ -48,6 +52,7 @@ def location_block(path: str) -> str:
 
 
 require("DATABASE_URL=postgresql://${POSTGRES_" not in compose, "raw DB credentials are assembled into a URL")
+require('user: "${PONGDANG_BACKEND_RUNTIME_USER:-pongdang:root}"' in compose, "backend must retain a non-root UID with the rootless private group")
 require(compose.count("DATABASE_URL: ${DATABASE_URL:?") == 2, "backend and collector must receive DATABASE_URL")
 require(compose.count("APPLICATION_BASE_PATH: ${APPLICATION_BASE_PATH:-}") == 2, "application base path must reach both Django processes")
 require(compose.count("CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}") == 2, "CORS setting is not passed to both Django processes")
@@ -72,13 +77,38 @@ require("<BrowserRouter basename={routerBaseName}>" in app_source, "React routes
 require(index_html.count("%BASE_URL%") >= 3, "HTML metadata/assets are not rooted at the Vite base path")
 require("VITE_CSRF_COOKIE_NAME" in api_source and "pongdang_csrftoken" in api_source, "Axios CSRF cookie does not match Django")
 require("VITE_SSO_ENABLED" in api_source, "frontend runtime does not expose the SSO mode")
+logout_handler = profile_source[
+    profile_source.index("  const handleLogout = async () => {") :
+    profile_source.index("  const submitProfile = async", profile_source.index("  const handleLogout = async () => {"))
+]
+require(
+    "finally {" in logout_handler
+    and logout_handler.index("window.location.assign") > logout_handler.index("finally {"),
+    "central SSO logout is not guaranteed after the local logout attempt",
+)
 require("PONGDANG_SSO_ENABLED: ${PONGDANG_SSO_ENABLED:-false}" in compose, "backend SSO setting is not wired")
+require("PONGDANG_SSO_EDGE_SECRET: ${PONGDANG_SSO_EDGE_SECRET:-}" in compose, "backend SSO edge secret is not wired")
+require("PONGDANG_SSO_EDGE_SECRET_FILE: ${PONGDANG_SSO_EDGE_SECRET_FILE:-}" in compose, "backend SSO secret file is not wired")
+require(
+    len(re.findall(r"^\s+PONGDANG_SSO_EDGE_SECRET:", compose, flags=re.MULTILINE)) == 1,
+    "SSO edge secret reaches a service other than the backend",
+)
+require(
+    len(re.findall(r"^\s+PONGDANG_SSO_EDGE_SECRET_FILE:", compose, flags=re.MULTILINE)) == 1,
+    "SSO secret file reaches a service other than the backend",
+)
+require("source: ${PONGDANG_SSO_EDGE_SECRET_MOUNT:-/dev/null}" in compose, "backend lacks the optional private SSO secret bind")
+require("target: /run/secrets/pongdang_sso_edge_secret" in compose, "backend SSO secret bind target changed")
 require(nginx.count("proxy_set_header Remote-User $http_remote_user;") >= 2, "frontend proxy does not preserve trusted SSO identity")
+require(nginx.count("proxy_set_header X-Portfolio-Edge-Secret $http_x_portfolio_edge_secret;") >= 2, "frontend proxy does not forward the private edge credential")
 require("127.0.0.1}:${FRONTEND_PORT:-8080}:8080" in compose, "production Nginx mapping does not target port 8080")
 require(dev_compose.count("DJANGO_SETTINGS_MODULE: config.settings.dev") == 2, "backend and collector do not share the explicit development settings path")
-require("location = /admin" in nginx, "bare /admin is not routed to the operator surface")
+for path in ("= /admin", "/admin/"):
+    block = location_block(path)
+    require("return 404;" in block, f"{path} is not fail-closed")
+    require("proxy_pass" not in block, f"{path} still exposes Django admin")
 
-for path in ("= /admin", "/admin/", "/static/"):
+for path in ("/static/",):
     block = location_block(path)
     for directive in (
         "proxy_pass http://backend:8000;",
@@ -104,6 +134,36 @@ require(
     release_workflow.count("needs: [prepare, quality-gate]") == 2,
     "release images can be published before the quality gate succeeds",
 )
+prepare_job = release_workflow[
+    release_workflow.index("  prepare:\n") : release_workflow.index("  quality-gate:\n")
+]
+deploy_job = release_workflow[release_workflow.index("  deploy:\n") :]
+require("fetch-depth: 0" in prepare_job, "release ancestry proof lacks complete history")
+require(
+    'git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main' in prepare_job,
+    "release tag revision is not constrained to origin/main history",
+)
+require(
+    'if [[ "$tagged_commit" != "$GITHUB_SHA" ]]' in prepare_job,
+    "release tag is not constrained to the exact workflow revision",
+)
+require(
+    "timeout-minutes: 60" in deploy_job,
+    "restricted server deployment timeout must remain 60 minutes",
+)
+for document_name, document in (
+    ("README", readme),
+    ("AGENTS", agents),
+    ("operations runbook", operations_runbook),
+):
+    require(
+        "origin/main" in document,
+        f"{document_name} does not describe the main-bound release contract",
+    )
+    require(
+        "/sso/admin/" in document and "404" in document,
+        f"{document_name} does not describe the centralized admin contract",
+    )
 require("VITE_APP_BASE_PATH=/multtara/" in release_workflow, "release assets are not built for the portfolio subpath")
 require("VITE_API_BASE_URL=/multtara/api/v1/" in release_workflow, "release API is not isolated below the portfolio subpath")
 require("VITE_SSO_ENABLED=true" in release_workflow, "release frontend does not enable portfolio SSO")
@@ -182,6 +242,20 @@ for service in ("backend", "collector"):
         raise SystemExit(f"FAIL: {service} same-origin CORS default changed")
     if environment.get("SECURE_SSL_REDIRECT") != "True":
         raise SystemExit(f"FAIL: {service} SSL redirect default changed")
+if services["backend"]["environment"].get("PONGDANG_SSO_EDGE_SECRET_FILE") != "":
+    raise SystemExit("FAIL: backend SSO secret file should default to environment fallback")
+if services["backend"].get("user") != "pongdang:root":
+    raise SystemExit("FAIL: backend default runtime user changed")
+if "PONGDANG_SSO_EDGE_SECRET" in services["collector"]["environment"]:
+    raise SystemExit("FAIL: collector received an SSO edge secret")
+secret_mounts = services["backend"].get("volumes", [])
+if not any(
+    mount.get("source") == "/dev/null"
+    and mount.get("target") == "/run/secrets/pongdang_sso_edge_secret"
+    and mount.get("read_only") is True
+    for mount in secret_mounts
+):
+    raise SystemExit(f"FAIL: backend optional secret bind is unsafe: {secret_mounts}")
 print("effective Compose contract: PASS")
 PY
 

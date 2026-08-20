@@ -3,7 +3,7 @@ from datetime import timedelta
 from django.core.cache import cache
 from django.contrib.admin.sites import AdminSite
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
@@ -13,42 +13,64 @@ from apps.users.admin import EcoActionAdmin
 from apps.users.models import EcoAction, Passport, User, UserActivity
 from apps.spots.models import WaterSpot
 
+
 class UserModelTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
-            username='useruser',
-            password='testpassword',
-            persona_type='surfer'
+            username="useruser", password="testpassword", persona_type="surfer"
         )
         self.spot = WaterSpot.objects.create(
-            type='beach',
-            name='Test Surf Beach',
+            type="beach",
+            name="Test Surf Beach",
             lat=34.0,
             lng=126.0,
-            region='Incheon',
-            address='654 Test Ln'
+            region="Incheon",
+            address="654 Test Ln",
         )
 
     def test_user_creation(self):
-        self.assertEqual(self.user.username, 'useruser')
-        self.assertEqual(self.user.persona_type, 'surfer')
+        self.assertEqual(self.user.username, "useruser")
+        self.assertEqual(self.user.persona_type, "surfer")
+
+    def test_linked_sso_subject_is_unique_and_immutable(self):
+        self.user.sso_subject = "portfolio-subject"
+        self.user.save(update_fields=("sso_subject",))
+
+        self.user.sso_subject = "replacement-subject"
+        with self.assertRaisesMessage(ValidationError, "immutable"):
+            self.user.save(update_fields=("sso_subject",))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.sso_subject, "portfolio-subject")
+
+        with self.assertRaises(DatabaseError):
+            with transaction.atomic():
+                User.objects.filter(pk=self.user.pk).update(
+                    sso_subject="bulk-replacement-subject"
+                )
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.sso_subject, "portfolio-subject")
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                User.objects.create_user(
+                    username="other-sso-user",
+                    sso_subject="portfolio-subject",
+                )
 
     def test_user_activity_creation(self):
         activity = UserActivity.objects.create(
             user=self.user,
             spot=self.spot,
-            action='visit',
+            action="visit",
         )
-        self.assertEqual(activity.action, 'visit')
+        self.assertEqual(activity.action, "visit")
         self.assertIsNone(activity.rating)
 
     def test_passport_creation(self):
         passport = Passport.objects.create(
-            user=self.user,
-            spot=self.spot,
-            eco_action='picked up trash'
+            user=self.user, spot=self.spot, eco_action="picked up trash"
         )
-        self.assertEqual(passport.eco_action, 'picked up trash')
+        self.assertEqual(passport.eco_action, "picked up trash")
 
     def test_passport_evidence_is_public_and_query_free_at_rest(self):
         with self.assertRaises(ValidationError):
@@ -193,6 +215,7 @@ class EcoActionVerificationIntegrityTests(TestCase):
 
 class UserSessionApiTests(TestCase):
     password = "V3ry-Long!Pond-Passphrase-2026"
+    sso_edge_secret = "test-only-pongdang-edge-secret-2026"
 
     def setUp(self):
         cache.clear()
@@ -211,6 +234,19 @@ class UserSessionApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         token = response.json()["csrf_token"]
         return client, token
+
+    def _sso_headers(
+        self,
+        subject="portfolio-owner",
+        email="owner@example.test",
+        display_name="Portfolio Owner",
+    ):
+        return {
+            "HTTP_REMOTE_USER": subject,
+            "HTTP_REMOTE_EMAIL": email,
+            "HTTP_REMOTE_NAME": display_name,
+            "HTTP_X_PORTFOLIO_EDGE_SECRET": self.sso_edge_secret,
+        }
 
     def test_registration_requires_csrf_and_creates_an_authenticated_session(self):
         client = APIClient(enforce_csrf_checks=True)
@@ -235,7 +271,10 @@ class UserSessionApiTests(TestCase):
         self.assertEqual(created.json()["email"], "pond@example.com")
         self.assertEqual(client.get("/api/v1/users/me/").status_code, 200)
 
-    @override_settings(PONGDANG_SSO_ENABLED=True)
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
     def test_sso_exchange_creates_session_and_disables_local_credentials(self):
         client, token = self._csrf_client()
         missing = client.post(
@@ -251,15 +290,17 @@ class UserSessionApiTests(TestCase):
             {},
             format="json",
             HTTP_X_CSRFTOKEN=token,
-            HTTP_REMOTE_USER="portfolio-owner",
-            HTTP_REMOTE_EMAIL="owner@example.test",
-            HTTP_REMOTE_NAME="Portfolio Owner",
+            **self._sso_headers(),
         )
         self.assertEqual(exchanged.status_code, 200)
         self.assertEqual(exchanged.json()["username"], "portfolio-owner")
         user = User.objects.get(username="portfolio-owner")
         self.assertFalse(user.has_usable_password())
-        self.assertEqual(client.get("/api/v1/users/me/").status_code, 200)
+        self.assertEqual(user.sso_subject, "portfolio-owner")
+        self.assertEqual(
+            client.get("/api/v1/users/me/", **self._sso_headers()).status_code,
+            200,
+        )
 
         csrf_token = client.cookies["csrftoken"].value
         local_register = client.post(
@@ -287,6 +328,7 @@ class UserSessionApiTests(TestCase):
             {"current_password": self.password, "new_password": self.password + "-new"},
             format="json",
             HTTP_X_CSRFTOKEN=csrf_token,
+            **self._sso_headers(),
         )
         self.assertEqual(local_password.status_code, 403)
         self.assertIn("single sign-on", local_password.json()["detail"])
@@ -295,9 +337,242 @@ class UserSessionApiTests(TestCase):
             {"current_password": self.password},
             format="json",
             HTTP_X_CSRFTOKEN=csrf_token,
+            **self._sso_headers(),
         )
         self.assertEqual(local_delete.status_code, 403)
         self.assertIn("single sign-on", local_delete.json()["detail"])
+
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
+    def test_sso_never_claims_a_username_collision(self):
+        collision = User.objects.create_user(
+            username="portfolio-owner",
+            email="different@example.test",
+            password=self.password,
+        )
+        client, token = self._csrf_client()
+
+        exchanged = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+            **self._sso_headers(),
+        )
+
+        self.assertEqual(exchanged.status_code, 200)
+        collision.refresh_from_db()
+        self.assertIsNone(collision.sso_subject)
+        linked = User.objects.get(sso_subject="portfolio-owner")
+        self.assertNotEqual(linked.pk, collision.pk)
+        self.assertNotEqual(linked.username.lower(), collision.username.lower())
+        self.assertEqual(linked.email, "owner@example.test")
+
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
+    def test_sso_preserves_an_opaque_subject_with_a_safe_local_username(self):
+        subject = "https://identity.example.test/subjects|owner account"
+        client, token = self._csrf_client()
+
+        exchanged = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+            **self._sso_headers(subject=subject),
+        )
+
+        self.assertEqual(exchanged.status_code, 200)
+        user = User.objects.get(sso_subject=subject)
+        self.assertNotEqual(user.username, subject)
+        self.assertLessEqual(len(user.username), 150)
+
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
+    def test_sso_links_only_one_unambiguous_email_match(self):
+        email_owner = User.objects.create_user(
+            username="legacy-email-owner",
+            email="OWNER@example.test",
+            password=self.password,
+        )
+        username_collision = User.objects.create_user(
+            username="portfolio-owner",
+            email="someone-else@example.test",
+            password=self.password,
+        )
+        client, token = self._csrf_client()
+
+        exchanged = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+            **self._sso_headers(),
+        )
+
+        self.assertEqual(exchanged.status_code, 200)
+        email_owner.refresh_from_db()
+        username_collision.refresh_from_db()
+        self.assertEqual(email_owner.sso_subject, "portfolio-owner")
+        self.assertIsNone(username_collision.sso_subject)
+        self.assertEqual(exchanged.json()["username"], "legacy-email-owner")
+
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
+    def test_sso_fails_closed_on_email_or_subject_conflicts(self):
+        duplicate_one = User.objects.create_user(
+            username="duplicate-one",
+            email="owner@example.test",
+        )
+        duplicate_two = User.objects.create_user(
+            username="duplicate-two",
+            email="OWNER@example.test",
+        )
+        client, token = self._csrf_client()
+        ambiguous = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+            **self._sso_headers(),
+        )
+        self.assertEqual(ambiguous.status_code, 409)
+        self.assertNotIn("owner@example.test", str(ambiguous.json()))
+        duplicate_one.refresh_from_db()
+        duplicate_two.refresh_from_db()
+        self.assertIsNone(duplicate_one.sso_subject)
+        self.assertIsNone(duplicate_two.sso_subject)
+
+        duplicate_two.delete()
+        duplicate_one.sso_subject = "different-subject"
+        duplicate_one.save(update_fields=("sso_subject",))
+        occupied_email = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value,
+            **self._sso_headers(),
+        )
+        self.assertEqual(occupied_email.status_code, 409)
+
+        wrong_email = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value,
+            **self._sso_headers(
+                subject="different-subject",
+                email="changed@example.test",
+            ),
+        )
+        self.assertEqual(wrong_email.status_code, 409)
+
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
+    def test_sso_session_requires_current_subject_and_edge_secret(self):
+        client, token = self._csrf_client()
+        exchanged = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+            **self._sso_headers(),
+        )
+        self.assertEqual(exchanged.status_code, 200)
+        self.assertEqual(
+            client.get("/api/v1/users/me/", **self._sso_headers()).status_code,
+            200,
+        )
+
+        rejected = client.get(
+            "/api/v1/users/me/",
+            HTTP_REMOTE_USER="portfolio-owner",
+            HTTP_X_PORTFOLIO_EDGE_SECRET="wrong-secret",
+        )
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(
+            client.get("/api/v1/users/me/", **self._sso_headers()).status_code,
+            403,
+        )
+
+        refreshed = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value,
+            **self._sso_headers(),
+        )
+        self.assertEqual(refreshed.status_code, 200)
+        switched = client.get(
+            "/api/v1/users/me/",
+            **self._sso_headers(
+                subject="Portfolio-Owner",
+                email="owner@example.test",
+            ),
+        )
+        self.assertEqual(switched.status_code, 403)
+        new_identity = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value,
+            **self._sso_headers(
+                subject="another-subject",
+                email="another@example.test",
+            ),
+        )
+        self.assertEqual(new_identity.status_code, 200)
+        self.assertEqual(User.objects.filter(sso_subject="another-subject").count(), 1)
+
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
+    def test_sso_exchange_and_logout_require_the_private_edge(self):
+        client, token = self._csrf_client()
+        missing_edge = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+            HTTP_REMOTE_USER="portfolio-owner",
+            HTTP_REMOTE_EMAIL="owner@example.test",
+        )
+        self.assertEqual(missing_edge.status_code, 401)
+        self.assertFalse(User.objects.filter(sso_subject="portfolio-owner").exists())
+
+        self.assertEqual(
+            client.post(
+                "/api/v1/users/sso/",
+                {},
+                format="json",
+                HTTP_X_CSRFTOKEN=token,
+                **self._sso_headers(),
+            ).status_code,
+            200,
+        )
+        logged_out = client.post(
+            "/api/v1/users/logout/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value,
+            **self._sso_headers(),
+        )
+        self.assertEqual(logged_out.status_code, 204)
+        self.assertEqual(
+            client.get("/api/v1/users/me/", **self._sso_headers()).status_code,
+            403,
+        )
 
     def test_login_profile_password_logout_and_account_delete(self):
         user = User.objects.create_user(

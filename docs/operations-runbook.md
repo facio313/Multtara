@@ -7,7 +7,9 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
 
 ## 1. 운영 계약
 
-- Release source는 기존 `vMAJOR.MINOR.PATCH` Git tag가 가리키는 commit이다.
+- Release source는 `origin/main` 이력에 이미 포함된 commit을 가리키는 기존
+  `vMAJOR.MINOR.PATCH` Git tag다. tag commit과 workflow revision은 정확히 같아야
+  한다.
 - Backend와 frontend 이미지는 GHCR의 `@sha256:<64 hex>` 참조만 허용한다.
 - Release build는 max-level provenance와 SBOM attestation을 이미지에 첨부한다.
 - Pi 배포는 `docker-compose.yml` 다음에 `docker-compose.deploy.yml`을 로드한다.
@@ -26,7 +28,18 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
 - 일반 공개 경로는 호스트 Authelia `auth_request`로 보호한다. edge는 외부
   `Remote-*` 헤더를 버리고 검증된 값을 덮어쓰며, release frontend는
   `VITE_SSO_ENABLED=true`, backend Compose는 `PONGDANG_SSO_ENABLED=true`여야
-  한다. 운영에서 로컬 가입·비밀번호 인증·계정 삭제를 다시 열지 않는다.
+  한다. SSO edge secret은 printable ASCII 32~4096바이트 앱 전용 무작위 값으로 생성한다. host
+  `cks:cks`, mode `0640` 일반 파일을 `PONGDANG_SSO_EDGE_SECRET_MOUNT`로 bind하고 container
+  path를 `PONGDANG_SSO_EDGE_SECRET_FILE=/run/secrets/pongdang_sso_edge_secret`로
+  지정하는 방식이 우선이다. rootless Docker의 host owner/group은 container
+  root로 매핑되므로 `PONGDANG_BACKEND_RUNTIME_USER=pongdang:root`로 앱 UID는
+  비-root로 유지하고 private group-read만 허용한다. 두 파일 설정이 모두 비어 있을 때만
+  `PONGDANG_SSO_EDGE_SECRET` 환경변수로 폴백한다. 호스트 edge와 backend만 같은
+  값을 사용하고 inner Nginx는 해당 헤더를 Django로 전달한다. 브라우저나 다른
+  앱과 공유하지 않는다. 운영에서 로컬 가입·비밀번호
+  인증·계정 삭제를 다시 열지 않는다. 계정 관리는 중앙 `/sso/admin/`만 사용하며,
+  inner Nginx는 `/admin`과 모든 `/admin/` 하위 경로를 Django로 전달하지 않고
+  항상 `404`로 차단한다.
 
 ## 2. 최초 사용자 결정 및 외부 준비
 
@@ -44,6 +57,10 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
 8. 신뢰 가능한 HTTPS termination 및 Pi firewall 규칙.
 9. off-device backup 대상과 조직의 RPO/RTO. 로컬 기본 retention은 14일이며
    off-device 복사 자체는 이 저장소가 구성하지 않는다.
+10. 퐁당 전용 SSO edge secret. `openssl rand -hex 32`의 출력을 전용 파일에
+    쓰고 owner/group `cks:cks`, mode `0640`, 일반 파일, 32~4096바이트인지 확인한다.
+    절대 호스트 파일 경로와 고정 container 경로를 위 두 파일 변수에 설정하고,
+    `PONGDANG_BACKEND_RUNTIME_USER=pongdang:root`를 함께 설정한다.
 
 현재 portfolio 서버의 운영값은 `APPLICATION_BASE_PATH=/multtara`,
 `VITE_APP_BASE_PATH=/multtara/`, `VITE_API_BASE_URL=/multtara/api/v1/`,
@@ -72,16 +89,20 @@ Docker group membership은 사실상 root 수준 권한이다. 전용 사용자�
 
 ## 3. Release 생성
 
-사용자가 검증된 commit에 tag를 만들고 push하면 `Release ARM64 Images` workflow가
-실행된다.
+사용자가 검증을 마쳐 `origin/main`에 포함된 commit에 tag를 만들고 push하면
+`Release ARM64 Images` workflow가 실행된다. workflow는 전체 commit graph를
+가져온 뒤 tag commit과 선택된 revision의 일치 및 그 revision이 현재
+`origin/main`의 ancestor인지 모두 확인하고, 하나라도 다르면 release 전에
+중단한다.
 
 ```bash
-git tag -s v1.0.0 <verified-commit>
+git tag -s v1.0.0 <verified-main-commit>
 git push origin v1.0.0
 ```
 
 수동 재실행은 workflow dispatch에서 이미 존재하는 tag를 입력하고 그 tag가
-가리키는 revision을 선택한다. 입력 tag와 workflow revision이 다르면 실패한다.
+가리키는 revision을 선택한다. 입력 tag와 workflow revision이 다르거나 선택된
+revision이 `origin/main` 이력에 없으면 실패한다.
 
 Workflow 결과:
 

@@ -116,6 +116,9 @@ cp \
   "$TARGET/scripts/"
 chmod +x "$TARGET/scripts/"*.sh
 cp docker-compose.yml docker-compose.deploy.yml "$TARGET/"
+SSO_SECRET_FILE="$TARGET/state/pongdang-sso-edge-secret"
+printf 'test-only-private-edge-secret-value-2026\n' > "$SSO_SECRET_FILE"
+chmod 0640 "$SSO_SECRET_FILE"
 {
   printf 'POSTGRES_DB=pongdang_test\n'
   printf 'POSTGRES_USER=pongdang\n'
@@ -126,6 +129,11 @@ cp docker-compose.yml docker-compose.deploy.yml "$TARGET/"
   printf 'SECURE_SSL_REDIRECT=True\n'
   printf 'FRONTEND_BIND_ADDRESS=127.0.0.1\n'
   printf 'ROUTING_MATRIX_URL=\n'
+  printf 'PONGDANG_SSO_ENABLED=True\n'
+  printf 'PONGDANG_SSO_EDGE_SECRET=\n'
+  printf 'PONGDANG_SSO_EDGE_SECRET_MOUNT=%s\n' "$SSO_SECRET_FILE"
+  printf 'PONGDANG_SSO_EDGE_SECRET_FILE=/run/secrets/pongdang_sso_edge_secret\n'
+  printf 'PONGDANG_BACKEND_RUNTIME_USER=pongdang:root\n'
   printf 'BACKUP_RETENTION_DAYS=14\n'
   printf '# 운영 UTF-8 주석은 허용한다.\n'
 } > "$TARGET/.env"
@@ -145,8 +153,11 @@ SH
 cat > "$FAKE_BIN/stat" <<'SH'
 #!/bin/sh
 case "${2:-}" in
-  %a) echo 600 ;;
+  %a)
+    if [ "${3##*/}" = ".env" ]; then echo 600; else echo 640; fi
+    ;;
   %u) echo 1000 ;;
+  %g) echo 1000 ;;
   *) exit 1 ;;
 esac
 SH
@@ -244,6 +255,47 @@ SH
 chmod +x "$FAKE_BIN/"*
 export PONGDANG_FAKE_DOCKER_LOG="$TMP_ROOT/fake-docker.log"
 : > "$PONGDANG_FAKE_DOCKER_LOG"
+
+cp "$SSO_SECRET_FILE" "$SSO_SECRET_FILE.valid"
+printf 'short\n' > "$SSO_SECRET_FILE"
+chmod 0640 "$SSO_SECRET_FILE"
+if PATH="$FAKE_BIN:$PATH" bash -c '
+    set -euo pipefail
+    PONGDANG_TARGET="$1"
+    source "$2/deploy-common.sh"
+    pongdang_validate_secret_env
+  ' _ "$TARGET" "$TARGET/scripts" >/dev/null 2>&1; then
+  fail "short SSO edge secret was accepted"
+fi
+mv "$SSO_SECRET_FILE.valid" "$SSO_SECRET_FILE"
+
+cp "$TARGET/.env" "$TARGET/.env.valid-runtime-user"
+sed 's/^PONGDANG_BACKEND_RUNTIME_USER=.*/PONGDANG_BACKEND_RUNTIME_USER=1000:1000/' \
+  "$TARGET/.env.valid-runtime-user" > "$TARGET/.env"
+chmod 0600 "$TARGET/.env"
+if PATH="$FAKE_BIN:$PATH" bash -c '
+    set -euo pipefail
+    PONGDANG_TARGET="$1"
+    source "$2/deploy-common.sh"
+    pongdang_validate_secret_env
+  ' _ "$TARGET" "$TARGET/scripts" >/dev/null 2>&1; then
+  fail "host UID:GID backend runtime override was accepted"
+fi
+mv "$TARGET/.env.valid-runtime-user" "$TARGET/.env"
+
+cp "$TARGET/.env" "$TARGET/.env.valid-file-precedence"
+sed 's/^PONGDANG_SSO_EDGE_SECRET=.*/PONGDANG_SSO_EDGE_SECRET=duplicate-private-edge-secret-value-2026/' \
+  "$TARGET/.env.valid-file-precedence" > "$TARGET/.env"
+chmod 0600 "$TARGET/.env"
+if PATH="$FAKE_BIN:$PATH" bash -c '
+    set -euo pipefail
+    PONGDANG_TARGET="$1"
+    source "$2/deploy-common.sh"
+    pongdang_validate_secret_env
+  ' _ "$TARGET" "$TARGET/scripts" >/dev/null 2>&1; then
+  fail "file-backed SSO deployment retained a duplicate environment secret"
+fi
+mv "$TARGET/.env.valid-file-precedence" "$TARGET/.env"
 
 if PONGDANG_FAKE_COMPOSE_VERSION=v2.24.3 PATH="$FAKE_BIN:$PATH" \
     "$TARGET/scripts/postgres-backup.sh" --target "$TARGET" >/dev/null 2>&1; then
@@ -384,6 +436,13 @@ require("platforms: linux/arm64" in release, "release workflow does not target A
 require(release.count("provenance: mode=max") == 2, "release provenance is incomplete")
 require(release.count("sbom: true") == 2, "release SBOM attestations are incomplete")
 require("BACKEND_IMAGE=%s@%s" in release and "FRONTEND_IMAGE=%s@%s" in release, "release bundle is not digest-pinned")
+prepare_job = release[release.index("  prepare:\n") : release.index("  quality-gate:\n")]
+deploy_job = release[release.index("  deploy:\n") :]
+require(
+    'git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main' in prepare_job,
+    "release revision is not constrained to origin/main history",
+)
+require("timeout-minutes: 60" in deploy_job, "release deploy timeout is not 60 minutes")
 print("deployment static contract: PASS")
 PY
 

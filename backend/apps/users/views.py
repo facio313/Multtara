@@ -1,11 +1,7 @@
 from __future__ import annotations
 
 from django.conf import settings
-from django.contrib.auth import get_user_model, login, logout, update_session_auth_hash
-from django.contrib.auth.validators import UnicodeUsernameValidator
-from django.core.exceptions import ValidationError
-from django.core.validators import validate_email
-from django.db import IntegrityError, transaction
+from django.contrib.auth import login, logout, update_session_auth_hash
 from django.db.models.deletion import ProtectedError
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
@@ -33,8 +29,7 @@ from .serializers import (
     UserActivitySerializer,
     UserSelfSerializer,
 )
-
-User = get_user_model()
+from .sso import SsoIdentityConflict, resolve_sso_user, trusted_sso_identity
 
 
 def _sso_managed_response():
@@ -42,46 +37,6 @@ def _sso_managed_response():
         {"detail": "This credential is managed by portfolio single sign-on."},
         status=status.HTTP_403_FORBIDDEN,
     )
-
-
-def _trusted_sso_identity(request):
-    username = request.META.get("HTTP_REMOTE_USER", "").strip()
-    email = request.META.get("HTTP_REMOTE_EMAIL", "").strip().lower()
-    display_name = request.META.get("HTTP_REMOTE_NAME", "").strip()
-    if not username or not email:
-        return None
-    if any(
-        len(value) > 254
-        or any(ord(character) < 32 or ord(character) == 127 for character in value)
-        for value in (username, email, display_name)
-    ):
-        return None
-    if len(username) > User._meta.get_field("username").max_length:
-        return None
-    try:
-        UnicodeUsernameValidator()(username)
-        validate_email(email)
-    except ValidationError:
-        return None
-    return username, email, display_name
-
-
-def _get_or_create_sso_user(username, email, display_name):
-    user = User.objects.filter(username__iexact=username).first()
-    if user is None:
-        user = User.objects.filter(email__iexact=email).first()
-    if user is not None:
-        return user
-    try:
-        with transaction.atomic():
-            user = User(username=username, email=email)
-            if display_name:
-                user.first_name = display_name[:150]
-            user.set_unusable_password()
-            user.save()
-            return user
-    except IntegrityError:
-        return User.objects.get(username__iexact=username)
 
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")
@@ -143,13 +98,22 @@ class SsoLoginView(APIView):
     def post(self, request):
         if not settings.PONGDANG_SSO_ENABLED:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        identity = _trusted_sso_identity(request)
+        identity = trusted_sso_identity(request)
         if identity is None:
             return Response(
                 {"detail": "A validated proxy identity is required."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
-        user = _get_or_create_sso_user(*identity)
+        try:
+            user = resolve_sso_user(identity)
+        except SsoIdentityConflict:
+            # Do not retain a previous native session after an ambiguous or
+            # contradictory identity assertion.
+            logout(request._request)
+            return Response(
+                {"detail": "The portfolio identity conflicts with an account."},
+                status=status.HTTP_409_CONFLICT,
+            )
         if not user.is_active:
             return Response(
                 {"detail": "This account is disabled."},

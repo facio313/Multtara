@@ -82,15 +82,35 @@ GHCR digest image, provenance, SBOM, checksum manifest만 배포합니다. 최�
 
 `bonifacio.work`에서는 전용 target `/opt/pongdang-multtara`, Compose project
 `pongdang-multtara`, loopback `127.0.0.1:5182`와 독립 PostgreSQL volume을 사용합니다.
-tag release가 digest를 만든 뒤 제한된 서버 명령으로 자동 배포하며, 공개 prefix는
-`/multtara/`입니다. 다른 프로젝트의 `cksDB`나 네트워크를 공유하지 않습니다.
+`origin/main` 이력에 이미 포함된 commit에 붙은 tag만 release할 수 있습니다.
+workflow revision과 tag commit이 정확히 일치해야 하며, tag release가 digest를 만든
+뒤 제한된 서버 명령으로 자동 배포합니다. 공개 prefix는 `/multtara/`입니다. 다른
+프로젝트의 `cksDB`나 네트워크를 공유하지 않습니다.
 
 운영 계정은 `bonifacio.work/sso/`의 Authelia 통합 로그인을 사용합니다. 호스트
-Nginx가 인증한 `Remote-*` 헤더만 loopback 원본에 전달하며, Django는 이를 전용
-`pongdang_sessionid` 세션으로 교환합니다. 운영에서는 별도 회원가입·비밀번호
+Nginx가 인증한 `Remote-*` 헤더와 퐁당 전용 `X-Portfolio-Edge-Secret`만 loopback
+원본에 전달하며, Django는 불변 `sso_subject`에 정확히 결합한 뒤 전용
+`pongdang_sessionid` 세션으로 교환합니다. 최초 연결은 중복 없는 이메일 한 건에만
+허용되고 이후 모든 인증 API 요청은 현재 SSO subject와 엣지 시크릿을 다시
+검증합니다. 운영에서는 별도 회원가입·비밀번호
 로그인/변경·계정 삭제가 비활성화되고 로그아웃은 중앙 `/sso/logout`으로
 연결됩니다. 개발 환경은 두 SSO 변수를 `false`로 두면 기존 로컬 계정 흐름을
 사용할 수 있습니다.
+
+운영 계정 관리는 중앙 `/sso/admin/`에서만 수행합니다. Multtara의 독립 Django
+admin은 공개하지 않으며 `/multtara/admin`과 모든 하위 경로는 inner Nginx에서
+항상 `404`를 반환합니다.
+
+엣지 시크릿은 환경변수보다 host `cks:cks`, mode `0640` 일반 파일을 권장합니다.
+`PONGDANG_SSO_EDGE_SECRET_MOUNT`에 절대 호스트 경로를,
+`PONGDANG_SSO_EDGE_SECRET_FILE=/run/secrets/pongdang_sso_edge_secret`를 설정하면
+파일이 우선됩니다. rootless Docker에서는 host 소유자가 container root로
+매핑되므로 `PONGDANG_BACKEND_RUNTIME_USER=pongdang:root`로 앱 UID는 비-root로
+유지하고 전용 group-read 권한만 사용합니다.
+파일 경로를 설정하지 않은 배포에서만
+`PONGDANG_SSO_EDGE_SECRET` 값으로 폴백합니다. 시크릿은 printable ASCII
+32~4096바이트이고
+심볼릭 링크가 아니어야 하며 브라우저 번들·로그·API 응답에 포함하면 안 됩니다.
 
 백엔드 컨테이너는 외부 포트를 열지 않으며, 프런트 Nginx도 기본적으로 호스트의 `127.0.0.1:8080`에만 바인딩됩니다. Caddy·Cloudflare Tunnel 등 신뢰 가능한 HTTPS 종단 프록시가 이 주소로 전달하도록 구성한 뒤, 공개 HTTPS 도메인에서 다음 경로를 확인합니다.
 

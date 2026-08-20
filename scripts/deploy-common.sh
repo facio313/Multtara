@@ -174,7 +174,9 @@ pongdang_validate_secret_env() {
   local file="$PONGDANG_TARGET/.env"
   local mode
   local owner
+  local group
   local secret_lower
+  local sso_secret_file_size
 
   [[ -f "$file" && ! -L "$file" ]] || pongdang_die "secret environment file is missing or unsafe: $file"
   pongdang_require_command python3
@@ -217,6 +219,17 @@ PY
     || pongdang_die "APPLICATION_BASE_PATH may appear at most once"
   PONGDANG_ROUTING_MATRIX_URL="$(pongdang_optional_env_value "$file" ROUTING_MATRIX_URL)" \
     || pongdang_die "ROUTING_MATRIX_URL may appear at most once"
+  PONGDANG_SSO_ENABLED="$(pongdang_optional_env_value "$file" PONGDANG_SSO_ENABLED)" \
+    || pongdang_die "PONGDANG_SSO_ENABLED may appear at most once"
+  PONGDANG_SSO_EDGE_SECRET="$(pongdang_optional_env_value "$file" PONGDANG_SSO_EDGE_SECRET)" \
+    || pongdang_die "PONGDANG_SSO_EDGE_SECRET may appear at most once"
+  PONGDANG_SSO_EDGE_SECRET_MOUNT="$(pongdang_optional_env_value "$file" PONGDANG_SSO_EDGE_SECRET_MOUNT)" \
+    || pongdang_die "PONGDANG_SSO_EDGE_SECRET_MOUNT may appear at most once"
+  PONGDANG_SSO_EDGE_SECRET_FILE="$(pongdang_optional_env_value "$file" PONGDANG_SSO_EDGE_SECRET_FILE)" \
+    || pongdang_die "PONGDANG_SSO_EDGE_SECRET_FILE may appear at most once"
+  PONGDANG_BACKEND_RUNTIME_USER="$(pongdang_optional_env_value "$file" PONGDANG_BACKEND_RUNTIME_USER)" \
+    || pongdang_die "PONGDANG_BACKEND_RUNTIME_USER may appear at most once"
+  PONGDANG_SSO_ENABLED="${PONGDANG_SSO_ENABLED:-False}"
 
   [[ "$PONGDANG_POSTGRES_DB" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
     || pongdang_die "POSTGRES_DB is not a safe PostgreSQL identifier"
@@ -286,6 +299,87 @@ PY
   [[ "$PONGDANG_SSL_REDIRECT" == "True" ]] || pongdang_die "SECURE_SSL_REDIRECT must be True on the Pi"
   [[ "$PONGDANG_FRONTEND_BIND" == "127.0.0.1" ]] \
     || pongdang_die "FRONTEND_BIND_ADDRESS must remain 127.0.0.1 behind the trusted HTTPS edge"
+  [[ "$PONGDANG_SSO_ENABLED" == "True" || "$PONGDANG_SSO_ENABLED" == "true" \
+    || "$PONGDANG_SSO_ENABLED" == "False" || "$PONGDANG_SSO_ENABLED" == "false" ]] \
+    || pongdang_die "PONGDANG_SSO_ENABLED must be True or False"
+  if [[ -n "$PONGDANG_BACKEND_RUNTIME_USER" \
+    && "$PONGDANG_BACKEND_RUNTIME_USER" != "pongdang:root" ]]; then
+    pongdang_die "PONGDANG_BACKEND_RUNTIME_USER must be pongdang:root when explicitly configured"
+  fi
+  if [[ -n "$PONGDANG_SSO_EDGE_SECRET_MOUNT" || -n "$PONGDANG_SSO_EDGE_SECRET_FILE" ]]; then
+    [[ -n "$PONGDANG_SSO_EDGE_SECRET_MOUNT" \
+      && "$PONGDANG_SSO_EDGE_SECRET_FILE" == "/run/secrets/pongdang_sso_edge_secret" ]] \
+      || pongdang_die "SSO edge secret file configuration requires both the absolute host mount and fixed container path"
+    [[ -z "$PONGDANG_SSO_EDGE_SECRET" ]] \
+      || pongdang_die "PONGDANG_SSO_EDGE_SECRET must be empty when the file-backed secret is configured"
+    [[ "$PONGDANG_SSO_EDGE_SECRET_MOUNT" == /* \
+      && "$PONGDANG_SSO_EDGE_SECRET_MOUNT" != "/dev/null" \
+      && -f "$PONGDANG_SSO_EDGE_SECRET_MOUNT" \
+      && ! -L "$PONGDANG_SSO_EDGE_SECRET_MOUNT" ]] \
+      || pongdang_die "PONGDANG_SSO_EDGE_SECRET_MOUNT must be an absolute regular non-symlink file"
+    mode="$(stat -c '%a' "$PONGDANG_SSO_EDGE_SECRET_MOUNT")"
+    [[ "$mode" == "640" ]] \
+      || pongdang_die "PONGDANG_SSO_EDGE_SECRET_MOUNT must have mode 0640"
+    owner="$(stat -c '%u' "$PONGDANG_SSO_EDGE_SECRET_MOUNT")"
+    [[ "$owner" == "$(id -u)" ]] \
+      || pongdang_die "PONGDANG_SSO_EDGE_SECRET_MOUNT must be owned by the deployment user"
+    group="$(stat -c '%g' "$PONGDANG_SSO_EDGE_SECRET_MOUNT")"
+    [[ "$group" == "$(id -g)" ]] \
+      || pongdang_die "PONGDANG_SSO_EDGE_SECRET_MOUNT must use the deployment user's private group"
+    [[ "${PONGDANG_BACKEND_RUNTIME_USER:-pongdang:root}" == "pongdang:root" ]] \
+      || pongdang_die "the backend must retain its non-root UID with container group 0 for the private secret bind"
+    sso_secret_file_size="$(wc -c < "$PONGDANG_SSO_EDGE_SECRET_MOUNT")" \
+      || pongdang_die "PONGDANG_SSO_EDGE_SECRET_MOUNT could not be read"
+    [[ "$sso_secret_file_size" =~ ^[0-9]+$ ]] \
+      || pongdang_die "PONGDANG_SSO_EDGE_SECRET_MOUNT size is invalid"
+    (( sso_secret_file_size >= 32 && sso_secret_file_size <= 4096 )) \
+      || pongdang_die "PONGDANG_SSO_EDGE_SECRET_MOUNT must contain 32 to 4096 bytes"
+    python3 - "$PONGDANG_SSO_EDGE_SECRET_MOUNT" <<'PY' \
+      || pongdang_die "PONGDANG_SSO_EDGE_SECRET_MOUNT content is invalid"
+import sys
+import unicodedata
+from pathlib import Path
+
+payload = Path(sys.argv[1]).read_bytes()
+if payload.endswith(b"\n"):
+    payload = payload[:-1]
+try:
+    value = payload.decode("ascii")
+except UnicodeError:
+    raise SystemExit(1) from None
+lowered = value.lower()
+if (
+    len(payload) < 32
+    or any(character.isspace() or unicodedata.category(character) == "Cc" for character in value)
+    or "change" in lowered
+    or "replace" in lowered
+):
+    raise SystemExit(1)
+PY
+  fi
+  if [[ "$PONGDANG_SSO_ENABLED" == "True" || "$PONGDANG_SSO_ENABLED" == "true" ]]; then
+    if [[ -z "$PONGDANG_SSO_EDGE_SECRET_MOUNT" ]]; then
+      PONGDANG_CHECK_SSO_EDGE_SECRET="$PONGDANG_SSO_EDGE_SECRET" python3 - <<'PY' \
+        || pongdang_die "PONGDANG_SSO_EDGE_SECRET must be printable ASCII with 32 to 4096 bytes and no placeholder"
+import os
+
+value = os.environ["PONGDANG_CHECK_SSO_EDGE_SECRET"]
+try:
+    payload = value.encode("ascii")
+except UnicodeError:
+    raise SystemExit(1) from None
+lowered = value.lower()
+if (
+    len(payload) < 32
+    or len(payload) > 4096
+    or any(byte < 33 or byte > 126 for byte in payload)
+    or "change" in lowered
+    or "replace" in lowered
+):
+    raise SystemExit(1)
+PY
+    fi
+  fi
   if [[ -n "$PONGDANG_APPLICATION_BASE_PATH" ]]; then
     [[ "$PONGDANG_APPLICATION_BASE_PATH" =~ ^/[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*$ ]] \
       || pongdang_die "APPLICATION_BASE_PATH must be an absolute URL path without a trailing slash"

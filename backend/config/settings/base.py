@@ -74,7 +74,9 @@ DATABASES = {
 }
 
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+    },
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
@@ -84,7 +86,7 @@ AUTH_USER_MODEL = "users.User"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.SessionAuthentication",
+        "apps.users.authentication.PortfolioSessionAuthentication",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
@@ -137,3 +139,7 @@ CSRF_COOKIE_SAMESITE = "Lax"
 # Nginx + Authelia auth_request boundary. The application never trusts client
 # identity headers on an independently exposed origin.
 PONGDANG_SSO_ENABLED = config("PONGDANG_SSO_ENABLED", default=False, cast=bool)
+PONGDANG_SSO_EDGE_SECRET = config("PONGDANG_SSO_EDGE_SECRET", default="")
+PONGDANG_SSO_EDGE_SECRET_FILE = config(
+    "PONGDANG_SSO_EDGE_SECRET_FILE", default=""
+).strip()

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import ipaddress
+import os
+from pathlib import Path
 import re
+import stat
+import unicodedata
 from typing import Any
 
 import dj_database_url
@@ -108,15 +112,12 @@ def parse_production_cors_allowed_origins(value: str) -> list[str]:
                 canonical_host = str(address)
             else:
                 labels = host.split(".")
-                if (
-                    len(host) > 253
-                    or any(
-                        not label
-                        or len(label) > 63
-                        or label.startswith("-")
-                        or label.endswith("-")
-                        for label in labels
-                    )
+                if len(host) > 253 or any(
+                    not label
+                    or len(label) > 63
+                    or label.startswith("-")
+                    or label.endswith("-")
+                    for label in labels
                 ):
                     raise ImproperlyConfigured(
                         "Production CORS_ALLOWED_ORIGINS contains an invalid host."
@@ -131,3 +132,108 @@ def parse_production_cors_allowed_origins(value: str) -> list[str]:
             origins.append(canonical_origin)
 
     return origins
+
+
+def validate_production_sso_edge_secret(enabled: bool, value: str) -> str:
+    """Require an unambiguous private edge credential whenever SSO is active."""
+
+    if not isinstance(value, str):
+        raise ImproperlyConfigured(
+            "Production PONGDANG_SSO_EDGE_SECRET must be a string."
+        )
+    if not enabled:
+        return value
+    try:
+        encoded_size = len(value.encode("utf-8"))
+    except UnicodeError as exc:
+        raise ImproperlyConfigured(
+            "Production SSO edge secret must contain valid UTF-8."
+        ) from exc
+    lowered = value.lower()
+    if (
+        encoded_size < 32
+        or encoded_size > 4_096
+        or not value.isascii()
+        or any(
+            character.isspace() or unicodedata.category(character) == "Cc"
+            for character in value
+        )
+        or "change" in lowered
+        or "replace" in lowered
+    ):
+        raise ImproperlyConfigured(
+            "Production SSO requires a printable ASCII edge secret of 32 to 4096 bytes."
+        )
+    return value
+
+
+def load_production_sso_edge_secret(
+    enabled: bool,
+    environment_value: str,
+    file_name: str,
+) -> str:
+    """Prefer a bounded private secret file, with an environment fallback."""
+
+    if not enabled:
+        return environment_value
+    if not file_name:
+        return validate_production_sso_edge_secret(True, environment_value)
+
+    path = Path(file_name)
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise ImproperlyConfigured(
+            "Production SSO edge secret file is unavailable."
+        ) from exc
+    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
+        raise ImproperlyConfigured(
+            "Production SSO edge secret file must be a regular non-symlink file."
+        )
+    mode = stat.S_IMODE(metadata.st_mode)
+    owned_private = mode == 0o600 and metadata.st_uid == os.geteuid()
+    rootless_group_private = (
+        mode == 0o640
+        and os.geteuid() != 0
+        and metadata.st_uid == 0
+        and metadata.st_gid == os.getegid()
+    )
+    if not (owned_private or rootless_group_private):
+        raise ImproperlyConfigured(
+            "Production SSO edge secret file must be mode 0600 and owned by "
+            "the backend user, or mode 0640 and root-owned by its private group."
+        )
+    if metadata.st_size < 32 or metadata.st_size > 4_096:
+        raise ImproperlyConfigured(
+            "Production SSO edge secret file must contain 32 to 4096 bytes."
+        )
+    try:
+        with path.open("rb") as source:
+            payload = source.read(4_097)
+    except OSError as exc:
+        raise ImproperlyConfigured(
+            "Production SSO edge secret file could not be read."
+        ) from exc
+    if len(payload) > 4_096:
+        raise ImproperlyConfigured(
+            "Production SSO edge secret file must contain 32 to 4096 bytes."
+        )
+    if payload.endswith(b"\n"):
+        payload = payload[:-1]
+    try:
+        value = payload.decode("ascii")
+    except UnicodeError as exc:
+        raise ImproperlyConfigured(
+            "Production SSO edge secret file must contain printable ASCII."
+        ) from exc
+    # Ensure the file was not replaced between metadata and read operations.
+    try:
+        if os.path.samestat(metadata, path.stat()) is False:
+            raise ImproperlyConfigured(
+                "Production SSO edge secret file changed while it was read."
+            )
+    except OSError as exc:
+        raise ImproperlyConfigured(
+            "Production SSO edge secret file changed while it was read."
+        ) from exc
+    return validate_production_sso_edge_secret(True, value)
