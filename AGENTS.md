@@ -169,6 +169,9 @@ anthropic-feat-name ─┘
   queries, fragments, or wildcards; invalid entries must fail startup.
 - `frontend/npm run build` remains the Docker/Nginx build. `frontend/npm run build:sites` is the separate Cloudflare Worker-compatible private preview build; keep `.openai/hosting.json` limited to the Sites `project_id` and optional logical bindings, never secrets.
 - Production Compose binds frontend Nginx to host loopback by default. Only a trusted HTTPS termination proxy may reach it and supply `X-Forwarded-Proto`; never expose that origin port while trusting client-supplied forwarding headers.
+- Backend and collector keep a read-only root filesystem. Gunicorn's optional
+  control socket stays disabled because its default `/app/.gunicorn` path is not
+  writable; writable runtime state is limited to the declared tmpfs mounts.
 - Production Compose runs `run_condition_pipeline` as a separate non-root collector. Missing/failed providers must not extend stale evidence; preserve provider issue cadence and quota-aware defaults when changing its intervals.
 - Recommendation requests accept at most 20 preference targets. `party.participant_skill_level` is one of `beginner|intermediate|advanced|unspecified`; adult beginner swimming uses the conservative family profile, and surfing suitability remains unknown unless an explicit skill matches an authoritative KHOA `GrdCn` shape. Unfiltered nationwide candidate sets above the bounded pool require a region.
 - Anonymous API throttling uses the connection peer, never caller-supplied forwarding headers. Nginx applies an additional origin-wide limit and a stricter recommendation limit; per-client limits belong at the trusted HTTPS edge.

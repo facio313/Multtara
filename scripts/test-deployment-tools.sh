@@ -365,6 +365,7 @@ require("--no-build" in deploy and " config --format json" in deploy, "Pi deploy
 require("postgres_volume_exists" in deploy and "prior release state or PostgreSQL volume exists" in deploy, "stopped existing database can bypass the pre-change backup")
 require("--require-hashes" in dockerfile and "requirements.lock" in dockerfile, "backend image does not install the hash lock")
 require("requirements.txt /tmp/requirements.txt" not in dockerfile, "backend image still installs the range manifest")
+require("--no-control-socket" in dockerfile, "Gunicorn control socket conflicts with the read-only runtime")
 require("USER nginx" in frontend_dockerfile and "EXPOSE 8080" in frontend_dockerfile, "frontend image is not explicitly unprivileged")
 require("ENTRYPOINT []" in frontend_dockerfile, "frontend still depends on the root image entrypoint")
 require("/var/run:rw,noexec,nosuid,nodev,size=8m,mode=1777" in compose, "unprivileged Nginx PID path is not writable tmpfs")
