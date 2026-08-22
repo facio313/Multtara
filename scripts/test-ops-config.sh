@@ -93,7 +93,7 @@ for name, content in (("backend", backend_dockerfile), ("frontend", frontend_doc
         "/etc/portfolio-auth-build" in content and "chmod 0444" in content,
         f"{name} image lacks an immutable auth build contract",
     )
-require("portfolio-auth-mode.sh exec --" in auth_entrypoint, "frontend entrypoint bypasses the resolver")
+require("portfolio-auth-mode.sh contract" in auth_entrypoint, "frontend entrypoint bypasses the resolver")
 require("if not settings.PONGDANG_SSO_ENABLED" in root_urls, "SSO mode still registers Django admin")
 require("dockerfile: frontend/Dockerfile" in compose, "frontend does not use the guarded root context")
 require("**" in dockerignore and "!frontend/**" in dockerignore, "root frontend context is not allowlisted")

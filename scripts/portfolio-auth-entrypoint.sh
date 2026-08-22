@@ -15,10 +15,7 @@ build_contract_file=/etc/portfolio-auth-build
   fail 'image build contract must contain exactly two lines'
 
 build_contract=$(cat "$build_contract_file")
-runtime_contract=$(
-  /usr/local/bin/portfolio-auth-mode.sh exec -- /bin/sh -c \
-    'printf "%s\n%s\n" "$PORTFOLIO_BRANCH" "$PORTFOLIO_AUTH_MODE"'
-)
+runtime_contract=$(/usr/local/bin/portfolio-auth-mode.sh contract)
 [ "$runtime_contract" = "$build_contract" ] || \
   fail 'runtime branch/auth mode conflicts with the image build'
 
