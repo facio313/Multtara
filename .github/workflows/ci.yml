@@ -59,7 +59,7 @@ jobs:
       PONGDANG_SSO_EDGE_SECRET: ci-only-pongdang-edge-secret-value-2026
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate branch-bound authentication contract
         working-directory: .
@@ -111,7 +111,7 @@ jobs:
         working-directory: frontend
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate branch-bound authentication contract
         working-directory: .
@@ -167,7 +167,7 @@ jobs:
       FRONTEND_IMAGE: ghcr.io/example/pongdang/frontend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Validate branch-bound authentication contract
         run: scripts/test-portfolio-auth-mode.sh
@@ -206,7 +206,7 @@ jobs:
             dockerfile: ./frontend/Dockerfile
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
