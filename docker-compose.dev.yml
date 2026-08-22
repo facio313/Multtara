@@ -7,7 +7,11 @@ services:
       - "${DEV_BIND_ADDRESS:-127.0.0.1}:${DEV_POSTGRES_PORT:-5432}:5432"
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?PORTFOLIO_BRANCH is required}
+        PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?PORTFOLIO_AUTH_MODE is required}
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - ./backend:/app
@@ -31,8 +35,12 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      context: .
+      dockerfile: frontend/Dockerfile
       target: builder
+      args:
+        PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?PORTFOLIO_BRANCH is required}
+        PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?PORTFOLIO_AUTH_MODE is required}
     command: npm run dev -- --host 0.0.0.0
     volumes:
       - ./frontend:/app

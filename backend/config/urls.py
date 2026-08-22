@@ -4,6 +4,7 @@ PongDang (퐁당) — Root URL configuration.
 
 from collections import Counter
 
+from django.conf import settings
 from django.contrib import admin
 from django.db import DatabaseError, connection
 from django.utils import timezone
@@ -128,10 +129,12 @@ api_v1_patterns = [
 ]
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
     path("api/v1/", include((api_v1_patterns, "api-v1"))),
     path("api/health/", health_check),
     path("api/health/ready/", readiness_check),
     path("api/health/integrations/", integration_health_check),
     path("api/health/safety/", safety_readiness_health_check),
 ]
+
+if not settings.PONGDANG_SSO_ENABLED:
+    urlpatterns.insert(0, path("admin/", admin.site.urls))

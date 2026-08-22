@@ -1,0 +1,9 @@
+**
+!frontend/
+!frontend/**
+!scripts/
+!scripts/portfolio-auth-mode.sh
+!scripts/portfolio-auth-entrypoint.sh
+
+frontend/node_modules/
+frontend/dist/

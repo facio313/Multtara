@@ -128,6 +128,9 @@ chmod 0640 "$SSO_SECRET_FILE"
   printf 'ALLOWED_HOSTS=localhost\n'
   printf 'SECURE_SSL_REDIRECT=True\n'
   printf 'FRONTEND_BIND_ADDRESS=127.0.0.1\n'
+  printf 'PORTFOLIO_BRANCH=main\n'
+  printf 'PORTFOLIO_AUTH_MODE=sso\n'
+  printf 'VITE_SSO_ENABLED=true\n'
   printf 'ROUTING_MATRIX_URL=\n'
   printf 'PONGDANG_SSO_ENABLED=True\n'
   printf 'PONGDANG_SSO_EDGE_SECRET=\n'
@@ -419,7 +422,11 @@ require("--require-hashes" in dockerfile and "requirements.lock" in dockerfile, 
 require("requirements.txt /tmp/requirements.txt" not in dockerfile, "backend image still installs the range manifest")
 require("--no-control-socket" in dockerfile, "Gunicorn control socket conflicts with the read-only runtime")
 require("USER nginx" in frontend_dockerfile and "EXPOSE 8080" in frontend_dockerfile, "frontend image is not explicitly unprivileged")
-require("ENTRYPOINT []" in frontend_dockerfile, "frontend still depends on the root image entrypoint")
+require(
+    'ENTRYPOINT ["/usr/local/bin/portfolio-auth-entrypoint.sh"]' in frontend_dockerfile,
+    "frontend does not replace the root image entrypoint with the auth guard",
+)
+require("/etc/portfolio-auth-build" in frontend_dockerfile, "frontend lacks immutable auth provenance")
 require("/var/run:rw,noexec,nosuid,nodev,size=8m,mode=1777" in compose, "unprivileged Nginx PID path is not writable tmpfs")
 require("unquote(encoded_password) != expected_password" in (root / "scripts/deploy-common.sh").read_text(), "database URL credentials are not cross-checked")
 require("PONGDANG_MIN_COMPOSE_PATCH=4" in (root / "scripts/deploy-common.sh").read_text(), "Compose minimum does not cover !override")

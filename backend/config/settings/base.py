@@ -6,6 +6,10 @@ from pathlib import Path
 
 import dj_database_url
 from decouple import config
+from django.core.exceptions import ImproperlyConfigured
+
+from config.auth_mode import resolve_portfolio_auth_contract
+from config.settings.validation import load_production_sso_edge_secret
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -135,11 +139,40 @@ SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = False
 CSRF_COOKIE_SAMESITE = "Lax"
 
-# This is enabled only when the origin is loopback-bound behind the portfolio
-# Nginx + Authelia auth_request boundary. The application never trusts client
-# identity headers on an independently exposed origin.
-PONGDANG_SSO_ENABLED = config("PONGDANG_SSO_ENABLED", default=False, cast=bool)
+# Git branch is the authentication source of truth. Local checkouts resolve it
+# from Git; packaged runtimes receive both canonical variables explicitly.
+_portfolio_environment = {
+    name: value
+    for name in ("PORTFOLIO_BRANCH", "PORTFOLIO_AUTH_MODE", "GITHUB_REF_NAME")
+    if (value := config(name, default=None)) is not None
+}
+_portfolio_auth = resolve_portfolio_auth_contract(
+    base_dir=BASE_DIR,
+    environment=_portfolio_environment,
+    legacy_sso_name="PONGDANG_SSO_ENABLED",
+    legacy_sso_value=config("PONGDANG_SSO_ENABLED", default=None),
+    build_mode=config("PORTFOLIO_BUILD_AUTH_MODE", default=None),
+    build_contract_path=Path("/etc/portfolio-auth-build"),
+)
+PORTFOLIO_BRANCH = _portfolio_auth.branch
+PORTFOLIO_AUTH_MODE = _portfolio_auth.mode
+PONGDANG_SSO_ENABLED = _portfolio_auth.sso_enabled
+PONGDANG_RUNTIME_ROLE = config("PONGDANG_RUNTIME_ROLE", default="web").strip()
+if PONGDANG_RUNTIME_ROLE not in {"web", "worker"}:
+    raise ImproperlyConfigured("PONGDANG_RUNTIME_ROLE must be web or worker.")
+
 PONGDANG_SSO_EDGE_SECRET = config("PONGDANG_SSO_EDGE_SECRET", default="")
 PONGDANG_SSO_EDGE_SECRET_FILE = config(
     "PONGDANG_SSO_EDGE_SECRET_FILE", default=""
 ).strip()
+if PONGDANG_RUNTIME_ROLE == "worker":
+    if PONGDANG_SSO_EDGE_SECRET or PONGDANG_SSO_EDGE_SECRET_FILE:
+        raise ImproperlyConfigured(
+            "The worker runtime must not receive the portfolio edge secret."
+        )
+else:
+    PONGDANG_SSO_EDGE_SECRET = load_production_sso_edge_secret(
+        PONGDANG_SSO_ENABLED,
+        PONGDANG_SSO_EDGE_SECRET,
+        PONGDANG_SSO_EDGE_SECRET_FILE,
+    )

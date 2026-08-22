@@ -4,12 +4,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$REPO_ROOT"
 
-bash -n scripts/setup-worktrees.sh scripts/test-setup-worktrees.sh
+bash -n scripts/setup-worktrees.sh scripts/test-setup-worktrees.sh scripts/portfolio-auth-mode.sh scripts/test-portfolio-auth-mode.sh
 
 python3 - "$REPO_ROOT" <<'PY'
 from __future__ import annotations
 
 import re
+import json
 import sys
 from pathlib import Path
 
@@ -19,6 +20,10 @@ dev_compose = (root / "docker-compose.dev.yml").read_text()
 deploy_compose = (root / "docker-compose.deploy.yml").read_text()
 nginx = (root / "frontend/nginx.conf").read_text()
 frontend_dockerfile = (root / "frontend/Dockerfile").read_text()
+backend_dockerfile = (root / "backend/Dockerfile").read_text()
+auth_entrypoint = (root / "scripts/portfolio-auth-entrypoint.sh").read_text()
+root_urls = (root / "backend/config/urls.py").read_text()
+frontend_package = json.loads((root / "frontend/package.json").read_text())
 wsgi = (root / "backend/config/wsgi.py").read_text()
 asgi = (root / "backend/config/asgi.py").read_text()
 manage = (root / "backend/manage.py").read_text()
@@ -32,6 +37,7 @@ profile_source = (root / "frontend/src/pages/ProfilePage.jsx").read_text()
 readme = (root / "README.md").read_text()
 agents = (root / "AGENTS.md").read_text()
 operations_runbook = (root / "docs/operations-runbook.md").read_text()
+dockerignore = (root / ".dockerignore").read_text()
 
 compile(wsgi, str(root / "backend/config/wsgi.py"), "exec")
 compile(asgi, str(root / "backend/config/asgi.py"), "exec")
@@ -68,11 +74,36 @@ for port in ("DEV_POSTGRES_PORT", "DEV_BACKEND_PORT", "DEV_FRONTEND_PORT"):
 require("ports: !override" in dev_compose, "development frontend does not replace production ports")
 require("http://127.0.0.1:5173/" in dev_compose, "development frontend healthcheck does not probe Vite")
 require("listen 8080;" in nginx, "production Nginx does not use an unprivileged port")
-require("USER nginx" in frontend_dockerfile and "ENTRYPOINT []" in frontend_dockerfile, "production Nginx runtime is not explicitly unprivileged")
+require(
+    "USER nginx" in frontend_dockerfile
+    and 'ENTRYPOINT ["/usr/local/bin/portfolio-auth-entrypoint.sh"]' in frontend_dockerfile,
+    "production Nginx runtime does not use the unprivileged auth guard",
+)
 require("ARG VITE_APP_BASE_PATH=/" in frontend_dockerfile, "frontend image does not accept an application base path")
 require("ARG VITE_CSRF_COOKIE_NAME=pongdang_csrftoken" in frontend_dockerfile, "frontend image does not pin the isolated CSRF cookie")
-require("ARG VITE_SSO_ENABLED=false" in frontend_dockerfile, "frontend image cannot select the portfolio SSO contract")
-require("base: process.env.VITE_APP_BASE_PATH || '/'" in vite_config, "Vite base path is not configurable")
+require("ARG VITE_SSO_ENABLED" in frontend_dockerfile, "frontend image cannot adapt the legacy SSO flag")
+require("org.opencontainers.image.ref.name" in frontend_dockerfile, "frontend branch audit label is missing")
+require("io.bonifacio.portfolio.auth-mode" in frontend_dockerfile, "frontend auth-mode audit label is missing")
+for name, content in (("backend", backend_dockerfile), ("frontend", frontend_dockerfile)):
+    require(
+        '${PORTFOLIO_BRANCH#refs/heads/}' in content,
+        f"{name} Docker build does not normalize refs/heads branches",
+    )
+    require(
+        "/etc/portfolio-auth-build" in content and "chmod 0444" in content,
+        f"{name} image lacks an immutable auth build contract",
+    )
+require("portfolio-auth-mode.sh exec --" in auth_entrypoint, "frontend entrypoint bypasses the resolver")
+require("if not settings.PONGDANG_SSO_ENABLED" in root_urls, "SSO mode still registers Django admin")
+require("dockerfile: frontend/Dockerfile" in compose, "frontend does not use the guarded root context")
+require("**" in dockerignore and "!frontend/**" in dockerignore, "root frontend context is not allowlisted")
+require("!scripts/portfolio-auth-mode.sh" in dockerignore, "root context omits the canonical resolver")
+require("file: ${{ matrix.dockerfile }}" in ci_workflow, "CI image matrix ignores its Dockerfile")
+require("file: ./frontend/Dockerfile" in release_workflow, "release frontend Dockerfile is not explicit")
+for command in ("dev", "preview"):
+    require("PORTFOLIO_AUTH_MODE=local" in frontend_package["scripts"][command], f"{command} is not local-only")
+    require("../scripts/portfolio-auth-mode.sh exec --" in frontend_package["scripts"][command], f"{command} bypasses the resolver")
+require("base: environment.VITE_APP_BASE_PATH || '/'" in vite_config, "Vite base path is not configurable")
 require("<BrowserRouter basename={routerBaseName}>" in app_source, "React routes do not honor the Vite base path")
 require(index_html.count("%BASE_URL%") >= 3, "HTML metadata/assets are not rooted at the Vite base path")
 require("VITE_CSRF_COOKIE_NAME" in api_source and "pongdang_csrftoken" in api_source, "Axios CSRF cookie does not match Django")
@@ -86,7 +117,11 @@ require(
     and logout_handler.index("window.location.assign") > logout_handler.index("finally {"),
     "central SSO logout is not guaranteed after the local logout attempt",
 )
-require("PONGDANG_SSO_ENABLED: ${PONGDANG_SSO_ENABLED:-false}" in compose, "backend SSO setting is not wired")
+require("PONGDANG_SSO_ENABLED: ${PONGDANG_SSO_ENABLED:?" in compose, "backend SSO adapter is not fail-closed")
+require(compose.count("PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?") == 5, "canonical branch is not injected into every app build/runtime")
+require(compose.count("PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?") == 5, "canonical auth mode is not injected into every app build/runtime")
+require("PONGDANG_RUNTIME_ROLE: web" in compose, "backend web runtime role is not explicit")
+require("PONGDANG_RUNTIME_ROLE: worker" in compose, "collector worker runtime role is not explicit")
 require("PONGDANG_SSO_EDGE_SECRET: ${PONGDANG_SSO_EDGE_SECRET:-}" in compose, "backend SSO edge secret is not wired")
 require("PONGDANG_SSO_EDGE_SECRET_FILE: ${PONGDANG_SSO_EDGE_SECRET_FILE:-}" in compose, "backend SSO secret file is not wired")
 require(
@@ -125,6 +160,7 @@ dev_default = 'os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.
 require(prod_default in wsgi and prod_default in asgi, "WSGI/ASGI do not fail closed to production settings")
 require(dev_default in manage, "manage.py is not the explicit development entry point")
 require("  workflow_call:\n" in ci_workflow, "CI is not reusable as a release quality gate")
+require("      - main\n" in ci_workflow and "      - dev\n" in ci_workflow, "main/dev CI triggers are incomplete")
 require(
     "  quality-gate:\n" in release_workflow
     and "uses: ./.github/workflows/ci.yml" in release_workflow,
@@ -167,6 +203,8 @@ for document_name, document in (
 require("VITE_APP_BASE_PATH=/multtara/" in release_workflow, "release assets are not built for the portfolio subpath")
 require("VITE_API_BASE_URL=/multtara/api/v1/" in release_workflow, "release API is not isolated below the portfolio subpath")
 require("VITE_SSO_ENABLED=true" in release_workflow, "release frontend does not enable portfolio SSO")
+require("PORTFOLIO_BRANCH: main" in release_workflow, "release branch is not pinned to main")
+require("PORTFOLIO_AUTH_MODE: sso" in release_workflow, "release auth mode is not pinned to SSO")
 require("deploy multtara $DEPLOY_VERSION $DEPLOY_SHA $BACKEND_DIGEST $FRONTEND_DIGEST" in release_workflow, "release workflow does not request the restricted Multtara deployment")
 
 # Ensure the override tag is attached only to the intended ports declaration.
@@ -198,6 +236,10 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     ALLOWED_HOSTS='localhost,127.0.0.1' \
     APPLICATION_BASE_PATH='/multtara' \
     FRONTEND_BIND_ADDRESS='127.0.0.1' \
+    PORTFOLIO_BRANCH='codex-auth-contract' \
+    PORTFOLIO_AUTH_MODE='local' \
+    PONGDANG_SSO_ENABLED='false' \
+    VITE_SSO_ENABLED='false' \
     FRONTEND_PORT='8080' \
     DEV_BIND_ADDRESS='127.0.0.1' \
     DEV_POSTGRES_PORT='5432' \
@@ -242,6 +284,14 @@ for service in ("backend", "collector"):
         raise SystemExit(f"FAIL: {service} same-origin CORS default changed")
     if environment.get("SECURE_SSL_REDIRECT") != "True":
         raise SystemExit(f"FAIL: {service} SSL redirect default changed")
+    if environment.get("PORTFOLIO_BRANCH") != "codex-auth-contract":
+        raise SystemExit(f"FAIL: {service} did not receive the local branch")
+    if environment.get("PORTFOLIO_AUTH_MODE") != "local":
+        raise SystemExit(f"FAIL: {service} did not receive local auth mode")
+if services["backend"]["environment"].get("PONGDANG_RUNTIME_ROLE") != "web":
+    raise SystemExit("FAIL: backend runtime role is not web")
+if services["collector"]["environment"].get("PONGDANG_RUNTIME_ROLE") != "worker":
+    raise SystemExit("FAIL: collector runtime role is not worker")
 if services["backend"]["environment"].get("PONGDANG_SSO_EDGE_SECRET_FILE") != "":
     raise SystemExit("FAIL: backend SSO secret file should default to environment fallback")
 if services["backend"].get("user") != "pongdang:root":
@@ -266,6 +316,10 @@ PY
     ALLOWED_HOSTS='localhost,127.0.0.1' \
     APPLICATION_BASE_PATH='/multtara' \
     FRONTEND_BIND_ADDRESS='127.0.0.1' \
+    PORTFOLIO_BRANCH='main' \
+    PORTFOLIO_AUTH_MODE='sso' \
+    PONGDANG_SSO_ENABLED='true' \
+    VITE_SSO_ENABLED='true' \
     FRONTEND_PORT='8080' \
     BACKEND_IMAGE='ghcr.io/example/pongdang/backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
     FRONTEND_IMAGE='ghcr.io/example/pongdang/frontend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
@@ -299,4 +353,5 @@ else
 fi
 
 scripts/test-setup-worktrees.sh
+scripts/test-portfolio-auth-mode.sh
 scripts/test-deployment-tools.sh

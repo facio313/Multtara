@@ -213,6 +213,7 @@ class EcoActionVerificationIntegrityTests(TestCase):
         self.action.full_clean()
 
 
+@override_settings(PONGDANG_SSO_ENABLED=False)
 class UserSessionApiTests(TestCase):
     password = "V3ry-Long!Pond-Passphrase-2026"
     sso_edge_secret = "test-only-pongdang-edge-secret-2026"
@@ -297,6 +298,19 @@ class UserSessionApiTests(TestCase):
         user = User.objects.get(username="portfolio-owner")
         self.assertFalse(user.has_usable_password())
         self.assertEqual(user.sso_subject, "portfolio-owner")
+
+        user.set_password(self.password)
+        user.save(update_fields=("password",))
+        repeated = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value,
+            **self._sso_headers(),
+        )
+        self.assertEqual(repeated.status_code, 200)
+        user.refresh_from_db()
+        self.assertFalse(user.has_usable_password())
         self.assertEqual(
             client.get("/api/v1/users/me/", **self._sso_headers()).status_code,
             200,
@@ -420,6 +434,7 @@ class UserSessionApiTests(TestCase):
         email_owner.refresh_from_db()
         username_collision.refresh_from_db()
         self.assertEqual(email_owner.sso_subject, "portfolio-owner")
+        self.assertFalse(email_owner.has_usable_password())
         self.assertIsNone(username_collision.sso_subject)
         self.assertEqual(exchanged.json()["username"], "legacy-email-owner")
 

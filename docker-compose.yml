@@ -35,7 +35,11 @@ services:
       start_period: 30s
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?PORTFOLIO_BRANCH is required}
+        PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?PORTFOLIO_AUTH_MODE is required}
     # Rootless Docker maps the deployment user's host UID/GID to container
     # root. Keep the application UID non-root and use only container group 0
     # to read the host-owned mode-0640 edge-secret bind.
@@ -78,7 +82,10 @@ services:
       APPLICATION_BASE_PATH: ${APPLICATION_BASE_PATH:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-True}
-      PONGDANG_SSO_ENABLED: ${PONGDANG_SSO_ENABLED:-false}
+      PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?PORTFOLIO_BRANCH is required}
+      PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?PORTFOLIO_AUTH_MODE is required}
+      PONGDANG_RUNTIME_ROLE: web
+      PONGDANG_SSO_ENABLED: ${PONGDANG_SSO_ENABLED:?PONGDANG_SSO_ENABLED is required}
       PONGDANG_SSO_EDGE_SECRET: ${PONGDANG_SSO_EDGE_SECRET:-}
       PONGDANG_SSO_EDGE_SECRET_FILE: ${PONGDANG_SSO_EDGE_SECRET_FILE:-}
       DATA_GO_KR_SERVICE_KEY: ${DATA_GO_KR_SERVICE_KEY:-}
@@ -101,7 +108,11 @@ services:
       start_period: 45s
 
   collector:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?PORTFOLIO_BRANCH is required}
+        PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?PORTFOLIO_AUTH_MODE is required}
     restart: unless-stopped
     entrypoint: []
     init: true
@@ -132,6 +143,9 @@ services:
       APPLICATION_BASE_PATH: ${APPLICATION_BASE_PATH:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-True}
+      PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?PORTFOLIO_BRANCH is required}
+      PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?PORTFOLIO_AUTH_MODE is required}
+      PONGDANG_RUNTIME_ROLE: worker
       DATA_GO_KR_SERVICE_KEY: ${DATA_GO_KR_SERVICE_KEY:-}
       TOUR_API_KEY: ${TOUR_API_KEY:-}
       KMA_API_KEY: ${KMA_API_KEY:-}
@@ -161,13 +175,16 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      context: .
+      dockerfile: frontend/Dockerfile
       args:
         VITE_APP_BASE_PATH: ${VITE_APP_BASE_PATH:-/}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1/}
         VITE_KAKAO_MAP_KEY: ${VITE_KAKAO_MAP_KEY:-}
         VITE_CSRF_COOKIE_NAME: ${VITE_CSRF_COOKIE_NAME:-pongdang_csrftoken}
-        VITE_SSO_ENABLED: ${VITE_SSO_ENABLED:-false}
+        PORTFOLIO_BRANCH: ${PORTFOLIO_BRANCH:?PORTFOLIO_BRANCH is required}
+        PORTFOLIO_AUTH_MODE: ${PORTFOLIO_AUTH_MODE:?PORTFOLIO_AUTH_MODE is required}
+        VITE_SSO_ENABLED: ${VITE_SSO_ENABLED:?VITE_SSO_ENABLED is required}
     restart: unless-stopped
     init: true
     stop_grace_period: 30s

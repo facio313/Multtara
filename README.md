@@ -49,10 +49,17 @@
 ```bash
 git clone https://github.com/facio313/Multtara.git
 cd Multtara
+git checkout -b codex-local-auth
 cp .env.example .env
-# .env에 개발용 DB 비밀번호와 50자 이상의 무작위 SECRET_KEY 입력
+# .env에 실제 branch와 local mode를 반영하고 개발용 DB 비밀번호와
+# 50자 이상의 무작위 SECRET_KEY를 입력
+# PORTFOLIO_BRANCH=codex-local-auth
+# PORTFOLIO_AUTH_MODE=local
+# PONGDANG_SSO_ENABLED=False
+# VITE_SSO_ENABLED=false
 
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+scripts/portfolio-auth-mode.sh exec -- \
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 - Frontend: `http://localhost:5173`
@@ -87,6 +94,23 @@ workflow revision과 tag commit이 정확히 일치해야 하며, tag release가
 뒤 제한된 서버 명령으로 자동 배포합니다. 공개 prefix는 `/multtara/`입니다. 다른
 프로젝트의 `cksDB`나 네트워크를 공유하지 않습니다.
 
+인증 모드는 Git branch에 묶입니다. `scripts/portfolio-auth-mode.sh`가 명시된
+`PORTFOLIO_BRANCH`, `GITHUB_REF_NAME`, 현재 Git branch 순으로 판정하며 `main`과
+`dev`는 항상 `sso`, 나머지는 `local`입니다. 명시한 `PORTFOLIO_AUTH_MODE`나 기존
+backend/Vite SSO flag가 다르면 build/startup이 중단됩니다. 로컬 checkout만 Git
+자동 감지를 사용하고 CI·image build·container에는 branch를 명시 주입합니다.
+`npm run dev`와 `npm run preview`는 local mode를 명시적으로 assert하므로
+`main`/`dev`에서는 즉시 실패하고 다른 개발 branch에서만 실행됩니다.
+
+Vite 인증 설정은 정적 번들에 build-time으로 고정됩니다. 최종 Nginx image의
+`PORTFOLIO_BRANCH`/`PORTFOLIO_AUTH_MODE` 환경값과 OCI label은 배포 provenance
+확인용일 뿐 runtime 전환 스위치가 아닙니다. 인증 모드를 바꾸려면 image를 다시
+build해야 하며 `main`/`dev` image는 항상 신뢰할 수 있는 SSO edge 뒤에 둡니다.
+두 image는 정규화한 branch와 mode를 `/etc/portfolio-auth-build`의 mode-0444 두
+줄로 고정합니다. Django settings와 frontend Nginx resolver entrypoint가 runtime
+canonical pair와 비교하므로 container 환경변수 override로 build 계약을 바꿀 수
+없습니다.
+
 운영 계정은 `bonifacio.work/sso/`의 Authelia 통합 로그인을 사용합니다. 호스트
 Nginx가 인증한 `Remote-*` 헤더와 퐁당 전용 `X-Portfolio-Edge-Secret`만 loopback
 원본에 전달하며, Django는 불변 `sso_subject`에 정확히 결합한 뒤 전용
@@ -94,12 +118,13 @@ Nginx가 인증한 `Remote-*` 헤더와 퐁당 전용 `X-Portfolio-Edge-Secret`�
 허용되고 이후 모든 인증 API 요청은 현재 SSO subject와 엣지 시크릿을 다시
 검증합니다. 운영에서는 별도 회원가입·비밀번호
 로그인/변경·계정 삭제가 비활성화되고 로그아웃은 중앙 `/sso/logout`으로
-연결됩니다. 개발 환경은 두 SSO 변수를 `false`로 두면 기존 로컬 계정 흐름을
-사용할 수 있습니다.
+연결됩니다. main/dev가 아닌 개발 branch에서 canonical mode와 두 adapter를
+`local`/`false`로 맞추면 중앙 SSO 없이 기존 로컬 계정 흐름을 사용할 수 있습니다.
 
 운영 계정 관리는 중앙 `/sso/admin/`에서만 수행합니다. Multtara의 독립 Django
 admin은 공개하지 않으며 `/multtara/admin`과 모든 하위 경로는 inner Nginx에서
-항상 `404`를 반환합니다.
+항상 `404`를 반환합니다. Django 자체도 SSO mode에서는 admin URL을 등록하지 않아
+backend에 직접 접근한 `/admin/login/` 요청이 404입니다.
 
 엣지 시크릿은 환경변수보다 host `cks:cks`, mode `0640` 일반 파일을 권장합니다.
 `PONGDANG_SSO_EDGE_SECRET_MOUNT`에 절대 호스트 경로를,

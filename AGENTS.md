@@ -127,6 +127,36 @@ anthropic-feat-name ─┘
    ```
 4. Merge `dev` into `main` after full verification only (user).
 
+### Branch-bound authentication
+
+- `scripts/portfolio-auth-mode.sh` is the canonical resolver. Source priority is
+  explicit `PORTFOLIO_BRANCH`, then `GITHUB_REF_NAME`, then the current Git
+  branch. `main` and `dev` resolve to `sso`; every other branch resolves to
+  `local`.
+- An explicit `PORTFOLIO_AUTH_MODE` mismatch fails closed.
+  `PONGDANG_SSO_ENABLED` and `VITE_SSO_ENABLED` remain compatibility adapters
+  and must agree with the canonical mode.
+- Local source checkouts may use Git auto-detection. CI, image builds, and
+  containers must inject the branch explicitly. Release images and Pi runtime
+  are pinned to `main`/`sso` and require the private edge secret.
+- `npm run dev` and `npm run preview` intentionally assert `local` and fail
+  immediately on `main` or `dev`; use them only from another development
+  branch.
+- Vite auth is compiled into the static bundle. Final Nginx image environment
+  and OCI branch/auth-mode labels are audit provenance only, not runtime
+  switches. Rebuild to change mode, and keep every `main`/`dev` image behind the
+  trusted SSO edge. Backend and frontend images also bake the normalized branch
+  and mode into the mode-0444, two-line `/etc/portfolio-auth-build`; Django
+  settings and the Nginx resolver entrypoint reject runtime mismatches.
+- Local branches run without central SSO and retain local registration, password
+  login, session, password-change, and account-deletion flows.
+- Django admin URLs are registered only in local mode. SSO mode must return 404
+  for `/admin/login/` even when the backend is reached without inner Nginx.
+- `dev` CI validates backend/frontend and builds both ARM64 images with
+  `push: false`. Only a release tag already contained in `origin/main` may push
+  release images or request the production deployment; CI never publishes a
+  `latest` image from `dev`.
+
 ### Naming Rules
 
 - Tool branches: `codex`, `cursor`, `anthropic`
@@ -165,7 +195,12 @@ anthropic-feat-name ─┘
   frontend XSRF cookie setting must remain identical to Django's CSRF cookie
   name; do not fall back to the generic `sessionid`/`csrftoken` names.
 - Production authentication is the portfolio Authelia SSO gate. Release images
-  set `VITE_SSO_ENABLED=true`, Compose sets `PONGDANG_SSO_ENABLED=true`, and
+  set `PORTFOLIO_BRANCH=main`, `PORTFOLIO_AUTH_MODE=sso`, and
+  `VITE_SSO_ENABLED=true`; Compose sets the same canonical pair and
+  `PONGDANG_SSO_ENABLED=true`. Any adapter mismatch is fatal. The collector
+  retains the canonical SSO mode but uses the explicit `worker` runtime role and
+  must never receive the edge secret. The web runtime requires the secret at
+  settings startup, and
   the host edge must discard client-supplied identity headers before
   overwriting `Remote-User`, `Remote-Email`, `Remote-Name`, and
   `Remote-Groups`. It also injects the per-app `X-Portfolio-Edge-Secret`; the

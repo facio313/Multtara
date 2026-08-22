@@ -2,9 +2,15 @@ name: CI
 
 on:
   workflow_call:
+    inputs:
+      portfolio_branch:
+        description: Source branch whose authentication contract is being validated
+        required: true
+        type: string
   pull_request:
   push:
     branches:
+      - main
       - codex
       - "codex-*"
       - dev
@@ -19,6 +25,10 @@ concurrency:
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "24"
+  PORTFOLIO_BRANCH: ${{ inputs.portfolio_branch || github.head_ref || github.ref_name }}
+  PORTFOLIO_AUTH_MODE: ${{ (inputs.portfolio_branch == 'main' || inputs.portfolio_branch == 'dev' || github.head_ref == 'main' || github.head_ref == 'dev' || github.ref_name == 'main' || github.ref_name == 'dev') && 'sso' || 'local' }}
+  PONGDANG_SSO_ENABLED: ${{ (inputs.portfolio_branch == 'main' || inputs.portfolio_branch == 'dev' || github.head_ref == 'main' || github.head_ref == 'dev' || github.ref_name == 'main' || github.ref_name == 'dev') && 'true' || 'false' }}
+  VITE_SSO_ENABLED: ${{ (inputs.portfolio_branch == 'main' || inputs.portfolio_branch == 'dev' || github.head_ref == 'main' || github.head_ref == 'dev' || github.ref_name == 'main' || github.ref_name == 'dev') && 'true' || 'false' }}
 
 jobs:
   backend:
@@ -46,9 +56,14 @@ jobs:
       DJANGO_SETTINGS_MODULE: config.settings.base
       SECRET_KEY: ci-only-django-secret-key
       DATABASE_URL: postgresql://pongdang:ci-postgres-password@127.0.0.1:5432/pongdang_test
+      PONGDANG_SSO_EDGE_SECRET: ci-only-pongdang-edge-secret-value-2026
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Validate branch-bound authentication contract
+        working-directory: .
+        run: scripts/test-portfolio-auth-mode.sh
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -97,6 +112,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Validate branch-bound authentication contract
+        working-directory: .
+        run: scripts/test-portfolio-auth-mode.sh
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -150,6 +169,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Validate branch-bound authentication contract
+        run: scripts/test-portfolio-auth-mode.sh
+
       - name: Render production Compose configuration
         run: docker compose -f docker-compose.yml config --quiet
 
@@ -178,8 +200,10 @@ jobs:
         include:
           - name: backend
             context: ./backend
+            dockerfile: ./backend/Dockerfile
           - name: frontend
-            context: ./frontend
+            context: .
+            dockerfile: ./frontend/Dockerfile
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -194,6 +218,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          build-args: |
+            PORTFOLIO_BRANCH=${{ env.PORTFOLIO_BRANCH }}
+            PORTFOLIO_AUTH_MODE=${{ env.PORTFOLIO_AUTH_MODE }}
+            VITE_SSO_ENABLED=${{ env.VITE_SSO_ENABLED }}
           platforms: linux/arm64
           push: false
           cache-from: type=gha,scope=${{ matrix.name }}-arm64

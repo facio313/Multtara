@@ -215,12 +215,18 @@ PY
     || pongdang_die "SECURE_SSL_REDIRECT must appear exactly once"
   PONGDANG_FRONTEND_BIND="$(pongdang_env_value "$file" FRONTEND_BIND_ADDRESS)" \
     || pongdang_die "FRONTEND_BIND_ADDRESS must appear exactly once"
+  PONGDANG_PORTFOLIO_BRANCH="$(pongdang_env_value "$file" PORTFOLIO_BRANCH)" \
+    || pongdang_die "PORTFOLIO_BRANCH must appear exactly once"
+  PONGDANG_PORTFOLIO_AUTH_MODE="$(pongdang_env_value "$file" PORTFOLIO_AUTH_MODE)" \
+    || pongdang_die "PORTFOLIO_AUTH_MODE must appear exactly once"
+  PONGDANG_VITE_SSO_ENABLED="$(pongdang_env_value "$file" VITE_SSO_ENABLED)" \
+    || pongdang_die "VITE_SSO_ENABLED must appear exactly once"
   PONGDANG_APPLICATION_BASE_PATH="$(pongdang_optional_env_value "$file" APPLICATION_BASE_PATH)" \
     || pongdang_die "APPLICATION_BASE_PATH may appear at most once"
   PONGDANG_ROUTING_MATRIX_URL="$(pongdang_optional_env_value "$file" ROUTING_MATRIX_URL)" \
     || pongdang_die "ROUTING_MATRIX_URL may appear at most once"
-  PONGDANG_SSO_ENABLED="$(pongdang_optional_env_value "$file" PONGDANG_SSO_ENABLED)" \
-    || pongdang_die "PONGDANG_SSO_ENABLED may appear at most once"
+  PONGDANG_SSO_ENABLED="$(pongdang_env_value "$file" PONGDANG_SSO_ENABLED)" \
+    || pongdang_die "PONGDANG_SSO_ENABLED must appear exactly once"
   PONGDANG_SSO_EDGE_SECRET="$(pongdang_optional_env_value "$file" PONGDANG_SSO_EDGE_SECRET)" \
     || pongdang_die "PONGDANG_SSO_EDGE_SECRET may appear at most once"
   PONGDANG_SSO_EDGE_SECRET_MOUNT="$(pongdang_optional_env_value "$file" PONGDANG_SSO_EDGE_SECRET_MOUNT)" \
@@ -229,7 +235,6 @@ PY
     || pongdang_die "PONGDANG_SSO_EDGE_SECRET_FILE may appear at most once"
   PONGDANG_BACKEND_RUNTIME_USER="$(pongdang_optional_env_value "$file" PONGDANG_BACKEND_RUNTIME_USER)" \
     || pongdang_die "PONGDANG_BACKEND_RUNTIME_USER may appear at most once"
-  PONGDANG_SSO_ENABLED="${PONGDANG_SSO_ENABLED:-False}"
 
   [[ "$PONGDANG_POSTGRES_DB" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
     || pongdang_die "POSTGRES_DB is not a safe PostgreSQL identifier"
@@ -299,9 +304,14 @@ PY
   [[ "$PONGDANG_SSL_REDIRECT" == "True" ]] || pongdang_die "SECURE_SSL_REDIRECT must be True on the Pi"
   [[ "$PONGDANG_FRONTEND_BIND" == "127.0.0.1" ]] \
     || pongdang_die "FRONTEND_BIND_ADDRESS must remain 127.0.0.1 behind the trusted HTTPS edge"
-  [[ "$PONGDANG_SSO_ENABLED" == "True" || "$PONGDANG_SSO_ENABLED" == "true" \
-    || "$PONGDANG_SSO_ENABLED" == "False" || "$PONGDANG_SSO_ENABLED" == "false" ]] \
-    || pongdang_die "PONGDANG_SSO_ENABLED must be True or False"
+  [[ "$PONGDANG_PORTFOLIO_BRANCH" == "main" ]] \
+    || pongdang_die "production deployment requires PORTFOLIO_BRANCH=main"
+  [[ "$PONGDANG_PORTFOLIO_AUTH_MODE" == "sso" ]] \
+    || pongdang_die "production main requires PORTFOLIO_AUTH_MODE=sso"
+  [[ "$PONGDANG_SSO_ENABLED" == "True" || "$PONGDANG_SSO_ENABLED" == "true" ]] \
+    || pongdang_die "production main requires PONGDANG_SSO_ENABLED=True"
+  [[ "$PONGDANG_VITE_SSO_ENABLED" == "true" ]] \
+    || pongdang_die "production main requires VITE_SSO_ENABLED=true"
   if [[ -n "$PONGDANG_BACKEND_RUNTIME_USER" \
     && "$PONGDANG_BACKEND_RUNTIME_USER" != "pongdang:root" ]]; then
     pongdang_die "PONGDANG_BACKEND_RUNTIME_USER must be pongdang:root when explicitly configured"

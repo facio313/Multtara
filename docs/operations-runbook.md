@@ -25,6 +25,20 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
 - `bonifacio.work` portfolio 배포는 `/multtara/` 아래에서만 노출한다. release
   frontend는 같은 asset/API prefix로 빌드하며 Django session/CSRF cookie도
   고유 이름과 `Path=/multtara/`로 다른 프로젝트와 격리한다.
+- Release image와 Pi runtime은 `PORTFOLIO_BRANCH=main` 및
+  `PORTFOLIO_AUTH_MODE=sso`로 고정한다. `PONGDANG_SSO_ENABLED=True`와
+  `VITE_SSO_ENABLED=true`는 canonical mode와 일치해야 하며 하나라도 다르면
+  build/startup/deploy validation이 실패한다.
+- `dev` CI도 SSO mode로 backend/frontend와 ARM64 image build를 검증하지만
+  registry push나 운영 배포는 하지 않는다. 운영 image push와 제한된 배포 명령은
+  `origin/main` 이력에 포함된 검증 tag release에만 허용된다.
+- Frontend Vite auth mode는 static bundle에 build-time으로 고정된다. 최종 Nginx
+  image의 canonical 환경값과 OCI branch/auth-mode label은 audit provenance이며
+  runtime switch가 아니다. Mode 변경은 rebuild가 필요하고 `main`/`dev` image는
+  신뢰 가능한 SSO edge 밖에서 실행하지 않는다. Backend/frontend image의
+  `/etc/portfolio-auth-build`에는 normalized branch와 mode가 mode 0444 두 줄로
+  고정되며 Django settings와 Nginx resolver entrypoint가 runtime pair와 비교한다.
+  이 검증을 container 환경변수 override로 우회할 수 없어야 한다.
 - 일반 공개 경로는 호스트 Authelia `auth_request`로 보호한다. edge는 외부
   `Remote-*` 헤더를 버리고 검증된 값을 덮어쓰며, release frontend는
   `VITE_SSO_ENABLED=true`, backend Compose는 `PONGDANG_SSO_ENABLED=true`여야
@@ -146,6 +160,8 @@ sudo -u pongdang stat -c '%U %a %n' /opt/pongdang/.env
 
 필수 검증 항목:
 
+- `PORTFOLIO_BRANCH=main`, `PORTFOLIO_AUTH_MODE=sso`
+- `PONGDANG_SSO_ENABLED=True`, `VITE_SSO_ENABLED=true`
 - `POSTGRES_PASSWORD`: 16자 이상이며 placeholder가 아님
 - `DATABASE_URL`: percent-encoded credential을 사용하고 `db:5432/<POSTGRES_DB>`를
   가리킴

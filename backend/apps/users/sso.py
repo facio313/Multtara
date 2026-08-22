@@ -157,6 +157,9 @@ def _resolve_sso_user_once(identity: TrustedSsoIdentity):
             or email_users[0].pk != subject_user.pk
         ):
             raise SsoIdentityConflict
+        if subject_user.has_usable_password():
+            subject_user.set_unusable_password()
+            subject_user.save(update_fields=("password",))
         return subject_user
 
     if len(email_users) > 1:
@@ -166,7 +169,8 @@ def _resolve_sso_user_once(identity: TrustedSsoIdentity):
         if user.sso_subject is not None:
             raise SsoIdentityConflict
         user.sso_subject = identity.subject
-        user.save(update_fields=("sso_subject",))
+        user.set_unusable_password()
+        user.save(update_fields=("sso_subject", "password"))
         return user
 
     user = User(
