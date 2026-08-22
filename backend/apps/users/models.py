@@ -35,6 +35,12 @@ class User(AbstractUser):
         editable=False,
     )
 
+    @property
+    def ownership_subject(self):
+        """Central subject projected through existing domain ownership FKs."""
+
+        return self.sso_subject
+
     def save(self, *args, **kwargs):
         if self.pk and not self._state.adding:
             previous_subject = (

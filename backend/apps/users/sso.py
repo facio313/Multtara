@@ -16,6 +16,18 @@ from django.db import IntegrityError, connection, transaction
 
 
 User = get_user_model()
+PORTFOLIO_ROLE_ORDER = ("user", "developer", "admin")
+PORTFOLIO_ROLE_RANK = {
+    role: rank for rank, role in enumerate(PORTFOLIO_ROLE_ORDER)
+}
+PORTFOLIO_GROUP_CONTRACT = {
+    "user": ("user",),
+    "user,developer": ("user", "developer"),
+    "user,developer,admin": ("user", "developer", "admin"),
+}
+SSO_SESSION_SUBJECT_KEY = "portfolio_sso_subject"
+SSO_SESSION_GROUPS_KEY = "portfolio_sso_groups"
+SSO_SESSION_ROLE_KEY = "portfolio_sso_role"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +35,8 @@ class TrustedSsoIdentity:
     subject: str
     email: str
     display_name: str
+    groups: tuple[str, ...]
+    role: str
 
 
 class SsoIdentityConflict(Exception):
@@ -55,8 +69,10 @@ def trusted_sso_identity(request) -> TrustedSsoIdentity | None:
     raw_subject = request.META.get("HTTP_REMOTE_USER", "")
     raw_email = request.META.get("HTTP_REMOTE_EMAIL", "")
     raw_display_name = request.META.get("HTTP_REMOTE_NAME", "")
+    raw_groups = request.META.get("HTTP_REMOTE_GROUPS", "")
     if not all(
-        isinstance(value, str) for value in (raw_subject, raw_email, raw_display_name)
+        isinstance(value, str)
+        for value in (raw_subject, raw_email, raw_display_name, raw_groups)
     ):
         return None
 
@@ -69,9 +85,13 @@ def trusted_sso_identity(request) -> TrustedSsoIdentity | None:
     if any(
         len(value) > 254
         or any(ord(character) < 32 or ord(character) == 127 for character in value)
-        for value in (subject, email, display_name)
+        for value in (subject, email, display_name, raw_groups)
     ):
         return None
+    groups = PORTFOLIO_GROUP_CONTRACT.get(raw_groups)
+    if groups is None:
+        return None
+    role = groups[-1]
     try:
         validate_email(email)
     except ValidationError:
@@ -80,18 +100,30 @@ def trusted_sso_identity(request) -> TrustedSsoIdentity | None:
         subject=subject,
         email=email,
         display_name=display_name,
+        groups=groups,
+        role=role,
     )
 
 
-def request_matches_sso_user(request, user) -> bool:
-    """Bind an existing Django session to its current trusted edge subject."""
+def bind_sso_session(request, identity: TrustedSsoIdentity) -> None:
+    request.session[SSO_SESSION_SUBJECT_KEY] = identity.subject
+    request.session[SSO_SESSION_GROUPS_KEY] = list(identity.groups)
+    request.session[SSO_SESSION_ROLE_KEY] = identity.role
 
-    if not has_valid_edge_secret(request):
-        return False
-    raw_subject = request.META.get("HTTP_REMOTE_USER", "")
-    return bool(
-        isinstance(raw_subject, str) and raw_subject and raw_subject == user.sso_subject
-    )
+
+def trusted_session_identity(request, user) -> TrustedSsoIdentity | None:
+    """Bind a native session to the current edge subject and central roles."""
+
+    identity = trusted_sso_identity(request)
+    if identity is None or identity.subject != user.sso_subject:
+        return None
+    if request.session.get(SSO_SESSION_SUBJECT_KEY) != identity.subject:
+        return None
+    if request.session.get(SSO_SESSION_GROUPS_KEY) != list(identity.groups):
+        return None
+    if request.session.get(SSO_SESSION_ROLE_KEY) != identity.role:
+        return None
+    return identity
 
 
 def _acquire_postgresql_identity_locks(identity: TrustedSsoIdentity) -> None:

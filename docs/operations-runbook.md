@@ -54,6 +54,54 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
   인증·계정 삭제를 다시 열지 않는다. 계정 관리는 중앙 `/sso/admin/`만 사용하며,
   inner Nginx는 `/admin`과 모든 `/admin/` 하위 경로를 Django로 전달하지 않고
   항상 `404`로 차단한다.
+- `Remote-Groups`는 edge secret과 하나의 assertion으로 검증한다. 허용 wire
+  값은 공백 없는 ordered prefix `user`, `user,developer`,
+  `user,developer,admin` 세 가지뿐이다. unknown, legacy plural, duplicate,
+  gap, reorder, empty segment, leading/trailing whitespace는 모두
+  fail-closed한다. 역할은 계층형이며 로그인 때 저장한 subject/group/role
+  session snapshot과 현재 edge header가 매 요청 정확히 일치해야 한다. SSO
+  모드에서는 로컬 `is_staff`, `is_superuser`, Django group/permission을 권한
+  근거로 쓰지 않는다.
+
+### SSO legacy identity cleanup gate
+
+아래 명령은 기본적으로 username/email/PK/token을 출력하지 않는 aggregate
+dry-run이다. 대상 canonical subject를 명시하고 각 ownership field의
+`legacy_rows_to_reassign` 수를 snapshot과 대조한다.
+
+```bash
+python manage.py cleanup_sso_legacy_auth \
+  --canonical-subject '<canonical-sso-subject>'
+```
+
+승인된 경우에만 `--apply`를 사용한다. 한 transaction에서 canonical/legacy
+user와 domain row를 잠근 뒤 TripMemory, UserActivity, Passport,
+EcoAction(user와 verified_by), Itinerary, SafetyCard FK를 canonical
+`sso_subject` projection으로 재귀속한다. 분류되지 않은 reverse relation이
+있으면 user 삭제 전에 전체 rollback한다. 재귀속 후에만 unlinked legacy User를
+삭제하고 usable password, 로컬 staff/superuser/group/permission, Django
+session과 local Django admin history를 제거한다. Admin LogEntry를 canonical
+subject 행위로 재귀속하면 감사 의미가 왜곡되므로 재귀속하지 않으며, output에
+정확한 삭제 수를 남긴다. `EcoAction.verified_by`는 verified state의
+`PROTECT`/검증자 invariant이므로 삭제 대상이 아니라 canonical subject FK로
+재귀속하고 state/time/verifier 일관성을 보존한다. 알 수 없는 app-local OAuth
+provider가 설치되어 있어도 fail-closed한다.
+
+```bash
+python manage.py cleanup_sso_legacy_auth \
+  --canonical-subject '<canonical-sso-subject>' \
+  --apply \
+  --expected-legacy-users '<reviewed-user-count>' \
+  --expected-domain-rows '<reviewed-domain-row-count>'
+python manage.py cleanup_sso_legacy_auth \
+  --canonical-subject '<canonical-sso-subject>' --check
+```
+
+두 expected count는 필수 compare-and-apply guard이므로 dry-run 이후 하나라도
+바뀌면 transaction을 시작하지 않는다. `--apply`는 멱등이지만 identity
+consolidation 자체는 되돌릴 수 없다. 운영
+DB에서는 반드시 사전 snapshot, dry-run aggregate 승인, 후속 `--check` 순서를
+지킨다. email/username을 ownership key로 사용하지 않는다.
 
 ## 2. 최초 사용자 결정 및 외부 준비
 

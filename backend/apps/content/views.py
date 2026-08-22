@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from rest_framework import generics, permissions, throttling
+from rest_framework import generics, throttling
+
+from apps.users.permissions import IsPortfolioUser
 
 from .models import TripMemory
 from .serializers import TripMemorySerializer
@@ -19,7 +21,7 @@ class MemoryWriteThrottleMixin:
 
 class TripMemoryListCreateView(MemoryWriteThrottleMixin, generics.ListCreateAPIView):
     serializer_class = TripMemorySerializer
-    permission_classes = (permissions.IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
 
     def get_queryset(self):
         return (
@@ -37,7 +39,7 @@ class TripMemoryDetailView(
     generics.RetrieveUpdateDestroyAPIView,
 ):
     serializer_class = TripMemorySerializer
-    permission_classes = (permissions.IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
 
     def get_queryset(self):
         return TripMemory.objects.filter(user=self.request.user).select_related("spot")

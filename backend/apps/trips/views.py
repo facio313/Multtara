@@ -8,8 +8,10 @@ import json
 from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 from rest_framework import generics, status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+
+from apps.users.permissions import IsPortfolioUser
 from rest_framework.views import APIView
 
 from apps.spots.models import WaterSpot
@@ -323,7 +325,7 @@ class ItineraryPlanView(APIView):
 
 
 class SavedItineraryListView(generics.ListAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
     serializer_class = SavedItinerarySerializer
 
     def get_queryset(self):
@@ -335,7 +337,7 @@ class SavedItineraryListView(generics.ListAPIView):
 
 
 class SavedItineraryDetailView(generics.RetrieveUpdateDestroyAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
     serializer_class = SavedItinerarySerializer
     http_method_names = ("get", "patch", "delete", "head", "options")
 

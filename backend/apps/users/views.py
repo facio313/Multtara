@@ -7,7 +7,7 @@ from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from rest_framework import generics, status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -19,6 +19,7 @@ from apps.trips.throttles import (
 )
 
 from .models import EcoAction, Passport, UserActivity
+from .permissions import IsPortfolioUser
 from .serializers import (
     AccountDeleteSerializer,
     EcoActionSerializer,
@@ -29,7 +30,20 @@ from .serializers import (
     UserActivitySerializer,
     UserSelfSerializer,
 )
-from .sso import SsoIdentityConflict, resolve_sso_user, trusted_sso_identity
+from .sso import (
+    SsoIdentityConflict,
+    bind_sso_session,
+    resolve_sso_user,
+    trusted_sso_identity,
+)
+
+
+def _serialized_user(user, identity=None):
+    data = dict(UserSelfSerializer(user).data)
+    if identity is not None:
+        data["role"] = identity.role
+        data["groups"] = list(identity.groups)
+    return data
 
 
 def _sso_managed_response():
@@ -83,7 +97,7 @@ class LoginView(APIView):
 
 @method_decorator(csrf_protect, name="dispatch")
 class LogoutView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
 
     def post(self, request):
         logout(request)
@@ -120,12 +134,13 @@ class SsoLoginView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         login(request, user)
-        return Response(UserSelfSerializer(user).data)
+        bind_sso_session(request, identity)
+        return Response(_serialized_user(user, identity))
 
 
 @method_decorator(csrf_protect, name="dispatch")
 class CurrentUserView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
 
     def get_throttles(self):
         if self.request.method in {"PATCH", "DELETE"}:
@@ -138,7 +153,12 @@ class CurrentUserView(APIView):
         return super().get_throttles()
 
     def get(self, request):
-        return Response(UserSelfSerializer(request.user).data)
+        return Response(
+            _serialized_user(
+                request.user,
+                getattr(request, "portfolio_sso_identity", None),
+            )
+        )
 
     def patch(self, request):
         data = request.data
@@ -182,7 +202,7 @@ class CurrentUserView(APIView):
 
 @method_decorator(csrf_protect, name="dispatch")
 class PasswordChangeView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
     throttle_classes = (SensitiveAccountUserRateThrottle,)
 
     def post(self, request):
@@ -200,7 +220,7 @@ class PasswordChangeView(APIView):
 
 
 class UserActivityListCreateView(generics.ListCreateAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
     serializer_class = UserActivitySerializer
     throttle_classes = (UserMutationRateThrottle,)
 
@@ -216,7 +236,7 @@ class UserActivityListCreateView(generics.ListCreateAPIView):
 
 
 class PassportListView(generics.ListAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
     serializer_class = PassportSerializer
 
     def get_queryset(self):
@@ -228,7 +248,7 @@ class PassportListView(generics.ListAPIView):
 
 
 class EcoActionListCreateView(generics.ListCreateAPIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsPortfolioUser,)
     serializer_class = EcoActionSerializer
     throttle_classes = (UserMutationRateThrottle,)
 

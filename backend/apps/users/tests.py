@@ -241,11 +241,13 @@ class UserSessionApiTests(TestCase):
         subject="portfolio-owner",
         email="owner@example.test",
         display_name="Portfolio Owner",
+        groups="user",
     ):
         return {
             "HTTP_REMOTE_USER": subject,
             "HTTP_REMOTE_EMAIL": email,
             "HTTP_REMOTE_NAME": display_name,
+            "HTTP_REMOTE_GROUPS": groups,
             "HTTP_X_PORTFOLIO_EDGE_SECRET": self.sso_edge_secret,
         }
 
@@ -295,6 +297,8 @@ class UserSessionApiTests(TestCase):
         )
         self.assertEqual(exchanged.status_code, 200)
         self.assertEqual(exchanged.json()["username"], "portfolio-owner")
+        self.assertEqual(exchanged.json()["role"], "user")
+        self.assertEqual(exchanged.json()["groups"], ["user"])
         user = User.objects.get(username="portfolio-owner")
         self.assertFalse(user.has_usable_password())
         self.assertEqual(user.sso_subject, "portfolio-owner")
@@ -548,6 +552,67 @@ class UserSessionApiTests(TestCase):
         )
         self.assertEqual(new_identity.status_code, 200)
         self.assertEqual(User.objects.filter(sso_subject="another-subject").count(), 1)
+
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
+    def test_sso_groups_are_edge_bound_and_highest_role_wins(self):
+        client, token = self._csrf_client()
+        missing_role = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+            **self._sso_headers(groups="unrelated"),
+        )
+        self.assertEqual(missing_role.status_code, 401)
+
+        headers = self._sso_headers(groups="user,developer,admin")
+        exchanged = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value,
+            **headers,
+        )
+        self.assertEqual(exchanged.status_code, 200)
+        self.assertEqual(exchanged.json()["groups"], ["user", "developer", "admin"])
+        self.assertEqual(exchanged.json()["role"], "admin")
+        current = client.get("/api/v1/users/me/", **headers)
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.json()["role"], "admin")
+
+        changed = client.get(
+            "/api/v1/users/me/",
+            **self._sso_headers(groups="developer"),
+        )
+        self.assertEqual(changed.status_code, 403)
+
+        for rejected_groups in (
+            "users",
+            "owners",
+            "analytics,user",
+            "developer",
+            "admin",
+            "user,admin",
+            "developer,user",
+            "user,user",
+            "user,,developer",
+            "user, developer",
+            " user",
+            "user ",
+        ):
+            with self.subTest(groups=rejected_groups):
+                isolated, isolated_token = self._csrf_client()
+                response = isolated.post(
+                    "/api/v1/users/sso/",
+                    {},
+                    format="json",
+                    HTTP_X_CSRFTOKEN=isolated_token,
+                    **self._sso_headers(groups=rejected_groups),
+                )
+                self.assertEqual(response.status_code, 401)
 
     @override_settings(
         PONGDANG_SSO_ENABLED=True,

@@ -208,8 +208,13 @@ anthropic-feat-name ─┘
   exact `Remote-User` to an immutable unique nullable `sso_subject`, links an
   existing account only once through one unambiguous email match, and never
   treats a username collision as identity. Every SSO-mode authenticated API
-  request revalidates both the subject and edge secret before accepting the
-  isolated PongDang session.
+  request revalidates the subject, role groups, and edge secret before
+  accepting the isolated PongDang session. `Remote-Groups` accepts only the
+  whitespace-free ordered prefix `user`, `user,developer`, or
+  `user,developer,admin`; unknown, legacy plural, duplicate, gapped, reordered,
+  or empty values fail closed. The login-time session snapshot and current
+  header must match exactly. SSO roles are hierarchical and never come from
+  local staff/superuser/group/permission state.
   Prefer a regular, non-symlink, host-owned mode-0640, 32--4096-byte secret mounted with
   `PONGDANG_SSO_EDGE_SECRET_MOUNT` and read from
   `PONGDANG_SSO_EDGE_SECRET_FILE`; use the direct environment value only when
@@ -224,6 +229,18 @@ anthropic-feat-name ─┘
   portfolio account-management surface is `/sso/admin/`; inner Nginx must
   return 404 for both `/admin` and every `/admin/` subpath so an independent
   Django admin session is never exposed through `/multtara/`.
+- `cleanup_sso_legacy_auth --canonical-subject <subject>` is aggregate dry-run
+  by default. Explicit `--apply` must lock and project every known domain FK to
+  that subject before deleting any unlinked legacy user, abort on an
+  unclassified reverse relation, and remove local passwords, role grants,
+  sessions, and local admin history. Admin `LogEntry` rows must be deleted with
+  an exact aggregate count, never relabeled as actions by the canonical
+  subject. `EcoAction.verified_by` is a protected domain invariant and must be
+  projected to the canonical subject without changing verification state/time.
+  `--apply` must require reviewed expected user/domain-row counts and abort if
+  either changes. Never apply it to production without a reviewed
+  aggregate and database snapshot; finish with `--check`. Ownership must remain
+  an immutable `sso_subject` projection, never an email/username lookup.
 - Production CORS is same-origin by default (`CORS_ALLOWED_ORIGINS` is empty). A
   split deployment may opt in only exact HTTPS origins without userinfo, paths,
   queries, fragments, or wildcards; invalid entries must fail startup.

@@ -135,6 +135,7 @@ require(
 require("source: ${PONGDANG_SSO_EDGE_SECRET_MOUNT:-/dev/null}" in compose, "backend lacks the optional private SSO secret bind")
 require("target: /run/secrets/pongdang_sso_edge_secret" in compose, "backend SSO secret bind target changed")
 require(nginx.count("proxy_set_header Remote-User $http_remote_user;") >= 2, "frontend proxy does not preserve trusted SSO identity")
+require(nginx.count("proxy_set_header Remote-Groups $http_remote_groups;") >= 2, "frontend proxy does not preserve central role groups")
 require(nginx.count("proxy_set_header X-Portfolio-Edge-Secret $http_x_portfolio_edge_secret;") >= 2, "frontend proxy does not forward the private edge credential")
 require("127.0.0.1}:${FRONTEND_PORT:-8080}:8080" in compose, "production Nginx mapping does not target port 8080")
 require(dev_compose.count("DJANGO_SETTINGS_MODULE: config.settings.dev") == 2, "backend and collector do not share the explicit development settings path")
