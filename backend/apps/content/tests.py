@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -48,7 +48,10 @@ class ContentModelTests(TestCase):
         self.assertEqual(memory.user.username, 'testuser')
 
 
+@override_settings(PONGDANG_SSO_ENABLED=False)
 class TripMemoryApiTests(TestCase):
+    """Exercise the local-branch credential adapter and owner isolation."""
+
     def setUp(self):
         self.owner = User.objects.create_user(username="memory-owner", password="password")
         self.other = User.objects.create_user(username="memory-other", password="password")

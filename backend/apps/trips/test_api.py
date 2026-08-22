@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from django.core.cache import cache
 from django.db import connection
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -19,7 +19,10 @@ from services.routing import persist_route_matrix
 from apps.trips.views import MAX_CANDIDATE_POOL
 
 
+@override_settings(PONGDANG_SSO_ENABLED=False)
 class RecommendationApiTests(TestCase):
+    """Exercise public planning plus the local-branch saved-owner flow."""
+
     def setUp(self) -> None:
         cache.clear()
         self.client = APIClient()
