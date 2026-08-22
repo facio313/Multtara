@@ -1,5 +1,5 @@
 # Stage 1: Builder
-FROM python:3.12-slim-bookworm AS builder
+FROM python:3.14-slim-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -15,7 +15,7 @@ RUN pip install \
     -r /tmp/requirements.lock
 
 # Stage 2: Runtime
-FROM python:3.12-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 ARG PORTFOLIO_BRANCH
 ARG PORTFOLIO_AUTH_MODE
