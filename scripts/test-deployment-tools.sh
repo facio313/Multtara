@@ -979,6 +979,7 @@ require("row_number() OVER (" in db_migration_rollback, "cross-major column fing
 require("'::character varying::text'" in db_migration_rollback, "cross-major constraint fingerprint does not normalize PostgreSQL 16 deparsing")
 require("']::text[]'" in db_migration_rollback, "cross-major constraint fingerprint does not normalize PostgreSQL 15 deparsing")
 require("AS collation_record" in db_migration_rollback, "fingerprint does not use a PostgreSQL 15-safe collation alias")
+require("--interactive" in db_migration_rollback[db_migration_rollback.index("target_psql()") : db_migration_rollback.index("fingerprint_target_database()")], "target fingerprint container cannot consume SQL from stdin")
 require("FINALIZE:multtara:pongdang_previous" in db_migration_rollback, "cutover marker can precede cksDB finalize")
 require("scripts/db-migration-rollback.sh" in pi_setup, "Pi setup does not install the migration rollback tool")
 require("scripts/test-ops-config.sh" in ci, "CI does not run the operations contract")

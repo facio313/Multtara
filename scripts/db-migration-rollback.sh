@@ -798,6 +798,7 @@ cksdb_runtime_image() {
 target_psql() {
   PGPASSWORD="$PONGDANG_POSTGRES_PASSWORD" docker run \
     --rm \
+    --interactive \
     --pull never \
     --network cksDB-multtara \
     --read-only \
