@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:16-alpine
         env:
           POSTGRES_DB: pongdang_test
           POSTGRES_USER: pongdang
@@ -156,7 +156,7 @@ jobs:
       POSTGRES_DB: pongdang
       POSTGRES_USER: pongdang
       POSTGRES_PASSWORD: ci-postgres-password
-      DATABASE_URL: postgresql://pongdang:ci-postgres-password@db:5432/pongdang
+      DATABASE_URL: postgresql://pongdang:ci-postgres-password@cksDB:5432/pongdang
       SECRET_KEY: ci-production-only-secret-key-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
       ALLOWED_HOSTS: localhost
       CORS_ALLOWED_ORIGINS: ""
@@ -176,6 +176,8 @@ jobs:
         run: docker compose -f docker-compose.yml config --quiet
 
       - name: Render development Compose configuration
+        env:
+          LOCAL_DATABASE_URL: postgresql://pongdang:ci-postgres-password@db:5432/pongdang
         run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
 
       - name: Render immutable production deployment configuration

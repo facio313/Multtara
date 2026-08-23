@@ -18,7 +18,7 @@
 
 - Backend: Python 3.11+ (운영 이미지 3.12) · Django 5.2 LTS · Django REST Framework
 - Frontend: React 19 · Vite 8 · React Router · Zustand · Axios
-- Database: PostgreSQL 15
+- Database: PostgreSQL 16 (`cksDB` shared instance in production, local container in development)
 - Infrastructure: Docker · Docker Compose · Nginx · Gunicorn
 - Target: Raspberry Pi 5 (`linux/arm64`)
 
@@ -57,6 +57,7 @@ cp .env.example .env
 # PORTFOLIO_AUTH_MODE=local
 # PONGDANG_SSO_ENABLED=False
 # VITE_SSO_ENABLED=false
+# LOCAL_DATABASE_URL은 로컬 Compose 서비스 db를 가리키도록 입력
 
 scripts/portfolio-auth-mode.sh exec -- \
   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
@@ -73,12 +74,12 @@ scripts/portfolio-auth-mode.sh exec -- \
 ```bash
 # Git tag release가 만든 bundle을 Raspberry Pi로 전달한 뒤 실행합니다.
 sudo ./scripts/pi-setup.sh \
-  --target /opt/pongdang \
-  --deploy-user pongdang \
-  --project-name pongdang
+  --target /opt/pongdang-multtara \
+  --deploy-user cks \
+  --project-name pongdang-multtara
 
-sudo -u pongdang /opt/pongdang/scripts/pi-deploy.sh deploy \
-  --target /opt/pongdang \
+sudo -u cks /opt/pongdang-multtara/scripts/pi-deploy.sh deploy \
+  --target /opt/pongdang-multtara \
   --release-file /path/to/release.env
 ```
 
@@ -88,11 +89,23 @@ GHCR digest image, provenance, SBOM, checksum manifest만 배포합니다. 최�
 [운영 runbook](docs/operations-runbook.md)을 따릅니다.
 
 `bonifacio.work`에서는 전용 target `/opt/pongdang-multtara`, Compose project
-`pongdang-multtara`, loopback `127.0.0.1:5182`와 독립 PostgreSQL volume을 사용합니다.
+`pongdang-multtara`, loopback `127.0.0.1:5182`를 사용합니다. 운영 backend와
+collector만 외부 `cksDB-multtara` 전용 네트워크에 연결하며 그 안의 전용
+`pongdang` database/role만 사용합니다. frontend와 다른 앱 backend는 이 DB
+네트워크에 연결하지 않습니다.
 `origin/main` 이력에 이미 포함된 commit에 붙은 tag만 release할 수 있습니다.
 workflow revision과 tag commit이 정확히 일치해야 하며, tag release가 digest를 만든
-뒤 제한된 서버 명령으로 자동 배포합니다. 공개 prefix는 `/multtara/`입니다. 다른
-프로젝트의 `cksDB`나 네트워크를 공유하지 않습니다.
+뒤에도 서버는 자동 변경되지 않습니다. 검증된 target을 준비한 다음
+`workflow_dispatch`의 `deploy_to_server=true`를 명시한 경우에만 제한된 서버 명령이
+배포합니다. 공개 prefix는 `/multtara/`입니다.
+애플리케이션 배포는 공유 PostgreSQL 컨테이너를 생성·재시작·삭제하지 않습니다.
+로컬 PC의 개발 overlay는 별도 PostgreSQL 16 컨테이너와 volume을 사용하므로 서버
+`cksDB`가 필요하지 않습니다.
+
+기존 checkout의 PostgreSQL 15 `postgres_data` volume은 자동 업그레이드하지
+않습니다. 개발 overlay는 새 `postgres16_data` volume을 사용해 PG15 데이터를
+보존합니다. 필요한 로컬 데이터는 먼저 PG15에서 `pg_dump`한 뒤 새 PG16 DB에
+복원하고, 확인 전에는 이전 volume에 `down -v`를 사용하지 마세요.
 
 인증 모드는 Git branch에 묶입니다. `scripts/portfolio-auth-mode.sh`가 명시된
 `PORTFOLIO_BRANCH`, `GITHUB_REF_NAME`, 현재 Git branch 순으로 판정하며 `main`과

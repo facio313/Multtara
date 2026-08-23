@@ -11,8 +11,8 @@ source "$SCRIPT_DIR/deploy-common.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  sudo ./scripts/pi-setup.sh --target /opt/pongdang \
-    --deploy-user pongdang [--project-name pongdang]
+  sudo ./scripts/pi-setup.sh --target /opt/pongdang-multtara \
+    --deploy-user cks --project-name pongdang-multtara
 
 Installs only deployment configuration and scripts. It never builds, pulls, or
 starts an image and never generates a credential.
@@ -71,6 +71,7 @@ for required in \
   docker-compose.yml \
   docker-compose.deploy.yml \
   .env.example \
+  scripts/db-migration-rollback.sh \
   scripts/deploy-common.sh \
   scripts/pi-deploy.sh \
   scripts/postgres-backup.sh \
@@ -112,6 +113,22 @@ if [[ -e "$PONGDANG_TARGET" ]]; then
     pongdang_validate_existing_target "$PONGDANG_TARGET"
     [[ "$PONGDANG_DEPLOY_USER" == "$DEPLOY_USER" ]] || pongdang_die "existing deployment user mismatch"
     [[ "$PONGDANG_PROJECT_NAME" == "$PROJECT_NAME" ]] || pongdang_die "existing Compose project mismatch"
+    cutover_marker="$PONGDANG_TARGET/state/$PONGDANG_CUTOVER_MARKER_NAME"
+    if [[ -e "$cutover_marker" || -L "$cutover_marker" ]]; then
+      [[ -f "$cutover_marker" && ! -L "$cutover_marker" ]] \
+        || pongdang_die "existing cksDB cutover-ready marker is unsafe"
+    fi
+    current_release="$PONGDANG_TARGET/state/current.release.env"
+    if [[ -e "$current_release" || -L "$current_release" ]]; then
+      [[ -f "$current_release" && ! -L "$current_release" ]] \
+        || pongdang_die "existing current release state is unsafe"
+      if [[ ! -f "$cutover_marker" ]]; then
+        runuser -u "$DEPLOY_USER" -- \
+          "$SOURCE_ROOT/scripts/db-migration-rollback.sh" verify \
+          --target "$PONGDANG_TARGET" >/dev/null \
+          || pongdang_die "stage and verify the immutable pre-cksDB rollback bundle before replacing deployment files"
+      fi
+    fi
   elif [[ -n "$(find "$PONGDANG_TARGET" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
     pongdang_die "refusing a non-empty unmarked target: $PONGDANG_TARGET"
   fi
@@ -145,6 +162,7 @@ install -m 0444 -o root -g root \
   "$SOURCE_ROOT/.env.example" \
   "$PONGDANG_TARGET/"
 install -m 0555 -o root -g root \
+  "$SOURCE_ROOT/scripts/db-migration-rollback.sh" \
   "$SOURCE_ROOT/scripts/deploy-common.sh" \
   "$SOURCE_ROOT/scripts/pi-deploy.sh" \
   "$SOURCE_ROOT/scripts/postgres-backup.sh" \

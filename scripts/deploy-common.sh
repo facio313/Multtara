@@ -8,6 +8,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 fi
 
 PONGDANG_MARKER_NAME=".pongdang-deployment"
+PONGDANG_CUTOVER_MARKER_NAME="cksdb-cutover-ready.env"
+PONGDANG_CUTOVER_MARKER_FORMAT="PONGDANG_CKSDB_CUTOVER_READY_V1"
+PONGDANG_DB_FINGERPRINT_FORMAT="PONGDANG_DB_FINGERPRINT_V1"
 PONGDANG_MIN_COMPOSE_MAJOR=2
 PONGDANG_MIN_COMPOSE_MINOR=24
 PONGDANG_MIN_COMPOSE_PATCH=4
@@ -170,6 +173,16 @@ pongdang_optional_env_value() {
   ' "$file"
 }
 
+pongdang_refuse_pre_cksdb_rollback_active() {
+  local marker="$PONGDANG_TARGET/state/pre-cksdb-rollback.active"
+
+  if [[ -e "$marker" || -L "$marker" ]]; then
+    [[ -f "$marker" && ! -L "$marker" ]] \
+      || pongdang_die "pre-cksDB rollback active marker is unsafe: $marker"
+    pongdang_die "pre-cksDB PostgreSQL 15 rollback is active; normal shared-DB deploy, backup, and restore operations are blocked until manual reconciliation"
+  fi
+}
+
 pongdang_validate_secret_env() {
   local file="$PONGDANG_TARGET/.env"
   local mode
@@ -178,6 +191,7 @@ pongdang_validate_secret_env() {
   local secret_lower
   local sso_secret_file_size
 
+  pongdang_refuse_pre_cksdb_rollback_active
   [[ -f "$file" && ! -L "$file" ]] || pongdang_die "secret environment file is missing or unsafe: $file"
   pongdang_require_command python3
   python3 - "$file" <<'PY' \
@@ -207,6 +221,12 @@ PY
     || pongdang_die "POSTGRES_PASSWORD must appear exactly once"
   PONGDANG_DATABASE_URL="$(pongdang_env_value "$file" DATABASE_URL)" \
     || pongdang_die "DATABASE_URL must appear exactly once"
+  PONGDANG_SHARED_DB_TOOL="$(pongdang_env_value "$file" SHARED_DB_TOOL)" \
+    || pongdang_die "SHARED_DB_TOOL must appear exactly once"
+  PONGDANG_SHARED_DB_TOOL_SHA256="$(pongdang_env_value "$file" SHARED_DB_TOOL_SHA256)" \
+    || pongdang_die "SHARED_DB_TOOL_SHA256 must appear exactly once"
+  PONGDANG_CKSDB_REVISION="$(pongdang_env_value "$file" CKSDB_REVISION)" \
+    || pongdang_die "CKSDB_REVISION must appear exactly once"
   PONGDANG_SECRET_KEY="$(pongdang_env_value "$file" SECRET_KEY)" \
     || pongdang_die "SECRET_KEY must appear exactly once"
   PONGDANG_ALLOWED_HOSTS="$(pongdang_env_value "$file" ALLOWED_HOSTS)" \
@@ -242,8 +262,32 @@ PY
     || pongdang_die "POSTGRES_DB must be a dedicated application database"
   [[ "$PONGDANG_POSTGRES_USER" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
     || pongdang_die "POSTGRES_USER is not a safe PostgreSQL identifier"
+  [[ "$PONGDANG_POSTGRES_DB" == "pongdang" && "$PONGDANG_POSTGRES_USER" == "pongdang" ]] \
+    || pongdang_die "production must use the dedicated pongdang database and role"
+  [[ "$PONGDANG_SHARED_DB_TOOL" == /* \
+    && -f "$PONGDANG_SHARED_DB_TOOL" \
+    && ! -L "$PONGDANG_SHARED_DB_TOOL" \
+    && -x "$PONGDANG_SHARED_DB_TOOL" ]] \
+    || pongdang_die "SHARED_DB_TOOL must be an absolute executable regular non-symlink file"
+  mode="$(stat -c '%a' "$PONGDANG_SHARED_DB_TOOL")"
+  (( (8#$mode & 022) == 0 )) \
+    || pongdang_die "SHARED_DB_TOOL must not be group/world writable"
+  [[ "$PONGDANG_SHARED_DB_TOOL_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+    || pongdang_die "SHARED_DB_TOOL_SHA256 must be a lowercase SHA-256 digest"
+  [[ "$PONGDANG_CKSDB_REVISION" =~ ^[0-9a-f]{40}$ ]] \
+    || pongdang_die "CKSDB_REVISION must be a full lowercase Git SHA"
+  [[ "$PONGDANG_SHARED_DB_TOOL" == */releases/"$PONGDANG_CKSDB_REVISION"/scripts/multtara-db.sh ]] \
+    || pongdang_die "SHARED_DB_TOOL must be installed below the pinned cksDB release revision"
+  actual_shared_db_tool_sha256="$(sha256sum "$PONGDANG_SHARED_DB_TOOL" | awk '{print $1}')"
+  [[ "$actual_shared_db_tool_sha256" == "$PONGDANG_SHARED_DB_TOOL_SHA256" ]] \
+    || pongdang_die "SHARED_DB_TOOL does not match its pinned SHA-256 digest"
+  expected_shared_db_contract='{"protocol":"cksdb.multtara-db","version":1,"database":"pongdang","role":"pongdang"}'
+  [[ "$("$PONGDANG_SHARED_DB_TOOL" contract)" == "$expected_shared_db_contract" ]] \
+    || pongdang_die "SHARED_DB_TOOL contract is incompatible with cksdb.multtara-db v1"
   (( ${#PONGDANG_POSTGRES_PASSWORD} >= 16 )) \
     || pongdang_die "POSTGRES_PASSWORD must contain at least 16 characters"
+  [[ "$PONGDANG_POSTGRES_PASSWORD" =~ ^[A-Za-z0-9_-]{16,128}$ ]] \
+    || pongdang_die "POSTGRES_PASSWORD must use 16-128 base64url-safe characters"
   [[ "$PONGDANG_POSTGRES_PASSWORD" != *YOUR_PASSWORD* ]] \
     || pongdang_die "POSTGRES_PASSWORD still contains a placeholder"
   [[ "$PONGDANG_DATABASE_URL" != *YOUR_PASSWORD* && "$PONGDANG_DATABASE_URL" != *REPLACE_* ]] \
@@ -268,7 +312,7 @@ try:
 except ValueError:
     raise SystemExit(1) from None
 
-if parsed.scheme != "postgresql" or parsed.hostname != "db" or port != 5432:
+if parsed.scheme != "postgresql" or parsed.hostname != "cksdb" or port != 5432:
     raise SystemExit(1)
 if parsed.path != f"/{database}" or parsed.query or parsed.fragment:
     raise SystemExit(1)
@@ -291,7 +335,7 @@ if unquote(encoded_user) != expected_user or unquote(encoded_password) != expect
     raise SystemExit(1)
 PY
   then
-    pongdang_die "DATABASE_URL must contain the percent-encoded PostgreSQL credentials and target db:5432/POSTGRES_DB exactly"
+    pongdang_die "DATABASE_URL must contain the percent-encoded PostgreSQL credentials and target cksDB:5432/POSTGRES_DB exactly"
   fi
   (( ${#PONGDANG_SECRET_KEY} >= 50 )) || pongdang_die "SECRET_KEY must contain at least 50 characters"
   secret_lower="$(printf '%s' "$PONGDANG_SECRET_KEY" | tr '[:upper:]' '[:lower:]')"
@@ -401,6 +445,156 @@ PY
   # This library publishes the validated path to each caller.
   # shellcheck disable=SC2034
   PONGDANG_ENV_FILE="$file"
+}
+
+pongdang_validate_cutover_ready() {
+  local marker="$PONGDANG_TARGET/state/$PONGDANG_CUTOVER_MARKER_NAME"
+  local rollback_tool="$PONGDANG_TARGET/scripts/db-migration-rollback.sh"
+  local bundle_manifest="$PONGDANG_TARGET/state/pre-cksdb-rollback/SHA256SUMS"
+  local final_dump_name
+  local final_dump
+  local checksum
+  local mode
+  local owner
+  local actual_dump_sha256
+  local actual_bundle_manifest_sha256
+
+  [[ -f "$marker" && ! -L "$marker" ]] \
+    || pongdang_die "cksDB cutover-ready marker is missing or unsafe: $marker"
+  mode="$(stat -c '%a' -- "$marker")" \
+    || pongdang_die "cannot inspect cksDB cutover-ready marker permissions"
+  owner="$(stat -c '%u' -- "$marker")" \
+    || pongdang_die "cannot inspect cksDB cutover-ready marker owner"
+  [[ "$mode" == "400" ]] \
+    || pongdang_die "cksDB cutover-ready marker must have mode 0400"
+  [[ "$owner" == "$(id -u)" ]] \
+    || pongdang_die "cksDB cutover-ready marker must be owned by the deployment user"
+
+  python3 - \
+    "$marker" \
+    "$PONGDANG_CUTOVER_MARKER_FORMAT" \
+    "$PONGDANG_DB_FINGERPRINT_FORMAT" \
+    "$PONGDANG_TARGET" \
+    "$PONGDANG_DEPLOY_USER" \
+    "$PONGDANG_PROJECT_NAME" \
+    "$PONGDANG_CKSDB_REVISION" \
+    "$PONGDANG_SHARED_DB_TOOL_SHA256" <<'PY' \
+    || pongdang_die "cksDB cutover-ready marker has invalid, incomplete, or mismatched evidence"
+import datetime as dt
+import re
+import sys
+from pathlib import Path
+
+(
+    marker_path,
+    expected_format,
+    fingerprint_format,
+    target,
+    deploy_user,
+    project,
+    cksdb_revision,
+    tool_sha256,
+) = sys.argv[1:]
+expected_keys = (
+    "FORMAT", "TARGET", "DEPLOY_USER", "PROJECT_NAME", "DATABASE",
+    "SOURCE_POSTGRES_MAJOR", "TARGET_POSTGRES_MAJOR", "FINGERPRINT_FORMAT",
+    "FINAL_DUMP", "FINAL_DUMP_SHA256", "SOURCE_FINGERPRINT_SHA256",
+    "TARGET_FINGERPRINT_SHA256", "CKSDB_REVISION", "SHARED_DB_TOOL_SHA256",
+    "ROLLBACK_BUNDLE_MANIFEST_SHA256", "CREATED_AT",
+)
+values: dict[str, str] = {}
+try:
+    lines = Path(marker_path).read_text(encoding="ascii").splitlines()
+except UnicodeError:
+    raise SystemExit(1) from None
+for line in lines:
+    if "=" not in line:
+        raise SystemExit(1)
+    key, value = line.split("=", 1)
+    if (
+        key not in expected_keys
+        or key in values
+        or not value
+        or any(ord(character) < 33 or ord(character) > 126 for character in value)
+    ):
+        raise SystemExit(1)
+    values[key] = value
+if tuple(values) != expected_keys:
+    raise SystemExit(1)
+if values != values | {
+    "FORMAT": expected_format,
+    "TARGET": target,
+    "DEPLOY_USER": deploy_user,
+    "PROJECT_NAME": project,
+    "DATABASE": "pongdang",
+    "SOURCE_POSTGRES_MAJOR": "15",
+    "TARGET_POSTGRES_MAJOR": "16",
+    "FINGERPRINT_FORMAT": fingerprint_format,
+    "CKSDB_REVISION": cksdb_revision,
+    "SHARED_DB_TOOL_SHA256": tool_sha256,
+}:
+    raise SystemExit(1)
+digest = re.compile(r"[0-9a-f]{64}")
+for key in (
+    "FINAL_DUMP_SHA256", "SOURCE_FINGERPRINT_SHA256",
+    "TARGET_FINGERPRINT_SHA256", "ROLLBACK_BUNDLE_MANIFEST_SHA256",
+):
+    if not digest.fullmatch(values[key]):
+        raise SystemExit(1)
+if values["SOURCE_FINGERPRINT_SHA256"] != values["TARGET_FINGERPRINT_SHA256"]:
+    raise SystemExit(1)
+if not re.fullmatch(r"pongdang-[0-9]{8}T[0-9]{6}Z-[0-9]+[.]dump", values["FINAL_DUMP"]):
+    raise SystemExit(1)
+if not re.fullmatch(r"[0-9a-f]{40}", values["CKSDB_REVISION"]):
+    raise SystemExit(1)
+try:
+    created_at = dt.datetime.strptime(values["CREATED_AT"], "%Y-%m-%dT%H:%M:%SZ")
+except ValueError:
+    raise SystemExit(1) from None
+if created_at.tzinfo is not None:
+    raise SystemExit(1)
+PY
+
+  final_dump_name="$(pongdang_marker_value "$marker" FINAL_DUMP)" \
+    || pongdang_die "cksDB cutover-ready marker FINAL_DUMP is invalid"
+  final_dump="$PONGDANG_TARGET/backups/postgres/$final_dump_name"
+  checksum="$final_dump.sha256"
+  for path in "$final_dump" "$checksum"; do
+    [[ -f "$path" && ! -L "$path" ]] \
+      || pongdang_die "cutover final dump evidence is missing or unsafe: $path"
+    mode="$(stat -c '%a' -- "$path")"
+    owner="$(stat -c '%u' -- "$path")"
+    [[ "$mode" == "600" && "$owner" == "$(id -u)" ]] \
+      || pongdang_die "cutover final dump evidence must be deployment-user-owned mode 0600: $path"
+  done
+  python3 - "$checksum" "$final_dump_name" <<'PY' \
+    || pongdang_die "cutover final dump checksum sidecar is malformed"
+import re
+import sys
+from pathlib import Path
+
+lines = Path(sys.argv[1]).read_text(encoding="ascii").splitlines()
+pattern = re.compile(rf"[0-9a-f]{{64}}  {re.escape(sys.argv[2])}")
+if len(lines) != 1 or not pattern.fullmatch(lines[0]):
+    raise SystemExit(1)
+PY
+  (cd "$PONGDANG_TARGET/backups/postgres" \
+    && sha256sum --check --strict "$final_dump_name.sha256" >/dev/null) \
+    || pongdang_die "cutover final dump checksum verification failed"
+  actual_dump_sha256="$(sha256sum "$final_dump" | awk '{print $1}')"
+  [[ "$actual_dump_sha256" == "$(pongdang_marker_value "$marker" FINAL_DUMP_SHA256)" ]] \
+    || pongdang_die "cutover marker does not match the final dump SHA-256"
+
+  [[ -f "$rollback_tool" && ! -L "$rollback_tool" && -x "$rollback_tool" ]] \
+    || pongdang_die "rollback bundle verifier is missing or unsafe"
+  "$rollback_tool" verify --target "$PONGDANG_TARGET" >/dev/null \
+    || pongdang_die "pre-cksDB rollback bundle verification failed"
+  [[ -f "$bundle_manifest" && ! -L "$bundle_manifest" ]] \
+    || pongdang_die "rollback bundle manifest is missing or unsafe"
+  actual_bundle_manifest_sha256="$(sha256sum "$bundle_manifest" | awk '{print $1}')"
+  [[ "$actual_bundle_manifest_sha256" == \
+      "$(pongdang_marker_value "$marker" ROLLBACK_BUNDLE_MANIFEST_SHA256)" ]] \
+    || pongdang_die "cutover marker does not match the rollback bundle manifest"
 }
 
 pongdang_validate_release_manifest() {

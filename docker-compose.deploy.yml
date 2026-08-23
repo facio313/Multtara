@@ -6,13 +6,24 @@ services:
     build: !reset null
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE immutable digest is required}
     pull_policy: always
+    networks:
+      - default
+      - multtara-db
 
   collector:
     build: !reset null
     image: ${BACKEND_IMAGE:?BACKEND_IMAGE immutable digest is required}
     pull_policy: always
+    networks:
+      - default
+      - multtara-db
 
   frontend:
     build: !reset null
     image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE immutable digest is required}
     pull_policy: always
+
+networks:
+  multtara-db:
+    external: true
+    name: cksDB-multtara

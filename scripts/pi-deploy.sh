@@ -11,8 +11,8 @@ usage() {
   cat <<'EOF'
 Usage:
   pi-deploy.sh validate-release /path/to/release.env
-  pi-deploy.sh deploy --target /opt/pongdang --release-file /path/to/release.env
-  pi-deploy.sh rollback --target /opt/pongdang
+  pi-deploy.sh deploy --target /opt/pongdang-multtara --release-file /path/to/release.env
+  pi-deploy.sh rollback --target /opt/pongdang-multtara
 
 Deployment accepts only GHCR sha256 image digests. Effective Compose is checked
 for build contexts before `pull` and `up --no-build` are allowed to run.
@@ -50,6 +50,10 @@ expected_images = {
     "collector": backend_image,
     "frontend": frontend_image,
 }
+if set(services) != set(expected_images):
+    raise SystemExit(
+        "production deployment service set must be exactly backend, collector, frontend"
+    )
 for name, image in expected_images.items():
     service = services.get(name)
     if not service:
@@ -60,6 +64,17 @@ for name, image in expected_images.items():
         raise SystemExit(f"image mismatch for {name}")
     if service.get("pull_policy") != "always":
         raise SystemExit(f"pull_policy is not always for {name}")
+
+for name in ("backend", "collector"):
+    attached = set(services[name].get("networks", {}))
+    if attached != {"default", "multtara-db"}:
+        raise SystemExit(f"{name} is not isolated to the Multtara database network")
+if set(services["frontend"].get("networks", {})) != {"default"}:
+    raise SystemExit("frontend must be attached only to the project default network")
+
+shared_network = config.get("networks", {}).get("multtara-db", {})
+if shared_network.get("name") != "cksDB-multtara" or shared_network.get("external") is not True:
+    raise SystemExit("Multtara must use the external cksDB-multtara network")
 
 ports = services["frontend"].get("ports", [])
 if len(ports) != 1 or ports[0].get("host_ip") != "127.0.0.1" or int(ports[0]["target"]) != 8080:
@@ -117,35 +132,8 @@ store_release() {
   PONGDANG_SELECTED_RELEASE="$destination"
 }
 
-database_is_running() {
-  "${BASE_COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -Fqx db
-}
-
-postgres_volume_exists() {
-  local expected_volume="${PONGDANG_PROJECT_NAME}_postgres_data"
-  local labelled
-  if docker volume inspect "$expected_volume" >/dev/null 2>&1; then
-    return 0
-  fi
-  labelled="$(
-    docker volume ls --quiet \
-      --filter "label=com.docker.compose.project=$PONGDANG_PROJECT_NAME" \
-      --filter "label=com.docker.compose.volume=postgres_data" 2>/dev/null
-  )" || pongdang_die "cannot inspect the PostgreSQL Docker volume"
-  [[ -n "$labelled" ]]
-}
-
 backup_before_change() {
-  local current="$PONGDANG_TARGET/state/current.release.env"
-  if database_is_running; then
-    "$PONGDANG_TARGET/scripts/postgres-backup.sh" --target "$PONGDANG_TARGET"
-    return
-  fi
-  if [[ -e "$current" || -L "$current" ]] || postgres_volume_exists; then
-    pongdang_die \
-      "database is stopped but prior release state or PostgreSQL volume exists; start and verify the database so a backup can be taken before deployment"
-  fi
-  echo "verified first deployment: no running database, prior release state, or PostgreSQL volume"
+  "$PONGDANG_TARGET/scripts/postgres-backup.sh" --target "$PONGDANG_TARGET"
 }
 
 activate_selected_release() {
@@ -264,6 +252,7 @@ pongdang_require_command sha256sum
 pongdang_require_compose
 pongdang_validate_secret_env
 pongdang_acquire_lock deploy
+pongdang_validate_cutover_ready
 
 for required in docker-compose.yml docker-compose.deploy.yml; do
   [[ -f "$PONGDANG_TARGET/$required" && ! -L "$PONGDANG_TARGET/$required" ]] \
@@ -279,13 +268,6 @@ fi
   || pongdang_die "DEPLOY_WAIT_SECONDS must be numeric"
 (( PONGDANG_DEPLOY_WAIT_SECONDS >= 30 && PONGDANG_DEPLOY_WAIT_SECONDS <= 600 )) \
   || pongdang_die "DEPLOY_WAIT_SECONDS must be between 30 and 600"
-
-BASE_COMPOSE=(
-  docker compose
-  --project-name "$PONGDANG_PROJECT_NAME"
-  --env-file "$PONGDANG_ENV_FILE"
-  -f "$PONGDANG_TARGET/docker-compose.yml"
-)
 
 if [[ "$ACTION" == "deploy" ]]; then
   RELEASE_FILE="$(canonical_file "$RELEASE_INPUT")"

@@ -10,6 +10,11 @@ on:
         description: Existing vMAJOR.MINOR.PATCH tag that points to the selected revision
         required: true
         type: string
+      deploy_to_server:
+        description: Deploy only after the release and target have been prepared
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -245,6 +250,7 @@ jobs:
           )
           install -m 0644 docker-compose.yml docker-compose.deploy.yml .env.example "$bundle_dir/"
           install -m 0755 \
+            scripts/db-migration-rollback.sh \
             scripts/deploy-common.sh \
             scripts/pi-setup.sh \
             scripts/pi-deploy.sh \
@@ -269,6 +275,7 @@ jobs:
   deploy:
     name: Deploy digest-pinned release to portfolio server
     needs: [prepare, backend, frontend, bundle]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_to_server }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:

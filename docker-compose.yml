@@ -1,39 +1,4 @@
 services:
-  db:
-    image: postgres:15-alpine
-    restart: unless-stopped
-    init: true
-    stop_grace_period: 1m
-    shm_size: 256mb
-    mem_limit: ${DB_MEMORY_LIMIT:-1g}
-    cpus: ${DB_CPU_LIMIT:-1.5}
-    pids_limit: ${DB_PIDS_LIMIT:-200}
-    logging:
-      driver: json-file
-      options:
-        max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
-        max-file: ${DOCKER_LOG_MAX_FILES:-5}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-pongdang}
-      POSTGRES_USER: ${POSTGRES_USER:-pongdang}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-    # Raspberry Pi 5 메모리 튜닝 (4GB/8GB 기준)
-    command: >
-      postgres
-        -c shared_buffers=256MB
-        -c work_mem=16MB
-        -c effective_cache_size=512MB
-        -c maintenance_work_mem=64MB
-        -c max_connections=50
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pongdang} -d ${POSTGRES_DB:-pongdang}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
   backend:
     build:
       context: ./backend
@@ -68,9 +33,6 @@ services:
       options:
         max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
         max-file: ${DOCKER_LOG_MAX_FILES:-5}
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
       # Pass a real RFC 3986 database URL instead of interpolating raw
       # credentials into one. Reserved characters in user/password components
@@ -219,7 +181,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-
-volumes:
-  postgres_data:
-    driver: local

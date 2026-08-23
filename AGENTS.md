@@ -60,7 +60,7 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 |---|---|
 | 웹 | React (Vite) · React Router · Zustand · Axios |
 | 서버 | Python 3.11+ (운영 3.12) · Django 5.2 LTS · Django REST Framework 3.17 |
-| DB | PostgreSQL 15 |
+| DB | PostgreSQL 16 (production shares the cksDB instance; database/role remain isolated) |
 | 인프라 | Docker · Docker Compose · Nginx |
 | 배포 | Raspberry Pi 5 (ARM64) |
 
@@ -302,12 +302,40 @@ anthropic-feat-name ─┘
   build application images on the Pi or deploy a mutable tag. A release tag
   must resolve to the exact workflow revision, and that revision must already
   be an ancestor of `origin/main`; the release workflow fails closed otherwise.
-- A successful tag release requests the restricted server command
+- A tag push builds and verifies release artifacts but must not change the
+  server. A successful explicit workflow dispatch with `deploy_to_server=true`
+  requests the restricted server command
   `deploy multtara <version> <commit> <backend-digest> <frontend-digest>`.
   The server fixes the GHCR namespace, deploys at `/opt/pongdang-multtara` with
-  Compose project `pongdang-multtara`, and uses its own PostgreSQL volume and
-  network. It must never attach to or recreate the shared `cksDB` service.
+  Compose project `pongdang-multtara`. Production backend and collector attach
+  only to the external `cksDB-multtara` database network and use the dedicated
+  `pongdang` database/login role; frontend and other app backends never join
+  that network. Application deploys
+  must never create, restart, or remove the shared `cksDB` service. Local
+  development instead gets a self-contained PostgreSQL 16 service and volume
+  from `docker-compose.dev.yml`.
 - Pi deployment configuration is rooted at a validated marker directory and
   requires Docker Compose 2.24.4 or newer. Preserve the loopback-only origin,
-  take a verified PostgreSQL backup before upgrades/rollback, and require the
-  explicit restore confirmation contract before replacing a database.
+  call the allowlisted cksDB Multtara operator tool for a verified backup before
+  upgrades/rollback, and require the explicit restore confirmation contract
+  before replacing only the `pongdang` database.
+- Before the one-time PG15-to-cksDB cutover, stage
+  `state/pre-cksdb-rollback` with `db-migration-rollback.sh` while the original
+  `db` service and retained project volume are still present. That bundle is a
+  secret, owner-only, checksum-verified emergency artifact and is valid only
+  while no Multtara write has reached cksDB. Activating it publishes
+  `state/pre-cksdb-rollback.active`; normal shared-DB deploy/backup/restore
+  commands must then fail closed until a reviewed forward reconciliation.
+- The first shared-DB deployment is gated by the fixed, deployment-user-owned
+  mode-0400 `state/cksdb-cutover-ready.env`. Only the migration tool may publish
+  it after stopping legacy writers, creating and checksumming the final PG15
+  dump, restoring through the pinned cksDB tool, and obtaining byte-identical
+  deterministic source/target fingerprints for schemas, constraints, indexes,
+  sequence state, and exact per-table row counts. The marker binds the final
+  dump SHA-256, both fingerprint SHA-256 values, full cksDB Git revision,
+  installed tool SHA-256, and rollback-bundle manifest SHA-256.
+- Production deploy and rollback must revalidate that marker, final dump and
+  checksum sidecar, the complete rollback manifest plus its separate manifest
+  checksum, and the retained PG15 volume identity. The effective production
+  service set is exactly `backend`, `collector`, and `frontend`; frontend is
+  attached only to the project default network.

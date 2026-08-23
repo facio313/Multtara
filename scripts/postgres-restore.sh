@@ -10,8 +10,8 @@ source "$SCRIPT_DIR/deploy-common.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  postgres-restore.sh verify --target /opt/pongdang --backup /path/to/pongdang-*.dump
-  postgres-restore.sh restore --target /opt/pongdang --backup /path/to/pongdang-*.dump \
+  postgres-restore.sh verify --target /opt/pongdang-multtara --backup /path/to/pongdang-*.dump
+  postgres-restore.sh restore --target /opt/pongdang-multtara --backup /path/to/pongdang-*.dump \
     --confirm RESTORE:<project-name>:<database-name>
 
 `restore` stops backend and collector, takes a fresh pre-restore backup, replaces
@@ -83,15 +83,9 @@ CHECKSUM_FILE="$BACKUP_FILE.sha256"
 [[ -f "$CHECKSUM_FILE" && ! -L "$CHECKSUM_FILE" ]] || pongdang_die "backup checksum is missing"
 (cd "$BACKUP_DIR" && sha256sum -c "${CHECKSUM_FILE##*/}")
 
-COMPOSE=(
-  docker compose
-  --project-name "$PONGDANG_PROJECT_NAME"
-  --env-file "$PONGDANG_ENV_FILE"
-  -f "$PONGDANG_TARGET/docker-compose.yml"
-)
-"${COMPOSE[@]}" ps --status running --services | grep -Fqx db \
-  || pongdang_die "PostgreSQL service is not running"
-"${COMPOSE[@]}" exec -T db pg_restore --list < "$BACKUP_FILE" >/dev/null \
+"$PONGDANG_SHARED_DB_TOOL" ready \
+  || pongdang_die "shared PostgreSQL database is not ready"
+"$PONGDANG_SHARED_DB_TOOL" verify --backup "$BACKUP_FILE" \
   || pongdang_die "pg_restore rejected the archive"
 
 if [[ "$ACTION" == "verify" ]]; then
@@ -127,37 +121,23 @@ pongdang_acquire_lock database
 # prevents the requested source from being removed by the supported retention
 # command while the restore is in progress.
 (cd "$BACKUP_DIR" && sha256sum -c "${CHECKSUM_FILE##*/}")
-"${COMPOSE[@]}" exec -T db pg_restore --list < "$BACKUP_FILE" >/dev/null \
+"$PONGDANG_SHARED_DB_TOOL" verify --backup "$BACKUP_FILE" \
   || pongdang_die "pg_restore rejected the archive after the pre-restore backup"
 
-"${COMPOSE[@]}" stop collector backend
+"${DEPLOY_COMPOSE[@]}" stop collector backend
 restore_succeeded=0
+expected_finalize_output='{"protocol":"cksdb.multtara-db","version":1,"action":"finalize","database":"pongdang","removed":"pongdang_previous","ready":true}'
 cleanup_restore() {
   if [[ "$restore_succeeded" -ne 1 ]]; then
-    "${COMPOSE[@]}" stop collector backend >/dev/null 2>&1 || true
+    "${DEPLOY_COMPOSE[@]}" stop collector backend >/dev/null 2>&1 || true
     echo "restore did not complete; backend and collector remain stopped" >&2
   fi
 }
 trap cleanup_restore EXIT INT TERM
 
-"${COMPOSE[@]}" exec -T db psql \
-  --username "$PONGDANG_POSTGRES_USER" \
-  --dbname postgres \
-  --set ON_ERROR_STOP=1 <<SQL
-SELECT pg_terminate_backend(pid)
-FROM pg_stat_activity
-WHERE datname = '$PONGDANG_POSTGRES_DB'
-  AND pid <> pg_backend_pid();
-DROP DATABASE IF EXISTS "$PONGDANG_POSTGRES_DB";
-CREATE DATABASE "$PONGDANG_POSTGRES_DB" OWNER "$PONGDANG_POSTGRES_USER";
-SQL
-
-"${COMPOSE[@]}" exec -T db pg_restore \
-  --username "$PONGDANG_POSTGRES_USER" \
-  --dbname "$PONGDANG_POSTGRES_DB" \
-  --exit-on-error \
-  --no-owner \
-  --no-privileges < "$BACKUP_FILE"
+"$PONGDANG_SHARED_DB_TOOL" restore \
+  --backup "$BACKUP_FILE" \
+  --confirm RESTORE:multtara:pongdang
 
 "${DEPLOY_COMPOSE[@]}" up \
   -d \
@@ -165,5 +145,10 @@ SQL
   --wait \
   --wait-timeout 180 \
   backend collector frontend
+finalize_output="$("$PONGDANG_SHARED_DB_TOOL" finalize \
+  --confirm FINALIZE:multtara:pongdang_previous)" \
+  || pongdang_die "restored database passed application readiness but cksDB finalize failed"
+[[ "$finalize_output" == "$expected_finalize_output" ]] \
+  || pongdang_die "cksDB finalize returned an incompatible result"
 restore_succeeded=1
 echo "database restore complete: $BACKUP_FILE"

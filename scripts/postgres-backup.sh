@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/deploy-common.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  postgres-backup.sh --target /opt/pongdang [--retention-days 14] [--skip-retention]
+  postgres-backup.sh --target /opt/pongdang-multtara [--retention-days 14] [--skip-retention]
 
 Creates a PostgreSQL custom-format archive, validates it through pg_restore,
 writes a sha256 checksum, and then enforces retention.
@@ -68,18 +68,8 @@ fi
 (( RETENTION_DAYS >= 7 && RETENTION_DAYS <= 365 )) \
   || pongdang_die "retention days must be between 7 and 365"
 
-COMPOSE=(
-  docker compose
-  --project-name "$PONGDANG_PROJECT_NAME"
-  --env-file "$PONGDANG_ENV_FILE"
-  -f "$PONGDANG_TARGET/docker-compose.yml"
-)
-"${COMPOSE[@]}" ps --status running --services | grep -Fqx db \
-  || pongdang_die "PostgreSQL service is not running"
-"${COMPOSE[@]}" exec -T db pg_isready \
-  --username "$PONGDANG_POSTGRES_USER" \
-  --dbname "$PONGDANG_POSTGRES_DB" >/dev/null \
-  || pongdang_die "PostgreSQL is not ready"
+"$PONGDANG_SHARED_DB_TOOL" ready \
+  || pongdang_die "shared PostgreSQL database is not ready"
 
 BACKUP_DIR="$PONGDANG_TARGET/backups/postgres"
 [[ -d "$BACKUP_DIR" && ! -L "$BACKUP_DIR" ]] || pongdang_die "backup directory is missing or unsafe"
@@ -88,6 +78,7 @@ final="$BACKUP_DIR/pongdang-$timestamp.dump"
 partial="$BACKUP_DIR/.pongdang-$timestamp.$$.partial"
 checksum="$final.sha256"
 complete=0
+dumped=""
 [[ ! -e "$final" && ! -L "$final" \
     && ! -e "$partial" && ! -L "$partial" \
     && ! -e "$checksum" && ! -L "$checksum" ]] \
@@ -105,15 +96,12 @@ cleanup_incomplete() {
 }
 trap cleanup_incomplete EXIT INT TERM
 
-"${COMPOSE[@]}" exec -T db pg_dump \
-  --username "$PONGDANG_POSTGRES_USER" \
-  --dbname "$PONGDANG_POSTGRES_DB" \
-  --format=custom \
-  --compress=6 \
-  --no-owner \
-  --no-privileges > "$partial"
+dumped="$("$PONGDANG_SHARED_DB_TOOL" dump --output "$partial")" \
+  || pongdang_die "shared PostgreSQL dump failed"
+[[ "$dumped" == "$partial" ]] \
+  || pongdang_die "shared PostgreSQL dump returned an unexpected output path"
 [[ -s "$partial" ]] || pongdang_die "pg_dump produced an empty archive"
-"${COMPOSE[@]}" exec -T db pg_restore --list < "$partial" >/dev/null \
+"$PONGDANG_SHARED_DB_TOOL" verify --backup "$partial" \
   || pongdang_die "pg_restore rejected the new archive"
 chmod 0600 "$partial"
 mv "$partial" "$final"

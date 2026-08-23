@@ -24,6 +24,11 @@ frontend/dist/
 .env
 .env.local
 .env.*.local
+# Migration rollback bundles contain a mode-0600 copy of the former production
+# environment and must remain runtime state, never source material.
+**/state/pre-cksdb-rollback/
+**/state/pre-cksdb-rollback.active
+**/state/cksdb-cutover-ready.env
 
 # === Docker ===
 postgres_data/

@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/deploy-common.sh"
 usage() {
   cat <<'EOF'
 Usage:
-  postgres-prune-backups.sh --target /opt/pongdang [--days 14] [--apply]
+  postgres-prune-backups.sh --target /opt/pongdang-multtara [--days 14] [--apply]
 
 The default is a dry run. --apply removes only validated pongdang-*.dump files
 older than the retention window and always preserves the newest archive.

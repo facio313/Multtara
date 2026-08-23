@@ -4,7 +4,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 cd "$REPO_ROOT"
 
-bash -n scripts/setup-worktrees.sh scripts/test-setup-worktrees.sh scripts/portfolio-auth-mode.sh scripts/test-portfolio-auth-mode.sh
+bash -n \
+  scripts/db-migration-rollback.sh \
+  scripts/setup-worktrees.sh \
+  scripts/test-setup-worktrees.sh \
+  scripts/portfolio-auth-mode.sh \
+  scripts/test-portfolio-auth-mode.sh
 
 python3 - "$REPO_ROOT" <<'PY'
 from __future__ import annotations
@@ -38,6 +43,12 @@ readme = (root / "README.md").read_text()
 agents = (root / "AGENTS.md").read_text()
 operations_runbook = (root / "docs/operations-runbook.md").read_text()
 dockerignore = (root / ".dockerignore").read_text()
+deploy_common = (root / "scripts/deploy-common.sh").read_text()
+pi_deploy = (root / "scripts/pi-deploy.sh").read_text()
+postgres_backup = (root / "scripts/postgres-backup.sh").read_text()
+postgres_restore = (root / "scripts/postgres-restore.sh").read_text()
+db_migration_rollback = (root / "scripts/db-migration-rollback.sh").read_text()
+pi_setup = (root / "scripts/pi-setup.sh").read_text()
 
 compile(wsgi, str(root / "backend/config/wsgi.py"), "exec")
 compile(asgi, str(root / "backend/config/asgi.py"), "exec")
@@ -58,6 +69,11 @@ def location_block(path: str) -> str:
 
 
 require("DATABASE_URL=postgresql://${POSTGRES_" not in compose, "raw DB credentials are assembled into a URL")
+require(
+    re.search(r"^  db:\s*$", compose, flags=re.MULTILINE) is None,
+    "production Compose still defines an application PostgreSQL service",
+)
+require("postgres_data" not in compose, "production Compose still owns a PostgreSQL volume")
 require('user: "${PONGDANG_BACKEND_RUNTIME_USER:-pongdang:root}"' in compose, "backend must retain a non-root UID with the rootless private group")
 require(compose.count("DATABASE_URL: ${DATABASE_URL:?") == 2, "backend and collector must receive DATABASE_URL")
 require(compose.count("APPLICATION_BASE_PATH: ${APPLICATION_BASE_PATH:-}") == 2, "application base path must reach both Django processes")
@@ -68,6 +84,51 @@ require("--route-matrix-interval=${ROUTE_MATRIX_INTERVAL_SECONDS:-86400}" in com
 require("check_condition_pipeline_health" in compose and '- "900"' in compose, "collector freshness healthcheck is missing")
 require(deploy_compose.count("build: !reset null") == 3, "deployment overlay leaves a local build context")
 require(deploy_compose.count("pull_policy: always") == 3, "deployment overlay lacks pull_policy")
+require(deploy_compose.count("      - multtara-db") == 2, "private DB network must reach backend and collector only")
+require("  multtara-db:\n    external: true\n    name: cksDB-multtara" in deploy_compose, "Multtara DB network is not fixed and external")
+
+require("image: postgres:16-alpine" in dev_compose, "local development PostgreSQL is not version 16")
+require("postgres16_data:/var/lib/postgresql/data" in dev_compose, "local PostgreSQL 16 data is not persistent")
+require(
+    "depends_on:\n      db:\n        condition: service_healthy" in dev_compose,
+    "local backend does not wait for its PostgreSQL service",
+)
+require("postgres16_data:\n    driver: local" in dev_compose, "local PostgreSQL 16 volume declaration is missing")
+require("LOCAL_DATABASE_URL:?LOCAL_DATABASE_URL is required" in dev_compose, "local database URL is not explicit")
+
+require('PONGDANG_SHARED_DB_TOOL="$(pongdang_env_value "$file" SHARED_DB_TOOL)"' in deploy_common, "shared DB tool is not loaded from the protected deployment environment")
+require('parsed.hostname != "cksdb"' in deploy_common, "production DATABASE_URL is not pinned to cksDB")
+require("SHARED_DB_TOOL must be an absolute executable regular non-symlink file" in deploy_common, "shared DB tool path validation is incomplete")
+require("SHARED_DB_TOOL_SHA256 must be a lowercase SHA-256 digest" in deploy_common, "shared DB tool digest is not pinned")
+require("CKSDB_REVISION must be a full lowercase Git SHA" in deploy_common, "cksDB revision is not pinned")
+require("cksdb.multtara-db" in deploy_common, "shared DB tool protocol is not pinned")
+require('"$PONGDANG_SHARED_DB_TOOL" ready' in postgres_backup, "backup does not verify shared PostgreSQL readiness")
+require('"$PONGDANG_SHARED_DB_TOOL" dump' in postgres_backup, "backup bypasses the shared DB operator boundary")
+require('"$PONGDANG_SHARED_DB_TOOL" verify --backup' in postgres_backup, "backup archive is not verified by the shared DB operator")
+require('"$PONGDANG_SHARED_DB_TOOL" restore' in postgres_restore, "restore bypasses the shared DB operator boundary")
+require('"$PONGDANG_SHARED_DB_TOOL" finalize' in postgres_restore, "restore never finalizes the retained previous database")
+require("production deployment service set must be exactly backend, collector, frontend" in pi_deploy, "effective deployment validation permits extra or missing services")
+require('set(services["frontend"].get("networks", {})) != {"default"}' in pi_deploy, "effective deployment permits frontend network drift")
+require("shared_network.get(\"name\") != \"cksDB-multtara\"" in pi_deploy, "effective deployment validation does not enforce the private DB network")
+require(pi_deploy.count("backup_before_change") == 3, "deploy and rollback must both take a pre-change backup")
+require('BUNDLE_NAME="pre-cksdb-rollback"' in db_migration_rollback, "pre-cksDB rollback bundle path is not fixed")
+require("rollback bundle already exists and will never be overwritten" in db_migration_rollback, "pre-cksDB rollback bundle can be overwritten")
+require('DATA_CONFIRMATION="NO_CKSDB_WRITES_SINCE_CUTOVER"' in db_migration_rollback, "topology rollback can ignore post-cutover writes")
+require("postgres:15-alpine" in db_migration_rollback, "topology rollback does not validate PostgreSQL 15")
+require("docker volume inspect" in db_migration_rollback and "VOLUME_CREATED_AT" in db_migration_rollback, "topology rollback does not bind the retained volume identity")
+require("--no-build" in db_migration_rollback and "--remove-orphans" in db_migration_rollback and "--wait" in db_migration_rollback, "topology rollback activation can drift from the staged release")
+require("pre-cksdb-rollback.active" in deploy_common, "normal shared-DB operations ignore an active standalone rollback")
+require("pongdang_validate_cutover_ready" in pi_deploy, "shared-DB deploy is not gated by cutover evidence")
+require("SOURCE_FINGERPRINT_SHA256" in deploy_common and "TARGET_FINGERPRINT_SHA256" in deploy_common, "cutover marker does not bind both database fingerprints")
+require("SHA256SUMS.sha256" in db_migration_rollback and "--check --strict" in db_migration_rollback, "rollback bundle manifest lacks an independent strict checksum")
+require("write_fingerprint_sql" in db_migration_rollback and "row-count" in db_migration_rollback, "cutover does not compute deterministic schema and exact row-count evidence")
+require("FINALIZE:multtara:pongdang_previous" in db_migration_rollback, "cutover can publish evidence before cksDB finalize")
+require("scripts/db-migration-rollback.sh" in pi_setup, "Pi setup does not install the migration rollback tool")
+require("scripts/db-migration-rollback.sh" in release_workflow, "release bundle cannot stage the pre-change rollback artifact")
+require("NO_CKSDB_WRITES_SINCE_CUTOVER" in operations_runbook, "operations runbook hides the rollback data-divergence boundary")
+require("/opt/pongdang-multtara" in operations_runbook and "--deploy-user cks" in operations_runbook and "--project-name pongdang-multtara" in operations_runbook, "operations examples do not match the real Multtara target identity")
+require("**/state/pre-cksdb-rollback/" in dockerignore, "secret rollback bundle can enter a Docker build context")
+require("**/state/cksdb-cutover-ready.env" in dockerignore, "runtime cutover evidence can enter a Docker build context")
 
 for port in ("DEV_POSTGRES_PORT", "DEV_BACKEND_PORT", "DEV_FRONTEND_PORT"):
     require(f"${{DEV_BIND_ADDRESS:-127.0.0.1}}:${{{port}" in dev_compose, f"{port} is not loopback-bound")
@@ -207,6 +268,7 @@ require("VITE_SSO_ENABLED=true" in release_workflow, "release frontend does not 
 require("PORTFOLIO_BRANCH: main" in release_workflow, "release branch is not pinned to main")
 require("PORTFOLIO_AUTH_MODE: sso" in release_workflow, "release auth mode is not pinned to SSO")
 require("deploy multtara $DEPLOY_VERSION $DEPLOY_SHA $BACKEND_DIGEST $FRONTEND_DIGEST" in release_workflow, "release workflow does not request the restricted Multtara deployment")
+require("github.event_name == 'workflow_dispatch' && inputs.deploy_to_server" in release_workflow, "tag pushes can still mutate the production server automatically")
 
 # Ensure the override tag is attached only to the intended ports declaration.
 require(len(re.findall(r"^\s+ports: !override$", dev_compose, flags=re.MULTILINE)) == 1, "unexpected !override usage")
@@ -232,7 +294,8 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
 
   env \
     POSTGRES_PASSWORD='p@ss/word' \
-    DATABASE_URL='postgresql://pongdang:p%40ss%2Fword@db:5432/pongdang' \
+    DATABASE_URL='postgresql://pongdang:p%40ss%2Fword@cksDB:5432/pongdang' \
+    LOCAL_DATABASE_URL='postgresql://pongdang:p%40ss%2Fword@db:5432/pongdang' \
     SECRET_KEY='0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN' \
     ALLOWED_HOSTS='localhost,127.0.0.1' \
     APPLICATION_BASE_PATH='/multtara' \
@@ -258,6 +321,8 @@ with open(sys.argv[1], encoding="utf-8") as source:
     config = json.load(source)
 
 services = config["services"]
+if set(services) != {"backend", "collector", "db", "frontend"}:
+    raise SystemExit(f"FAIL: development services changed unexpectedly: {sorted(services)}")
 expected = {
     "db": ("127.0.0.1", 5432, 5432),
     "backend": ("127.0.0.1", 8000, 8000),
@@ -275,6 +340,27 @@ for service, wanted in expected.items():
 health_test = " ".join(services["frontend"]["healthcheck"]["test"])
 if "127.0.0.1:5173" not in health_test:
     raise SystemExit("FAIL: effective frontend healthcheck does not probe Vite")
+
+if services["db"].get("image") != "postgres:16-alpine":
+    raise SystemExit("FAIL: local development does not use PostgreSQL 16")
+db_volumes = services["db"].get("volumes", [])
+if not any(
+    mount.get("type") == "volume"
+    and mount.get("source") == "postgres16_data"
+    and mount.get("target") == "/var/lib/postgresql/data"
+    for mount in db_volumes
+):
+    raise SystemExit(f"FAIL: local PostgreSQL volume is missing: {db_volumes}")
+db_dependency = services["backend"].get("depends_on", {}).get("db", {})
+if db_dependency.get("condition") != "service_healthy":
+    raise SystemExit(f"FAIL: local backend does not wait for PostgreSQL health: {db_dependency}")
+for service in ("backend", "collector", "db", "frontend"):
+    if set(services[service].get("networks", {})) != {"default"}:
+        raise SystemExit(f"FAIL: local {service} escaped the project network")
+if "postgres16_data" not in config.get("volumes", {}):
+    raise SystemExit("FAIL: local PostgreSQL 16 named volume was not rendered")
+if "postgres_data" in config.get("volumes", {}):
+    raise SystemExit("FAIL: local PostgreSQL 16 reused the former PG15 volume")
 
 expected_database_url = "postgresql://pongdang:p%40ss%2Fword@db:5432/pongdang"
 for service in ("backend", "collector"):
@@ -312,7 +398,7 @@ PY
 
   env \
     POSTGRES_PASSWORD='p@ss/word' \
-    DATABASE_URL='postgresql://pongdang:p%40ss%2Fword@db:5432/pongdang' \
+    DATABASE_URL='postgresql://pongdang:p%40ss%2Fword@cksDB:5432/pongdang' \
     SECRET_KEY='0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN' \
     ALLOWED_HOSTS='localhost,127.0.0.1' \
     APPLICATION_BASE_PATH='/multtara' \
@@ -331,7 +417,13 @@ import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as source:
-    services = json.load(source)["services"]
+    config = json.load(source)
+
+services = config["services"]
+if set(services) != {"backend", "collector", "frontend"}:
+    raise SystemExit(f"FAIL: production services changed unexpectedly: {sorted(services)}")
+if config.get("volumes"):
+    raise SystemExit(f"FAIL: production retained application volumes: {config['volumes']}")
 
 expected = {
     "backend": "ghcr.io/example/pongdang/backend@sha256:" + "a" * 64,
@@ -344,6 +436,19 @@ for name, image in expected.items():
         raise SystemExit(f"FAIL: deployment retained build for {name}")
     if service.get("image") != image or service.get("pull_policy") != "always":
         raise SystemExit(f"FAIL: immutable image contract failed for {name}")
+expected_database_url = "postgresql://pongdang:p%40ss%2Fword@cksDB:5432/pongdang"
+for name in ("backend", "collector"):
+    if services[name]["environment"].get("DATABASE_URL") != expected_database_url:
+        raise SystemExit(f"FAIL: production {name} does not target cksDB")
+    if set(services[name].get("networks", {})) != {"default", "multtara-db"}:
+        raise SystemExit(f"FAIL: production {name} is not isolated to app + private DB networks")
+if set(services["frontend"].get("networks", {})) != {"default"}:
+    raise SystemExit("FAIL: production frontend can reach the shared DB network")
+shared_network = config.get("networks", {}).get("multtara-db", {})
+if shared_network.get("name") != "cksDB-multtara" or shared_network.get("external") is not True:
+    raise SystemExit(f"FAIL: private DB network contract failed: {shared_network}")
+if "db" in services["backend"].get("depends_on", {}):
+    raise SystemExit("FAIL: production backend still depends on an application DB service")
 ports = services["frontend"].get("ports", [])
 if len(ports) != 1 or ports[0].get("host_ip") != "127.0.0.1" or int(ports[0]["target"]) != 8080:
     raise SystemExit(f"FAIL: deployment frontend port contract failed: {ports}")

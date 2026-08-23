@@ -15,7 +15,8 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
 - Pi 배포는 `docker-compose.yml` 다음에 `docker-compose.deploy.yml`을 로드한다.
   이 overlay가 모든 app `build` context를 제거한다.
 - `pi-deploy.sh`는 effective Compose를 다시 확인하고 `up --no-build`만 실행한다.
-- 배포 전 실행 중인 DB가 있으면 검증된 PostgreSQL backup을 먼저 만든다.
+- 배포 전 cksDB 운영 경계의 Multtara 전용 도구로 `pongdang` database의 검증된
+  PostgreSQL backup을 반드시 만든다.
 - 이미지 rollback은 DB schema/data를 자동으로 되돌리지 않는다. DB restore는
   별도 명령과 명시 확인문이 필요한 유지보수 작업이다.
 - Frontend origin은 `127.0.0.1`에만 bind한다. 공개 접점에는 별도의 신뢰 가능한
@@ -112,7 +113,7 @@ DB에서는 반드시 사전 snapshot, dry-run aggregate 승인, 후속 `--check
 3. GHCR package visibility. Private이면 Pi용 read-only token과 username.
 4. GitHub repository variable `VITE_KAKAO_MAP_KEY`. 지도를 사용할 때만 설정하고
    Kakao Developers에서 실제 HTTPS domain을 제한한다.
-5. 50자 이상 무작위 Django `SECRET_KEY`, PostgreSQL user/database/password.
+5. 50자 이상 무작위 Django `SECRET_KEY`, 전용 `pongdang` PostgreSQL role/database/password.
 6. 공공 제공자 API key. 없는 provider는 빈 값으로 두며 안전 상태는 fail-closed다.
 7. 선택형 credential-free Valhalla base URL `ROUTING_MATRIX_URL`. 비워 두면
    route matrix 기반 일정만 생성하지 않고 다른 서비스는 계속 동작한다.
@@ -126,8 +127,12 @@ DB에서는 반드시 사전 snapshot, dry-run aggregate 승인, 후속 `--check
 
 현재 portfolio 서버의 운영값은 `APPLICATION_BASE_PATH=/multtara`,
 `VITE_APP_BASE_PATH=/multtara/`, `VITE_API_BASE_URL=/multtara/api/v1/`,
-`FRONTEND_PORT=5182`다. DB는 다른 프로젝트와 공유하지 않고 전용 Compose volume을
-사용한다.
+`FRONTEND_PORT=5182`다. backend와 collector는 외부 `cksDB-multtara` 전용
+네트워크에서 공유 PostgreSQL 16 인스턴스를 사용하지만 database와 role은
+`pongdang`으로 격리한다.
+frontend는 이 네트워크에 연결하지 않는다. `/home/cks/cksDB`의 versioned
+infrastructure와 allowlisted `scripts/multtara-db.sh`가 provisioning과
+backup/restore의 관리자 경계다.
 
 Docker Engine, Docker Compose 2.24.4 이상, Python 3, `sha256sum`, `flock`을 설치하고,
 Pi OS가 64-bit ARM인지 확인한다.
@@ -189,21 +194,39 @@ Bundle은 deployment target 밖의 임시 작업 디렉터리에 푼다. Setup�
 정확한 canonical target, 기존 marker, 사용자 Docker 접근을 확인한다. 이미지
 build/pull/start는 하지 않는다.
 
+기존 PostgreSQL 15 standalone 운영을 cksDB로 처음 전환하는 경우에는 setup보다
+먼저 새 release bundle 쪽 rollback 도구로 기존 상태를 stage한다. 이 시점에는 기존
+`db` service가 실행 중이어야 하며 `${project}_postgres_data` volume을 삭제하거나
+재생성하면 안 된다.
+
 ```bash
-sudo ./scripts/pi-setup.sh \
-  --target /opt/pongdang \
-  --deploy-user pongdang \
-  --project-name pongdang
+sudo -u cks "$PWD/scripts/db-migration-rollback.sh" stage \
+  --target /opt/pongdang-multtara
 ```
 
-Setup이 생성한 `/opt/pongdang/.env`는 placeholder뿐이다. 배포 사용자로 값을
+Stage는 기존 `docker-compose.yml`, deployment overlay, mode-0600 `.env`, 현재
+digest release와 target에 설치됐던 5개 운영 script의 forensic copy를
+`/opt/pongdang-multtara/state/pre-cksdb-rollback`에 보존한다. PostgreSQL 15,
+DATABASE_URL의 `db` host, project volume label/생성 identity를 확인하고 전체
+checksum을 만든다. 고정 경로가 이미 있으면 절대 덮어쓰지 않는다. Bundle에는 DB
+password와 다른 운영 secret이 있으므로 배포 사용자 외에 읽기 권한을 주거나 Git,
+release artifact, 일반 backup 저장소로 복사하지 않는다.
+
+```bash
+sudo ./scripts/pi-setup.sh \
+  --target /opt/pongdang-multtara \
+  --deploy-user cks \
+  --project-name pongdang-multtara
+```
+
+Setup이 생성한 `/opt/pongdang-multtara/.env`는 placeholder뿐이다. 배포 사용자로 값을
 채우고 mode와 owner를 확인한다.
 
 ```bash
-sudo -u pongdang editor /opt/pongdang/.env
-sudo chown pongdang:pongdang /opt/pongdang/.env
-sudo chmod 600 /opt/pongdang/.env
-sudo -u pongdang stat -c '%U %a %n' /opt/pongdang/.env
+sudo -u cks editor /opt/pongdang-multtara/.env
+sudo chown cks:cks /opt/pongdang-multtara/.env
+sudo chmod 600 /opt/pongdang-multtara/.env
+sudo -u cks stat -c '%U %a %n' /opt/pongdang-multtara/.env
 ```
 
 필수 검증 항목:
@@ -211,8 +234,14 @@ sudo -u pongdang stat -c '%U %a %n' /opt/pongdang/.env
 - `PORTFOLIO_BRANCH=main`, `PORTFOLIO_AUTH_MODE=sso`
 - `PONGDANG_SSO_ENABLED=True`, `VITE_SSO_ENABLED=true`
 - `POSTGRES_PASSWORD`: 16자 이상이며 placeholder가 아님
-- `DATABASE_URL`: percent-encoded credential을 사용하고 `db:5432/<POSTGRES_DB>`를
-  가리킴
+- `DATABASE_URL`: percent-encoded credential을 사용하고
+  `cksDB:5432/pongdang`을 가리킴
+- `SHARED_DB_TOOL`: 검토한 cksDB commit 아래의 보호된 versioned 설치 경로이며
+  group/world writable가 아닌 실행 파일
+- `SHARED_DB_TOOL_SHA256`: 위 파일의 lowercase SHA-256. 실행 시 exact JSON
+  `cksdb.multtara-db` v1 / `pongdang` database·role 계약까지 함께 검증함
+- `CKSDB_REVISION`: 위 도구가 설치된 cksDB release의 full lowercase 40자리 Git SHA.
+  `SHARED_DB_TOOL` 경로의 `releases/<revision>/scripts/multtara-db.sh`와 일치해야 함
 - `SECRET_KEY`: 50자 이상 무작위 값
 - `ALLOWED_HOSTS`: wildcard나 URL이 아닌 명시 host 목록
 - `SECURE_SSL_REDIRECT=True`
@@ -220,40 +249,69 @@ sudo -u pongdang stat -c '%U %a %n' /opt/pongdang/.env
 - `ROUTING_MATRIX_URL`: 비어 있거나 credential/userinfo 없는 HTTPS base URL
 
 `DATABASE_URL`의 password와 `POSTGRES_PASSWORD`는 같은 credential이어야 한다.
-URL의 `@`, `/`, `:`, `%` 같은 예약 문자는 percent-encode한다.
+공유 운영 도구와 dotenv 해석을 일치시키기 위해 password는 16-128자의
+base64url-safe 문자만 사용한다. `openssl rand -hex 32`가 적합하다.
+
+첫 shared-DB 배포 전에는 설치된 도구로 bundle을 다시 읽기 전용 검증하고, writer
+정지부터 최종 dump·복원·동등성 검증까지 한 명령으로 수행한다.
+
+```bash
+sudo -u cks /opt/pongdang-multtara/scripts/db-migration-rollback.sh verify \
+  --target /opt/pongdang-multtara
+
+sudo -u cks /opt/pongdang-multtara/scripts/db-migration-rollback.sh cutover \
+  --target /opt/pongdang-multtara \
+  --confirm CUTOVER:multtara:pg15-to-cksdb
+```
+
+`cutover`는 bundle로 고정한 PG15 backend와 collector를 먼저 중지하고, retained
+volume의 `pongdang`에서 새 custom-format final dump를 만든다. pinned cksDB tool로
+PG16에 restore한 뒤 양쪽에 같은 deterministic read-only fingerprint를 실행한다.
+비교 범위는 application schema와 owner, relation/column, constraint, index,
+sequence state, view, trigger, enum과 table별 exact row count다. 다른 DB session이
+보이거나 byte-identical fingerprint가 아니면 finalize와 marker 생성은 거부되며
+writer는 중지 상태로 남는다.
+
+성공할 때만 cksDB의 격리된 `pongdang_previous`를 명시적으로 finalize하고
+`state/cksdb-cutover-ready.env`를 mode-0400으로 atomic publish한다. Marker는 final
+dump SHA-256, 동일한 source/target fingerprint SHA-256, cksDB revision, tool SHA-256,
+rollback bundle `SHA256SUMS` SHA-256을 고정한다. Final dump와 mode-0600 checksum,
+bundle 전체 manifest·manifest sidecar·retained volume identity까지 다시 검증되지 않으면
+`pi-deploy.sh`의 deploy와 rollback은 모두 fail closed한다. Marker를 손으로 작성하거나
+bundle/volume을 재생성해 우회하지 않는다.
 
 ## 5. 배포와 상태 확인
 
 Release bundle의 manifest와 checksum을 함께 보관한 상태에서 실행한다.
 
 ```bash
-sudo -u pongdang /opt/pongdang/scripts/pi-deploy.sh deploy \
-  --target /opt/pongdang \
+sudo -u cks /opt/pongdang-multtara/scripts/pi-deploy.sh deploy \
+  --target /opt/pongdang-multtara \
   --release-file "$PWD/release.env"
 ```
 
 배포 명령은 다음 순서로 동작한다.
 
 1. target marker, 실행 사용자, ARM64, secret file mode/content 검증
-2. release checksum과 네 개의 허용 field 검증
-3. backend/frontend GHCR digest 검증
-4. effective Compose에서 app build context 부재와 loopback origin 검증
-5. 기존 DB가 실행 중이면 pre-deploy backup 생성 및 archive 검증
-   - DB가 중지됐더라도 prior release state 또는 PostgreSQL volume이 있으면
-     첫 배포로 간주하지 않고 중단한다. DB를 복구·검증해 backup을 만든 뒤 다시
-     배포한다.
-   - DB, prior release state, PostgreSQL volume이 모두 없을 때만 검증된 첫
-     배포로 진행한다.
-6. digest images pull
-7. `up -d --no-build --wait`
-8. 성공 후에만 `state/current.release.env` 갱신
+2. cutover-ready marker, final dump SHA, source/target fingerprint, cksDB
+   revision/tool SHA, rollback bundle 전체 checksum과 retained PG15 volume identity 검증
+3. release checksum과 네 개의 허용 field 검증
+4. backend/frontend GHCR digest 검증
+5. effective Compose에서 정확히 backend/collector/frontend만 존재하고 frontend는
+   default network에만 연결되는지, app build context 부재와 loopback origin 검증
+6. 외부 `cksDB-multtara` 네트워크의 `pongdang` database readiness 확인,
+   pre-deploy backup 생성 및
+   archive 검증. DB/tool/network 중 하나라도 준비되지 않으면 첫 배포도 중단한다.
+7. digest images pull
+8. `up -d --no-build --wait`
+9. 성공 후에만 `state/current.release.env` 갱신
 
 확인 명령:
 
 ```bash
-cd /opt/pongdang
-sudo -u pongdang docker compose \
-  --project-name pongdang \
+cd /opt/pongdang-multtara
+sudo -u cks docker compose \
+  --project-name pongdang-multtara \
   --env-file .env \
   -f docker-compose.yml \
   ps
@@ -286,9 +344,9 @@ integrations가 `200`이어도 이 결과를 무시하지 않는다. 외부 aler
 명령의 종료 코드와 JSON도 같은 독립 신호로 사용할 수 있다.
 
 ```bash
-cd /opt/pongdang
-sudo -u pongdang docker compose \
-  --project-name pongdang \
+cd /opt/pongdang-multtara
+sudo -u cks docker compose \
+  --project-name pongdang-multtara \
   --env-file .env \
   -f docker-compose.yml \
   exec -T backend \
@@ -304,8 +362,8 @@ DB disk 사용량, backup age, loopback `/api/health/ready/`도 서버 감시에
 직전 성공 release가 있을 때만 가능하다.
 
 ```bash
-sudo -u pongdang /opt/pongdang/scripts/pi-deploy.sh rollback \
-  --target /opt/pongdang
+sudo -u cks /opt/pongdang-multtara/scripts/pi-deploy.sh rollback \
+  --target /opt/pongdang-multtara
 ```
 
 Rollback도 현재 DB를 먼저 backup하고 digest image만 pull한다. 실패한 새 image의
@@ -318,23 +376,24 @@ migration이 DB schema를 변경했을 수 있으므로, image rollback 후에�
 수동 backup:
 
 ```bash
-sudo -u pongdang /opt/pongdang/scripts/postgres-backup.sh \
-  --target /opt/pongdang
+sudo -u cks /opt/pongdang-multtara/scripts/postgres-backup.sh \
+  --target /opt/pongdang-multtara
 ```
 
-결과는 `/opt/pongdang/backups/postgres/pongdang-<UTC>-<process>.dump`와
+결과는 `/opt/pongdang-multtara/backups/postgres/pongdang-<UTC>-<process>.dump`와
 `.sha256`이다.
-`pg_dump --format=custom` 성공만으로 완료 처리하지 않고, 같은 PostgreSQL image의
-`pg_restore --list`가 archive를 읽어야 확정한다.
+`pg_dump --format=custom` 성공만으로 완료 처리하지 않고, cksDB 운영 도구의
+`pg_restore --list`가 archive를 읽어야 확정한다. 이 도구는 다른 application
+database 이름을 인수로 받지 않는다.
 
 Retention dry run과 적용:
 
 ```bash
-sudo -u pongdang /opt/pongdang/scripts/postgres-prune-backups.sh \
-  --target /opt/pongdang --days 14
+sudo -u cks /opt/pongdang-multtara/scripts/postgres-prune-backups.sh \
+  --target /opt/pongdang-multtara --days 14
 
-sudo -u pongdang /opt/pongdang/scripts/postgres-prune-backups.sh \
-  --target /opt/pongdang --days 14 --apply
+sudo -u cks /opt/pongdang-multtara/scripts/postgres-prune-backups.sh \
+  --target /opt/pongdang-multtara --days 14 --apply
 ```
 
 다음 archive는 자동 삭제하지 않는다.
@@ -347,7 +406,7 @@ sudo -u pongdang /opt/pongdang/scripts/postgres-prune-backups.sh \
 성공 시각을 감시한다. 예시 cron은 매일 03:17에 실행한다.
 
 ```cron
-17 3 * * * /opt/pongdang/scripts/postgres-backup.sh --target /opt/pongdang
+17 3 * * * /opt/pongdang-multtara/scripts/postgres-backup.sh --target /opt/pongdang-multtara
 ```
 
 같은 SSD의 retention은 장치 분실·SSD 고장·화재를 막지 못한다. `.dump`와
@@ -358,19 +417,24 @@ sudo -u pongdang /opt/pongdang/scripts/postgres-prune-backups.sh \
 먼저 checksum과 archive 구조만 검증한다.
 
 ```bash
-sudo -u pongdang /opt/pongdang/scripts/postgres-restore.sh verify \
-  --target /opt/pongdang \
-  --backup /opt/pongdang/backups/postgres/pongdang-YYYYMMDDTHHMMSSZ-PID.dump
+sudo -u cks /opt/pongdang-multtara/scripts/postgres-restore.sh verify \
+  --target /opt/pongdang-multtara \
+  --backup /opt/pongdang-multtara/backups/postgres/pongdang-YYYYMMDDTHHMMSSZ-PID.dump
 ```
 
 실제 restore는 유지보수 창에 수행한다. 명령은 backend와 collector를 중지하고,
-복구 직전 backup을 한 번 더 만든 뒤 application database를 drop/create한다.
+복구 직전 backup을 한 번 더 만든 뒤 cksDB 운영 도구가 오직 `pongdang`
+database를 staging restore와 fixed-name swap으로 교체한다. 이전 database는
+disconnected `pongdang_previous`로 유지하고 application readiness가 성공한 뒤에만
+exact `finalize` 계약으로 제거한다. Finalize가 실패하면 writer를 다시 중지하고
+`pongdang_previous`를 보존해 조사한다. Multtara 컨테이너에는 cluster 관리자
+credential을 전달하지 않는다.
 
 ```bash
-sudo -u pongdang /opt/pongdang/scripts/postgres-restore.sh restore \
-  --target /opt/pongdang \
-  --backup /opt/pongdang/backups/postgres/pongdang-YYYYMMDDTHHMMSSZ-PID.dump \
-  --confirm RESTORE:pongdang:pongdang
+sudo -u cks /opt/pongdang-multtara/scripts/postgres-restore.sh restore \
+  --target /opt/pongdang-multtara \
+  --backup /opt/pongdang-multtara/backups/postgres/pongdang-YYYYMMDDTHHMMSSZ-PID.dump \
+  --confirm RESTORE:pongdang-multtara:pongdang
 ```
 
 `project`나 DB 이름이 다르면 확인문도 실제 marker와 `.env` 값으로 바뀐다. Restore가
@@ -379,30 +443,12 @@ sudo -u pongdang /opt/pongdang/scripts/postgres-restore.sh restore \
 
 ## 9. 분리된 복구 drill
 
-분기마다 운영 volume과 다른 Compose project에서 실제 restore를 수행한다. 같은
-Pi에서 시험할 경우 별도 target, project, frontend port, DB volume을 쓴다.
-
-```bash
-sudo ./scripts/pi-setup.sh \
-  --target /srv/pongdang-drill \
-  --deploy-user pongdang \
-  --project-name pongdang-drill
-```
-
-Drill `.env`에는 별도 DB 이름·password, `FRONTEND_PORT=18080`을 사용한다. 같은
-release를 먼저 deploy한 후, production archive와 checksum을 drill의
-`backups/postgres/`로 복사하고 owner/mode를 복원한다.
-
-```bash
-sudo -u pongdang /srv/pongdang-drill/scripts/postgres-restore.sh verify \
-  --target /srv/pongdang-drill \
-  --backup /srv/pongdang-drill/backups/postgres/pongdang-YYYYMMDDTHHMMSSZ-PID.dump
-
-sudo -u pongdang /srv/pongdang-drill/scripts/postgres-restore.sh restore \
-  --target /srv/pongdang-drill \
-  --backup /srv/pongdang-drill/backups/postgres/pongdang-YYYYMMDDTHHMMSSZ-PID.dump \
-  --confirm RESTORE:pongdang-drill:pongdang_drill
-```
+분기마다 운영 cksDB와 완전히 다른 PC/VM 또는 별도 Docker daemon의 PostgreSQL
+16에서 실제 restore를 수행한다. 운영 `cksDB` network/container나
+`SHARED_DB_TOOL`을 drill에 재사용하면 안 된다. 로컬 PC에서는 cksDB 저장소를
+clone하여 별도 `CKS_DB_DATA_DIR`와 Docker context로 기동하고, 검증한 archive를
+그 격리된 `pongdang` database에 restore한 뒤 같은 release의 backend를 연결한다.
+운영 hostname·volume·Docker context가 하나라도 보이면 drill을 중단한다.
 
 Drill 증거로 다음을 기록한다.
 
@@ -416,3 +462,36 @@ Drill 증거로 다음을 기록한다.
 
 복구가 한 번도 실제 custom archive에서 성공하지 않았다면 backup 체계는 검증된
 것으로 간주하지 않는다.
+
+## 10. PG15 standalone 긴급 topology rollback
+
+이 절차는 위에서 migration 전에 stage한 bundle과 삭제하지 않은 기존 PG15 volume이
+모두 있을 때만 쓸 수 있다. 다음 두 문장을 동시에 증명할 수 있어야 한다.
+
+- cutover 뒤 cksDB의 `pongdang` database에 application write가 단 한 건도 없었다.
+- stage된 Docker volume의 이름, Compose labels와 생성 identity가 현재 volume과 같다.
+
+cksDB write 여부가 불명확하거나 이미 write가 있었다면 이 명령을 실행하지 않는다.
+PG16 backup을 PG15 volume에 restore하는 것은 지원되지 않으며 데이터 분기를 만든다.
+그 경우 cksDB를 유지하면서 app image만 rollback하거나, 별도 승인한 절차로 검증된
+backup을 새 PostgreSQL 16 standalone volume에 restore한다.
+
+유지보수 창에서 실제 project 이름을 넣어 실행한다.
+
+```bash
+sudo -u cks /opt/pongdang-multtara/scripts/db-migration-rollback.sh restore \
+  --target /opt/pongdang-multtara \
+  --confirm RESTORE:pre-cksdb-standalone:pongdang-multtara:postgres_data \
+  --confirm-data-state NO_CKSDB_WRITES_SINCE_CUTOVER
+```
+
+Restore는 bundle의 fixed path, owner/mode, exact file set, checksum, release digest,
+legacy Compose, retained volume identity를 다시 확인한다. 그 다음 backend/collector
+writer를 먼저 중지해 write gap을 닫고 현재 cksDB의 검증된 backup을 만든 뒤 bundle의 config와 `.env`로
+`up -d --no-build --remove-orphans --wait`를 실행한다. 실패하면 현재와 legacy writer를
+모두 중지 상태로 둔다. 성공하면 `state/pre-cksdb-rollback.active`가 생기며 정상
+`pi-deploy.sh`, `postgres-backup.sh`, `postgres-restore.sh`는 fail closed한다.
+
+이 상태는 장기 운영 모드가 아니다. Active marker와 restore가 출력한 cksDB safety
+backup을 보존하고, 두 DB의 write 경계를 조사한 뒤 PG16 forward migration 또는
+cksDB 복귀 계획을 별도 검토한다. Marker만 지워서 정상 작업을 재개하지 않는다.

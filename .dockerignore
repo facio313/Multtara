@@ -5,5 +5,11 @@
 !scripts/portfolio-auth-mode.sh
 !scripts/portfolio-auth-entrypoint.sh
 
+# Never admit an owner-only migration rollback bundle if a deployment target is
+# mistakenly created below the source tree.
+**/state/pre-cksdb-rollback/
+**/state/pre-cksdb-rollback.active
+**/state/cksdb-cutover-ready.env
+
 frontend/node_modules/
 frontend/dist/
