@@ -635,13 +635,17 @@ COPY (
 ) TO STDOUT WITH (FORMAT csv, FORCE_QUOTE *);
 COPY (
   SELECT
-    'column', namespace.nspname, relation.relname, attribute.attnum,
+    'column', namespace.nspname, relation.relname,
+    row_number() OVER (
+      PARTITION BY attribute.attrelid
+      ORDER BY attribute.attnum
+    ),
     attribute.attname, format_type(attribute.atttypid, attribute.atttypmod),
     attribute.attnotnull, attribute.attidentity, attribute.attgenerated,
     COALESCE(pg_get_expr(default_value.adbin, default_value.adrelid, true), ''),
     CASE
       WHEN attribute.attcollation = 0 THEN ''
-      ELSE quote_ident(collation_namespace.nspname) || '.' || quote_ident(collation.collname)
+      ELSE quote_ident(collation_namespace.nspname) || '.' || quote_ident(collation_record.collname)
     END
   FROM pg_attribute AS attribute
   JOIN pg_class AS relation ON relation.oid = attribute.attrelid
@@ -649,8 +653,10 @@ COPY (
   LEFT JOIN pg_attrdef AS default_value
     ON default_value.adrelid = attribute.attrelid
    AND default_value.adnum = attribute.attnum
-  LEFT JOIN pg_collation AS collation ON collation.oid = attribute.attcollation
-  LEFT JOIN pg_namespace AS collation_namespace ON collation_namespace.oid = collation.collnamespace
+  LEFT JOIN pg_collation AS collation_record
+    ON collation_record.oid = attribute.attcollation
+  LEFT JOIN pg_namespace AS collation_namespace
+    ON collation_namespace.oid = collation_record.collnamespace
   WHERE namespace.nspname <> 'information_schema'
     AND namespace.nspname !~ '^pg_'
     AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
@@ -663,7 +669,15 @@ COPY (
     'constraint', namespace.nspname, relation.relname, constraint_record.conname,
     constraint_record.contype, constraint_record.condeferrable,
     constraint_record.condeferred, constraint_record.convalidated,
-    pg_get_constraintdef(constraint_record.oid, true)
+    replace(
+      replace(
+        pg_get_constraintdef(constraint_record.oid, true),
+        '::character varying::text',
+        '::character varying'
+      ),
+      ']::text[]',
+      ']'
+    )
   FROM pg_constraint AS constraint_record
   JOIN pg_class AS relation ON relation.oid = constraint_record.conrelid
   JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
