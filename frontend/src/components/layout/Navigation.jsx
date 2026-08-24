@@ -1,6 +1,7 @@
 import { CalendarDays, CircleUserRound, Compass, Droplets, Radio, Sparkles } from 'lucide-react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useI18n } from '../../i18n';
+import { BonifacioReturnLink } from './bonifacioReturn';
 import LocaleSelector from './LocaleSelector';
 import './Navigation.css';
 
@@ -23,16 +24,29 @@ function Navigation() {
   const location = useLocation();
   const { t } = useI18n();
 
-  if (location.pathname === '/onboarding') return null;
+  if (location.pathname === '/onboarding') {
+    return (
+      <header className="app-navigation app-navigation--return-only">
+        <div className="nav-container">
+          <div className="nav-identity nav-identity--return-only">
+            <BonifacioReturnLink />
+          </div>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="app-navigation">
       <div className="nav-container">
-        <Link to="/" className="nav-brand" aria-label={t('nav.brandHome')}>
-          <span className="brand-mark"><Droplets size={19} /></span>
-          <span>퐁당</span>
-          <small>PONGDANG</small>
-        </Link>
+        <div className="nav-identity">
+          <Link to="/" className="nav-brand" aria-label={t('nav.brandHome')}>
+            <span className="brand-mark"><Droplets size={19} /></span>
+            <span>퐁당</span>
+            <small>PONGDANG</small>
+          </Link>
+          <BonifacioReturnLink />
+        </div>
 
         <nav className="nav-menu nav-menu-desktop" aria-label={t('nav.desktop')}>
           {desktopNavItems.map(({ path, labelKey, icon: Icon }) => (

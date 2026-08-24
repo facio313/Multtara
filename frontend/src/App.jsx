@@ -6,6 +6,7 @@ import {
 } from 'react';
 import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom';
 import Navigation from './components/layout/Navigation';
+import { BonifacioReturnLink } from './components/layout/bonifacioReturn';
 import { useI18n } from './i18n';
 import useSessionStore from './store/useSessionStore';
 import './App.css';
@@ -87,6 +88,9 @@ function App() {
       <div className="app-shell">
         <a className="skip-link" href="#main-content">{t('app.skip')}</a>
         <RouteEffects />
+        <div className="bonifacio-return-mobile">
+          <BonifacioReturnLink />
+        </div>
         <Navigation />
         <main className="app-main" id="main-content" tabIndex="-1">
           <Suspense fallback={<RouteFallback />}>
