@@ -130,7 +130,19 @@ Nginx가 인증한 `Remote-*` 헤더와 퐁당 전용 `X-Portfolio-Edge-Secret`�
 원본에 전달하며, Django는 불변 `sso_subject`에 정확히 결합한 뒤 전용
 `pongdang_sessionid` 세션으로 교환합니다. 최초 연결은 중복 없는 이메일 한 건에만
 허용되고 이후 모든 인증 API 요청은 현재 SSO subject와 엣지 시크릿을 다시
-검증합니다. 운영에서는 별도 회원가입·비밀번호
+검증합니다. canonical v2 `Remote-Groups`는 `user`, 선택적 `admin`, 선택적
+`chief-admin` 순서의 역할 prefix 뒤에 필수 `portfolio-v2` marker를 두고, 그 뒤에
+중앙 고정 순서의 앱 권한을 둡니다. 일반 사용자와 admin은
+`access-multtara`가 있어야 하며, 모든 앱에 접근 가능한 chief-admin은 앱 권한을
+싣지 않습니다. marker 누락·중복·재배치, 역할 gap, 알 수 없거나 순서가 바뀐
+권한, 공백, Multtara 권한 누락은 모두 거부합니다.
+
+중앙 전환 중에는 정확한 v1 값 `user`, `user,developer`,
+`user,developer,admin`만 예외적으로 받습니다. 앞의 두 값은 Multtara 권한이 있는
+일반 `user`, 마지막 값은 `chief-admin`으로 정규화하며 `developer`는 현재 역할이나
+정책·응답에 노출하지 않습니다. 세션은 subject, 현재 역할, Multtara 권한 여부에만
+결합하므로 관련 없는 다른 앱 권한이 바뀌어도 유지되지만, 매 요청의 전체 assertion
+형식과 subject·역할·현재 Multtara 권한은 다시 검증합니다. 운영에서는 별도 회원가입·비밀번호
 로그인/변경·계정 삭제가 비활성화되고 로그아웃은 중앙 `/sso/logout`으로
 연결됩니다. main/dev가 아닌 개발 branch에서 canonical mode와 두 adapter를
 `local`/`false`로 맞추면 중앙 SSO 없이 기존 로컬 계정 흐름을 사용할 수 있습니다.

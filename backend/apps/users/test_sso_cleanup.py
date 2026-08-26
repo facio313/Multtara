@@ -13,7 +13,7 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.spots.models import WaterSpot
 from apps.users.models import EcoAction, User, UserActivity
-from apps.users.permissions import IsPortfolioAdmin, IsPortfolioDeveloper
+from apps.users.permissions import IsPortfolioAdmin, IsPortfolioChiefAdmin
 from apps.users.sso import TrustedSsoIdentity
 
 
@@ -37,16 +37,28 @@ class PortfolioRolePermissionTests(TestCase):
             email=user.email,
             display_name="",
             groups=groups,
+            grants=("access-multtara",),
             role=role,
+            has_app_access=True,
         )
         return request
 
     def test_central_roles_are_hierarchical_and_ignore_local_staff_flags(self):
-        developer = self._request(
-            role="developer", groups=("user", "developer")
+        admin = self._request(
+            role="admin",
+            groups=("user", "admin", "portfolio-v2", "access-multtara"),
         )
-        self.assertTrue(IsPortfolioDeveloper().has_permission(developer, None))
-        self.assertFalse(IsPortfolioAdmin().has_permission(developer, None))
+        self.assertTrue(IsPortfolioAdmin().has_permission(admin, None))
+        self.assertFalse(IsPortfolioChiefAdmin().has_permission(admin, None))
+
+        chief_admin = self._request(
+            role="chief-admin",
+            groups=("user", "admin", "chief-admin", "portfolio-v2"),
+        )
+        self.assertTrue(IsPortfolioAdmin().has_permission(chief_admin, None))
+        self.assertTrue(
+            IsPortfolioChiefAdmin().has_permission(chief_admin, None)
+        )
 
         user_with_legacy_staff = self._request(
             role="user",
@@ -55,7 +67,7 @@ class PortfolioRolePermissionTests(TestCase):
             is_superuser=True,
         )
         self.assertFalse(
-            IsPortfolioDeveloper().has_permission(user_with_legacy_staff, None)
+            IsPortfolioAdmin().has_permission(user_with_legacy_staff, None)
         )
 
     @override_settings(PONGDANG_SSO_ENABLED=False)
@@ -71,9 +83,14 @@ class PortfolioRolePermissionTests(TestCase):
             is_staff=True,
             is_superuser=True,
         )
-        self.assertTrue(IsPortfolioDeveloper().has_permission(local_staff, None))
-        self.assertFalse(IsPortfolioAdmin().has_permission(local_staff, None))
+        self.assertTrue(IsPortfolioAdmin().has_permission(local_staff, None))
+        self.assertFalse(
+            IsPortfolioChiefAdmin().has_permission(local_staff, None)
+        )
         self.assertTrue(IsPortfolioAdmin().has_permission(local_admin, None))
+        self.assertTrue(
+            IsPortfolioChiefAdmin().has_permission(local_admin, None)
+        )
 
 
 @override_settings(PONGDANG_SSO_ENABLED=True)

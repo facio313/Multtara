@@ -16,18 +16,28 @@ from django.db import IntegrityError, connection, transaction
 
 
 User = get_user_model()
-PORTFOLIO_ROLE_ORDER = ("user", "developer", "admin")
+PORTFOLIO_ROLE_ORDER = ("user", "admin", "chief-admin")
 PORTFOLIO_ROLE_RANK = {
     role: rank for rank, role in enumerate(PORTFOLIO_ROLE_ORDER)
 }
-PORTFOLIO_GROUP_CONTRACT = {
-    "user": ("user",),
-    "user,developer": ("user", "developer"),
-    "user,developer,admin": ("user", "developer", "admin"),
-}
+PORTFOLIO_GRANT_ORDER = (
+    "access-react",
+    "access-vue",
+    "access-dukkeobi",
+    "access-ddit-finalproject",
+    "access-monitor",
+    "access-pilgrimage",
+    "access-multtara",
+    "access-feelmyrythm",
+    "access-garak",
+)
+PORTFOLIO_V2_MARKER = "portfolio-v2"
+MULTTARA_GRANT = "access-multtara"
+PORTFOLIO_GROUP_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 SSO_SESSION_SUBJECT_KEY = "portfolio_sso_subject"
-SSO_SESSION_GROUPS_KEY = "portfolio_sso_groups"
 SSO_SESSION_ROLE_KEY = "portfolio_sso_role"
+SSO_SESSION_APP_ACCESS_KEY = "portfolio_sso_multtara_access"
+SSO_LEGACY_SESSION_GROUPS_KEY = "portfolio_sso_groups"
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +46,9 @@ class TrustedSsoIdentity:
     email: str
     display_name: str
     groups: tuple[str, ...]
+    grants: tuple[str, ...]
     role: str
+    has_app_access: bool
 
 
 class SsoIdentityConflict(Exception):
@@ -58,6 +70,68 @@ def has_valid_edge_secret(request) -> bool:
         )
     except UnicodeError:
         return False
+
+
+def _parse_portfolio_groups(
+    raw_groups: str,
+) -> tuple[tuple[str, ...], tuple[str, ...], str] | None:
+    """Parse exact transitional v1 or canonical app-entitled v2 groups."""
+
+    if raw_groups in {"user", "user,developer"}:
+        return (
+            ("user", PORTFOLIO_V2_MARKER, MULTTARA_GRANT),
+            (MULTTARA_GRANT,),
+            "user",
+        )
+    if raw_groups == "user,developer,admin":
+        return (
+            ("user", "admin", "chief-admin", PORTFOLIO_V2_MARKER),
+            (),
+            "chief-admin",
+        )
+
+    groups = raw_groups.split(",")
+    if (
+        any(
+            not group or PORTFOLIO_GROUP_PATTERN.fullmatch(group) is None
+            for group in groups
+        )
+        or len(set(groups)) != len(groups)
+        or not groups
+        or groups[0] != "user"
+    ):
+        return None
+
+    cursor = 1
+    role = "user"
+    if cursor < len(groups) and groups[cursor] == "admin":
+        role = "admin"
+        cursor += 1
+        if cursor < len(groups) and groups[cursor] == "chief-admin":
+            role = "chief-admin"
+            cursor += 1
+    if cursor >= len(groups) or groups[cursor] != PORTFOLIO_V2_MARKER:
+        return None
+    cursor += 1
+
+    raw_grants = groups[cursor:]
+    if role == "chief-admin":
+        if raw_grants:
+            return None
+        return tuple(groups), (), role
+
+    grant_indexes = {grant: index for index, grant in enumerate(PORTFOLIO_GRANT_ORDER)}
+    previous_index = -1
+    grants = []
+    for grant in raw_grants:
+        grant_index = grant_indexes.get(grant)
+        if grant_index is None or grant_index <= previous_index:
+            return None
+        previous_index = grant_index
+        grants.append(grant)
+    if MULTTARA_GRANT not in grants:
+        return None
+    return tuple(groups), tuple(grants), role
 
 
 def trusted_sso_identity(request) -> TrustedSsoIdentity | None:
@@ -82,16 +156,23 @@ def trusted_sso_identity(request) -> TrustedSsoIdentity | None:
     # Do not silently turn a different opaque subject into the stored one.
     if raw_subject != subject or not subject or not email:
         return None
-    if any(
-        len(value) > 254
-        or any(ord(character) < 32 or ord(character) == 127 for character in value)
-        for value in (subject, email, display_name, raw_groups)
+    if (
+        len(raw_groups) > 1024
+        or any(ord(character) < 32 or ord(character) == 127 for character in raw_groups)
+        or any(
+            len(value) > 254
+            or any(
+                ord(character) < 32 or ord(character) == 127
+                for character in value
+            )
+            for value in (subject, email, display_name)
+        )
     ):
         return None
-    groups = PORTFOLIO_GROUP_CONTRACT.get(raw_groups)
-    if groups is None:
+    parsed_groups = _parse_portfolio_groups(raw_groups)
+    if parsed_groups is None:
         return None
-    role = groups[-1]
+    groups, grants, role = parsed_groups
     try:
         validate_email(email)
     except ValidationError:
@@ -101,14 +182,17 @@ def trusted_sso_identity(request) -> TrustedSsoIdentity | None:
         email=email,
         display_name=display_name,
         groups=groups,
+        grants=grants,
         role=role,
+        has_app_access=True,
     )
 
 
 def bind_sso_session(request, identity: TrustedSsoIdentity) -> None:
+    request.session.pop(SSO_LEGACY_SESSION_GROUPS_KEY, None)
     request.session[SSO_SESSION_SUBJECT_KEY] = identity.subject
-    request.session[SSO_SESSION_GROUPS_KEY] = list(identity.groups)
     request.session[SSO_SESSION_ROLE_KEY] = identity.role
+    request.session[SSO_SESSION_APP_ACCESS_KEY] = identity.has_app_access
 
 
 def trusted_session_identity(request, user) -> TrustedSsoIdentity | None:
@@ -119,9 +203,12 @@ def trusted_session_identity(request, user) -> TrustedSsoIdentity | None:
         return None
     if request.session.get(SSO_SESSION_SUBJECT_KEY) != identity.subject:
         return None
-    if request.session.get(SSO_SESSION_GROUPS_KEY) != list(identity.groups):
-        return None
     if request.session.get(SSO_SESSION_ROLE_KEY) != identity.role:
+        return None
+    if (
+        request.session.get(SSO_SESSION_APP_ACCESS_KEY)
+        != identity.has_app_access
+    ):
         return None
     return identity
 

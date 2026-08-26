@@ -241,7 +241,7 @@ class UserSessionApiTests(TestCase):
         subject="portfolio-owner",
         email="owner@example.test",
         display_name="Portfolio Owner",
-        groups="user",
+        groups="user,portfolio-v2,access-multtara",
     ):
         return {
             "HTTP_REMOTE_USER": subject,
@@ -280,6 +280,9 @@ class UserSessionApiTests(TestCase):
     )
     def test_sso_exchange_creates_session_and_disables_local_credentials(self):
         client, token = self._csrf_client()
+        legacy_session = client.session
+        legacy_session["portfolio_sso_groups"] = ["user", "developer"]
+        legacy_session.save()
         missing = client.post(
             "/api/v1/users/sso/",
             {},
@@ -298,7 +301,18 @@ class UserSessionApiTests(TestCase):
         self.assertEqual(exchanged.status_code, 200)
         self.assertEqual(exchanged.json()["username"], "portfolio-owner")
         self.assertEqual(exchanged.json()["role"], "user")
-        self.assertEqual(exchanged.json()["groups"], ["user"])
+        self.assertEqual(
+            exchanged.json()["groups"],
+            ["user", "portfolio-v2", "access-multtara"],
+        )
+        self.assertEqual(
+            client.session["portfolio_sso_subject"], "portfolio-owner"
+        )
+        self.assertEqual(client.session["portfolio_sso_role"], "user")
+        self.assertIs(
+            client.session["portfolio_sso_multtara_access"], True
+        )
+        self.assertNotIn("portfolio_sso_groups", client.session)
         user = User.objects.get(username="portfolio-owner")
         self.assertFalse(user.has_usable_password())
         self.assertEqual(user.sso_subject, "portfolio-owner")
@@ -557,7 +571,7 @@ class UserSessionApiTests(TestCase):
         PONGDANG_SSO_ENABLED=True,
         PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
     )
-    def test_sso_groups_are_edge_bound_and_highest_role_wins(self):
+    def test_sso_groups_are_edge_bound_and_v2_roles_are_hierarchical(self):
         client, token = self._csrf_client()
         missing_role = client.post(
             "/api/v1/users/sso/",
@@ -568,7 +582,9 @@ class UserSessionApiTests(TestCase):
         )
         self.assertEqual(missing_role.status_code, 401)
 
-        headers = self._sso_headers(groups="user,developer,admin")
+        headers = self._sso_headers(
+            groups="user,admin,chief-admin,portfolio-v2"
+        )
         exchanged = client.post(
             "/api/v1/users/sso/",
             {},
@@ -577,15 +593,20 @@ class UserSessionApiTests(TestCase):
             **headers,
         )
         self.assertEqual(exchanged.status_code, 200)
-        self.assertEqual(exchanged.json()["groups"], ["user", "developer", "admin"])
-        self.assertEqual(exchanged.json()["role"], "admin")
+        self.assertEqual(
+            exchanged.json()["groups"],
+            ["user", "admin", "chief-admin", "portfolio-v2"],
+        )
+        self.assertEqual(exchanged.json()["role"], "chief-admin")
         current = client.get("/api/v1/users/me/", **headers)
         self.assertEqual(current.status_code, 200)
-        self.assertEqual(current.json()["role"], "admin")
+        self.assertEqual(current.json()["role"], "chief-admin")
 
         changed = client.get(
             "/api/v1/users/me/",
-            **self._sso_headers(groups="developer"),
+            **self._sso_headers(
+                groups="user,portfolio-v2,access-multtara"
+            ),
         )
         self.assertEqual(changed.status_code, 403)
 
@@ -596,6 +617,18 @@ class UserSessionApiTests(TestCase):
             "developer",
             "admin",
             "user,admin",
+            "user,admin,portfolio-v2",
+            "user,admin,portfolio-v2,access-react",
+            "user,access-multtara",
+            "user,portfolio-v2",
+            "user,portfolio-v2,access-react",
+            "user,portfolio-v2,access-multtara,access-react",
+            "user,portfolio-v2,access-multtara,access-multtara",
+            "user,portfolio-v2,unknown",
+            "user,portfolio-v2,portfolio-v2,access-multtara",
+            "user,chief-admin,portfolio-v2",
+            "user,admin,chief-admin,portfolio-v2,access-multtara",
+            "user,admin,access-multtara,portfolio-v2",
             "developer,user",
             "user,user",
             "user,,developer",
@@ -613,6 +646,99 @@ class UserSessionApiTests(TestCase):
                     **self._sso_headers(groups=rejected_groups),
                 )
                 self.assertEqual(response.status_code, 401)
+
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
+    def test_exact_v1_groups_are_normalized_without_a_developer_role(self):
+        expected = {
+            "user": (
+                ["user", "portfolio-v2", "access-multtara"],
+                "user",
+            ),
+            "user,developer": (
+                ["user", "portfolio-v2", "access-multtara"],
+                "user",
+            ),
+            "user,developer,admin": (
+                ["user", "admin", "chief-admin", "portfolio-v2"],
+                "chief-admin",
+            ),
+        }
+        for raw_groups, (groups, role) in expected.items():
+            with self.subTest(groups=raw_groups):
+                client, token = self._csrf_client()
+                response = client.post(
+                    "/api/v1/users/sso/",
+                    {},
+                    format="json",
+                    HTTP_X_CSRFTOKEN=token,
+                    **self._sso_headers(groups=raw_groups),
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["groups"], groups)
+                self.assertEqual(response.json()["role"], role)
+                self.assertNotIn("developer", response.json()["groups"])
+
+    @override_settings(
+        PONGDANG_SSO_ENABLED=True,
+        PONGDANG_SSO_EDGE_SECRET=sso_edge_secret,
+    )
+    def test_sso_session_ignores_unrelated_grant_changes_but_rechecks_own_grant_and_role(self):
+        client, token = self._csrf_client()
+        exchanged = client.post(
+            "/api/v1/users/sso/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+            **self._sso_headers(
+                groups=(
+                    "user,portfolio-v2,access-react,access-monitor,"
+                    "access-multtara,access-feelmyrythm"
+                )
+            ),
+        )
+        self.assertEqual(exchanged.status_code, 200)
+
+        unrelated_changed = client.get(
+            "/api/v1/users/me/",
+            **self._sso_headers(
+                groups="user,portfolio-v2,access-multtara"
+            ),
+        )
+        self.assertEqual(unrelated_changed.status_code, 200)
+        self.assertEqual(
+            unrelated_changed.json()["groups"],
+            ["user", "portfolio-v2", "access-multtara"],
+        )
+
+        role_changed = client.get(
+            "/api/v1/users/me/",
+            **self._sso_headers(
+                groups="user,admin,portfolio-v2,access-multtara"
+            ),
+        )
+        self.assertEqual(role_changed.status_code, 403)
+
+        client, token = self._csrf_client()
+        self.assertEqual(
+            client.post(
+                "/api/v1/users/sso/",
+                {},
+                format="json",
+                HTTP_X_CSRFTOKEN=token,
+                **self._sso_headers(),
+            ).status_code,
+            200,
+        )
+        own_grant_removed = client.get(
+            "/api/v1/users/me/",
+            **self._sso_headers(
+                groups="user,portfolio-v2,access-react"
+            ),
+        )
+        self.assertEqual(own_grant_removed.status_code, 403)
 
     @override_settings(
         PONGDANG_SSO_ENABLED=True,

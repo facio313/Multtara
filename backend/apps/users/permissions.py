@@ -12,9 +12,9 @@ def portfolio_role_for_request(request) -> str | None:
         identity = getattr(request, "portfolio_sso_identity", None)
         return identity.role if identity is not None else None
     if user.is_superuser:
-        return "admin"
+        return "chief-admin"
     if user.is_staff:
-        return "developer"
+        return "admin"
     return "user"
 
 
@@ -33,12 +33,12 @@ class IsPortfolioUser(HasPortfolioRole):
     required_role = "user"
 
 
-class IsPortfolioDeveloper(HasPortfolioRole):
-    required_role = "developer"
-
-
 class IsPortfolioAdmin(HasPortfolioRole):
     required_role = "admin"
+
+
+class IsPortfolioChiefAdmin(HasPortfolioRole):
+    required_role = "chief-admin"
 
 
 class IsPortfolioUserOrReadOnly(IsPortfolioUser):

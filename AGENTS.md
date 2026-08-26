@@ -208,12 +208,23 @@ anthropic-feat-name ─┘
   exact `Remote-User` to an immutable unique nullable `sso_subject`, links an
   existing account only once through one unambiguous email match, and never
   treats a username collision as identity. Every SSO-mode authenticated API
-  request revalidates the subject, role groups, and edge secret before
-  accepting the isolated PongDang session. `Remote-Groups` accepts only the
-  whitespace-free ordered prefix `user`, `user,developer`, or
-  `user,developer,admin`; unknown, legacy plural, duplicate, gapped, reordered,
-  or empty values fail closed. The login-time session snapshot and current
-  header must match exactly. SSO roles are hierarchical and never come from
+  request revalidates the subject, current role, own-app entitlement, complete
+  group assertion, and edge secret before accepting the isolated PongDang
+  session. Canonical v2 `Remote-Groups` uses the hierarchy-closed role prefix
+  `user`, optional `admin`, optional `chief-admin`, then the mandatory
+  `portfolio-v2` marker. A non-chief identity carries assigned grants in the
+  fixed relative order `access-react`, `access-vue`, `access-dukkeobi`,
+  `access-ddit-finalproject`, `access-monitor`, `access-pilgrimage`,
+  `access-multtara`, `access-feelmyrythm`, `access-garak` and must include
+  `access-multtara`. A chief is universal and carries no grants. Missing,
+  duplicate, gapped, reordered, whitespace-bearing, unknown, or own-grant-free
+  values fail closed. During central cutover only exact v1 `user`,
+  `user,developer`, and `user,developer,admin` remain accepted: the first two
+  normalize to an app-entitled `user`, and the last to `chief-admin`.
+  `developer` is never a current runtime role or policy label. Bind the native
+  session only to subject, current role, and current Multtara entitlement, not
+  the full unrelated grant list; nevertheless, validate the current complete
+  assertion on every request. SSO roles are hierarchical and never come from
   local staff/superuser/group/permission state.
   Prefer a regular, non-symlink, host-owned mode-0640, 32--4096-byte secret mounted with
   `PONGDANG_SSO_EDGE_SECRET_MOUNT` and read from

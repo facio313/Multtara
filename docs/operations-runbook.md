@@ -55,14 +55,19 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
   인증·계정 삭제를 다시 열지 않는다. 계정 관리는 중앙 `/sso/admin/`만 사용하며,
   inner Nginx는 `/admin`과 모든 `/admin/` 하위 경로를 Django로 전달하지 않고
   항상 `404`로 차단한다.
-- `Remote-Groups`는 edge secret과 하나의 assertion으로 검증한다. 허용 wire
-  값은 공백 없는 ordered prefix `user`, `user,developer`,
-  `user,developer,admin` 세 가지뿐이다. unknown, legacy plural, duplicate,
-  gap, reorder, empty segment, leading/trailing whitespace는 모두
-  fail-closed한다. 역할은 계층형이며 로그인 때 저장한 subject/group/role
-  session snapshot과 현재 edge header가 매 요청 정확히 일치해야 한다. SSO
-  모드에서는 로컬 `is_staff`, `is_superuser`, Django group/permission을 권한
-  근거로 쓰지 않는다.
+- `Remote-Groups`는 edge secret과 하나의 assertion으로 검증한다. canonical v2
+  wire 값은 계층형 역할 `user`, 선택적 `admin`, 선택적 `chief-admin` 뒤에
+  `portfolio-v2` marker를 반드시 포함한다. non-chief의 앱 권한은 중앙 고정
+  순서를 지키고 `access-multtara`를 포함해야 한다. chief-admin은 전체 앱 권한이
+  있어 별도 grant를 싣지 않는다. unknown, duplicate, 역할 gap, marker/grant
+  reorder, empty segment, leading/trailing whitespace, 자체 앱 권한 누락은 모두
+  fail-closed한다. 중앙 cutover 동안에는 정확한 v1 `user`,
+  `user,developer`, `user,developer,admin`만 각각 app-entitled user, user,
+  chief-admin으로 정규화한다. `developer`를 현재 역할이나 정책에 사용하지 않는다.
+  로그인 세션은 subject/현재 역할/Multtara entitlement에만 결합하고 unrelated
+  grant 전체를 snapshot하지 않는다. 다만 현재 edge assertion의 전체 형식과
+  자체 앱 권한은 매 요청 다시 검증한다. SSO 모드에서는 로컬 `is_staff`,
+  `is_superuser`, Django group/permission을 권한 근거로 쓰지 않는다.
 
 ### SSO legacy identity cleanup gate
 
