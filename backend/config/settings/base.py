@@ -176,3 +176,7 @@ else:
         PONGDANG_SSO_EDGE_SECRET,
         PONGDANG_SSO_EDGE_SECRET_FILE,
     )
+
+# Legacy WaterForecast rows stay in development/admin storage, but the public
+# read API is fail-closed unless an environment explicitly opts back in.
+PUBLIC_LEGACY_WATER_FORECASTS = False

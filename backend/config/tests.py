@@ -65,13 +65,8 @@ class IntegrationHealthTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["status"], "degraded")
         self.assertEqual(payload["heartbeat"]["state"], "missing")
-        self.assertEqual(
-            set(payload["configured"]),
-            {"tour_api", "weather", "marine", "water_quality", "routing_matrix"},
-        )
-        self.assertTrue(
-            all(isinstance(value, bool) for value in payload["configured"].values())
-        )
+        self.assertNotIn("configured", payload)
+        self.assertEqual(payload["configured_count"], 0)
 
     @patch("config.urls.get_provider_status")
     @patch("config.urls.ProviderConfig.from_environment")
@@ -106,6 +101,8 @@ class IntegrationHealthTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["status"], "ok")
         self.assertNotIn("credential", response.content.decode())
+        self.assertNotIn("configured", payload)
+        self.assertEqual(payload["configured_count"], 0)
         self.assertEqual(
             payload["tasks"]["daily-forecast"]["max_age_seconds"],
             int(TASK_MAX_AGES["daily-forecast"].total_seconds()),

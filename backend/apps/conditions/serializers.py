@@ -175,6 +175,7 @@ class ConditionScoreSerializer(serializers.ModelSerializer):
     contributions = serializers.SerializerMethodField()
     missing_metrics = serializers.SerializerMethodField()
     stale_or_conflicting_metrics = serializers.SerializerMethodField()
+    evidence_state = serializers.SerializerMethodField()
 
     class Meta:
         model = ConditionScore
@@ -201,6 +202,7 @@ class ConditionScoreSerializer(serializers.ModelSerializer):
             "methodology_version",
             "evaluated_at",
             "computed_at",
+            "evidence_state",
         )
         read_only_fields = fields
 
@@ -270,16 +272,37 @@ class ConditionScoreSerializer(serializers.ModelSerializer):
     def get_suitability_score(self, score: ConditionScore) -> float | None:
         return self.get_score(score)
 
+    def get_evidence_state(self, score: ConditionScore) -> str:
+        if self.context.get("historical"):
+            return "historical"
+        as_of = self.context.get("effective_as_of")
+        snapshot = score.snapshot
+        if snapshot is None:
+            return "unavailable"
+        if as_of is None:
+            return "current"
+        if snapshot.valid_from is not None and as_of < snapshot.valid_from:
+            return "expired"
+        if snapshot.valid_until is not None and as_of > snapshot.valid_until:
+            return "expired"
+        failures = self._effective_failures(score)
+        if any(failure.category == "stale" for failure in failures):
+            return "expired"
+        if any(failure.category == "missing" for failure in failures):
+            return "unavailable"
+        return "current"
+
     def _is_effectively_unknown(self, score: ConditionScore) -> bool:
         """Project a stored decision through current evidence availability.
 
-        Only the ``latest`` action supplies ``effective_as_of``.  Historical
-        list/detail responses remain an immutable audit view of what was
-        evaluated, while a current consumer can never receive an expired
-        safety status or suitability score as if its evidence were still
-        usable.
+        Current list, detail, and ``latest`` responses supply
+        ``effective_as_of`` unless ``?historical=1`` requests the immutable
+        audit view. A current consumer can never receive an expired safety
+        status or suitability score as if its evidence were still usable.
         """
 
+        if self.context.get("historical"):
+            return False
         return bool(self._effective_failures(score))
 
     def _effective_failures(

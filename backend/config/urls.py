@@ -56,11 +56,14 @@ def integration_health_check(request):
     except DatabaseError:
         report = {"status": "degraded", "detail": "pipeline state unavailable"}
         healthy = False
+    provider_status = get_provider_status()
     return JsonResponse(
         {
             **report,
             "service": "pongdang-integrations",
-            "configured": get_provider_status(),
+            "configured_count": sum(
+                1 for enabled in provider_status.values() if enabled
+            ),
         },
         status=200 if healthy else 503,
     )

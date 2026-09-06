@@ -185,6 +185,22 @@ def _requirements(context: EvaluationContext) -> tuple[Requirement, ...]:
             ),
         )
     if context.activity is Activity.SWIM and context.environment is Environment.INLAND_WATER:
+        family_inland = (
+            (
+                Requirement(
+                    "safety.water_temperature.required",
+                    ("water_temperature_c",),
+                    "WATER_TEMPERATURE_MISSING",
+                ),
+                Requirement(
+                    "safety.adult_supervision.required",
+                    ("adult_supervision_status",),
+                    "ADULT_SUPERVISION_STATUS_MISSING",
+                ),
+            )
+            if context.participant_profile in {"family", "beginner", "family_swim"}
+            else ()
+        )
         return (
             Requirement(
                 "safety.access.required",
@@ -194,6 +210,7 @@ def _requirements(context: EvaluationContext) -> tuple[Requirement, ...]:
             *outdoor_alerts,
             Requirement("safety.river.required", ("river_risk_level",), "RIVER_RISK_STATUS_MISSING"),
             Requirement("safety.water_quality.required", ("water_quality_status",), "WATER_QUALITY_STATUS_MISSING"),
+            *family_inland,
         )
     if context.activity is Activity.SURF:
         return (

@@ -37,7 +37,7 @@ class WaterForecastViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        if not getattr(settings, "PUBLIC_LEGACY_WATER_FORECASTS", True):
+        if not getattr(settings, "PUBLIC_LEGACY_WATER_FORECASTS", False):
             return queryset.none()
         return queryset
 

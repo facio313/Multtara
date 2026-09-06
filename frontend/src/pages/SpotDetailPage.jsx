@@ -35,6 +35,7 @@ import { useWaterSpot } from '../hooks/useWaterData';
 import { localizedDataState, localizedSafety, useI18n } from '../i18n';
 import { bestEligibleForecast } from '../services/dailyForecastApi';
 import {
+  formatGateReason,
   formatMetricName,
   getSpotActivityView,
   isRecommendationEligible,
@@ -42,38 +43,40 @@ import {
 } from '../services/waterData';
 import './SpotDetailPage.css';
 
-const facilitySets = {
-  beach: [
-    { icon: ShowerHead, title: '샤워·세족 공간', meta: '운영 여부 방문 전 확인', tag: '해변 편의' },
-    { icon: Bath, title: '탈의 공간', meta: '개장 기간과 이용시간 확인', tag: '물놀이 후' },
-    { icon: ParkingCircle, title: '인근 주차', meta: '현장 혼잡도에 따라 변동', tag: '이동' },
-    { icon: Utensils, title: '로컬 한 끼', meta: '현재 위치 기반 연결 예정', tag: '미식' },
-  ],
-  facility: [
-    { icon: Bath, title: '시설 운영시간', meta: '휴무·입장 마감 방문 전 확인', tag: '시설' },
-    { icon: Accessibility, title: '무장애 동선', meta: '시설별 지원 범위 확인', tag: '접근성' },
-    { icon: ParkingCircle, title: '주차·진입', meta: '혼잡 시간대 방문 전 확인', tag: '이동' },
-    { icon: Utensils, title: '회복 한 끼', meta: '주변 식당 연결 예정', tag: '미식' },
-  ],
-  valley: [
-    { icon: ShieldAlert, title: '대피 지점', meta: '현장 안내판을 가장 먼저 확인', tag: '안전' },
-    { icon: ParkingCircle, title: '진입·주차', meta: '통제와 입산 가능 여부 확인', tag: '이동' },
-    { icon: ShowerHead, title: '세족·정비', meta: '인근 편의시설 연결 예정', tag: '물놀이 후' },
-    { icon: Utensils, title: '지역 한 끼', meta: '현재 위치 기반 연결 예정', tag: '미식' },
-  ],
-  mudflat: [
-    { icon: Clock3, title: '복귀 시각', meta: '조석과 현장 통제 우선 확인', tag: '안전' },
-    { icon: ShowerHead, title: '세척 공간', meta: '운영 여부 방문 전 확인', tag: '체험 후' },
-    { icon: ParkingCircle, title: '주차·진입', meta: '체험장별 이용 안내 확인', tag: '이동' },
-    { icon: Utensils, title: '지역 한 끼', meta: '현재 위치 기반 연결 예정', tag: '미식' },
-  ],
-  default: [
-    { icon: Accessibility, title: '접근 가능한 동선', meta: '현장 시설 정보 연결 예정', tag: '접근성' },
-    { icon: ParkingCircle, title: '주차·진입', meta: '방문 전 운영 정보 확인', tag: '이동' },
-    { icon: ShieldCheck, title: '안전 안내 지점', meta: '공식 안내와 현장 표지 우선', tag: '안전' },
-    { icon: Utensils, title: '지역 한 끼', meta: '현재 위치 기반 연결 예정', tag: '미식' },
-  ],
-};
+function facilityItems(t) {
+  return {
+    beach: [
+      { icon: ShowerHead, title: t('spot.facility.shower.title'), meta: t('spot.facility.confirmBeforeVisit'), tag: t('spot.facility.tag.beach') },
+      { icon: Bath, title: t('spot.facility.changing.title'), meta: t('spot.facility.hoursNote'), tag: t('spot.facility.tag.afterSwim') },
+      { icon: ParkingCircle, title: t('spot.facility.parking.title'), meta: t('spot.facility.crowdNote'), tag: t('spot.facility.tag.travel') },
+      { icon: Utensils, title: t('spot.facility.meal.title'), meta: t('spot.facility.mealPending'), tag: t('spot.facility.tag.food') },
+    ],
+    facility: [
+      { icon: Bath, title: t('spot.facility.hours.title'), meta: t('spot.facility.hoursNote'), tag: t('spot.facility.tag.venue') },
+      { icon: Accessibility, title: t('spot.facility.access.title'), meta: t('spot.facility.accessNote'), tag: t('spot.facility.tag.access') },
+      { icon: ParkingCircle, title: t('spot.facility.entry.title'), meta: t('spot.facility.crowdNote'), tag: t('spot.facility.tag.travel') },
+      { icon: Utensils, title: t('spot.facility.meal.title'), meta: t('spot.facility.mealPending'), tag: t('spot.facility.tag.food') },
+    ],
+    valley: [
+      { icon: ShieldAlert, title: t('spot.facility.evacuation.title'), meta: t('spot.facility.evacuationNote'), tag: t('spot.facility.tag.safety') },
+      { icon: ParkingCircle, title: t('spot.facility.entry.title'), meta: t('spot.facility.controlNote'), tag: t('spot.facility.tag.travel') },
+      { icon: ShowerHead, title: t('spot.facility.wash.title'), meta: t('spot.facility.nearbyPending'), tag: t('spot.facility.tag.afterSwim') },
+      { icon: Utensils, title: t('spot.facility.meal.title'), meta: t('spot.facility.mealPending'), tag: t('spot.facility.tag.food') },
+    ],
+    mudflat: [
+      { icon: Clock3, title: t('spot.facility.return.title'), meta: t('spot.facility.tideNote'), tag: t('spot.facility.tag.safety') },
+      { icon: ShowerHead, title: t('spot.facility.wash.title'), meta: t('spot.facility.confirmBeforeVisit'), tag: t('spot.facility.tag.afterActivity') },
+      { icon: ParkingCircle, title: t('spot.facility.entry.title'), meta: t('spot.facility.siteNote'), tag: t('spot.facility.tag.travel') },
+      { icon: Utensils, title: t('spot.facility.meal.title'), meta: t('spot.facility.mealPending'), tag: t('spot.facility.tag.food') },
+    ],
+    default: [
+      { icon: Accessibility, title: t('spot.facility.access.title'), meta: t('spot.facility.accessPending'), tag: t('spot.facility.tag.access') },
+      { icon: ParkingCircle, title: t('spot.facility.entry.title'), meta: t('spot.facility.confirmBeforeVisit'), tag: t('spot.facility.tag.travel') },
+      { icon: ShieldCheck, title: t('spot.facility.safetyPoint.title'), meta: t('spot.facility.officialFirst'), tag: t('spot.facility.tag.safety') },
+      { icon: Utensils, title: t('spot.facility.meal.title'), meta: t('spot.facility.mealPending'), tag: t('spot.facility.tag.food') },
+    ],
+  };
+}
 
 const FACILITY_GROUP_BY_TYPE = Object.freeze({
   beach: 'beach',
@@ -89,8 +92,6 @@ const FACILITY_GROUP_BY_TYPE = Object.freeze({
   reservoir: 'valley',
   mudflat: 'mudflat',
 });
-
-const analytics = [86, 82, 88, 90, 94];
 
 function readFavorite(id) {
   try {
@@ -157,13 +158,13 @@ function TypeSpecificPanel({ spot }) {
     return (
       <section className="detail-panel type-panel type-hotspring">
         <div className="detail-section-heading">
-          <div><span>FACILITY FIT</span><h2>온천 시설 특성과 이용 팁</h2></div>
+          <div><span>FACILITY FIT</span><h2>{t('spot.type.hotspring.title')}</h2></div>
           <Sparkles size={21} />
         </div>
         <div className="benefit-grid">
-          <div><span>대표 성분</span><strong>해수 · 나트륨</strong><p>실제 시설 성분표 연결 전 데모 분류</p></div>
-          <div><span>WELLNESS</span><strong>REST · WARM WATER</strong><p>{t('spot.type.hotspringDisclaimer')}</p></div>
-          <div><span>악천후 대안</span><strong>실내 스테이</strong><p>야외 일정에서 한 번에 전환 가능</p></div>
+          <div><span>{t('spot.type.hotspring.ingredientLabel')}</span><strong>{t('common.noData')}</strong><p>{t('spot.type.hotspring.ingredientNote')}</p></div>
+          <div><span>WELLNESS</span><strong>{t('spot.type.hotspring.wellness')}</strong><p>{t('spot.type.hotspringDisclaimer')}</p></div>
+          <div><span>{t('spot.type.hotspring.indoorLabel')}</span><strong>{t('spot.type.hotspring.indoorValue')}</strong><p>{t('spot.type.hotspring.indoorNote')}</p></div>
         </div>
       </section>
     );
@@ -173,12 +174,12 @@ function TypeSpecificPanel({ spot }) {
     return (
       <section className="detail-panel type-panel type-tidal">
         <div className="detail-section-heading">
-          <div><span>CATCH GUIDE</span><h2>갯벌 체험 도감</h2></div>
+          <div><span>CATCH GUIDE</span><h2>{t('spot.type.mudflat.title')}</h2></div>
           <Clock3 size={21} />
         </div>
         <div className="catch-grid">
-          <div><span>지금 볼 수 있어요</span><strong>바지락 · 칠게 · 갯고둥</strong></div>
-          <div className="catch-warning"><span>반드시 확인해요</span><strong>금어기 · 포획금지 체장 · 복귀 시각</strong></div>
+          <div><span>{t('spot.type.mudflat.nowLabel')}</span><strong>{t('common.noData')}</strong></div>
+          <div className="catch-warning"><span>{t('spot.type.mudflat.checkLabel')}</span><strong>{t('spot.type.mudflat.checkValue')}</strong></div>
         </div>
       </section>
     );
@@ -188,14 +189,14 @@ function TypeSpecificPanel({ spot }) {
     return (
       <section className="detail-panel type-panel type-valley">
         <div className="detail-section-heading">
-          <div><span>VALLEY RADAR</span><h2>계곡 안전 레이더</h2></div>
+          <div><span>VALLEY RADAR</span><h2>{t('spot.type.valley.title')}</h2></div>
           <ShieldAlert size={21} />
         </div>
-        <div className="radar-track" aria-label="데모 위험도: 주의">
+        <div className="radar-track" aria-label={t('spot.type.valley.radarUnavailable')}>
           <span className="radar-fill" />
           <span className="radar-marker" />
         </div>
-        <div className="radar-labels"><span>안전</span><strong>주의 · 현장 재확인</strong><span>위험</span></div>
+        <div className="radar-labels"><span>{t('spot.type.valley.safe')}</span><strong>{t('common.noData')}</strong><span>{t('spot.type.valley.danger')}</span></div>
         <p>{t('spot.type.valleyDisclaimer')}</p>
       </section>
     );
@@ -204,13 +205,13 @@ function TypeSpecificPanel({ spot }) {
   return (
     <section className="detail-panel type-panel type-sea">
       <div className="detail-section-heading">
-        <div><span>GOLDEN MOMENT</span><h2>오늘의 물멍 & 인생샷</h2></div>
+        <div><span>GOLDEN MOMENT</span><h2>{t('spot.type.sea.title')}</h2></div>
         <Camera size={21} />
       </div>
       <div className="golden-grid">
-        <div><span>일몰 × 잔잔한 파도</span><strong>18:47</strong><p>해 질 녘 25분 전부터 추천</p></div>
-        <div><span>ASMR 지수</span><strong>91</strong><p>잔잔한 백색소음 데모</p></div>
-        <div><span>수질 신뢰도</span><strong>확인 중</strong><p>공식 데이터와 리뷰 연결 예정</p></div>
+        <div><span>{t('spot.type.sea.sunsetLabel')}</span><strong>{t('common.noData')}</strong><p>{t('spot.type.sea.sunsetNote')}</p></div>
+        <div><span>{t('spot.type.sea.asmrLabel')}</span><strong>{t('common.noData')}</strong><p>{t('spot.type.sea.asmrNote')}</p></div>
+        <div><span>{t('spot.type.sea.qualityLabel')}</span><strong>{t('spot.type.sea.qualityPending')}</strong><p>{t('spot.type.sea.qualityNote')}</p></div>
       </div>
     </section>
   );
@@ -229,7 +230,6 @@ function SpotDetailPage() {
   } = useWaterSpot(id);
   const [requestedActivity, setRequestedActivity] = useState(null);
   const [saved, setSaved] = useState(() => readFavorite(id));
-  const [planned, setPlanned] = useState(false);
   const forecastActivity = requestedActivity ?? defaultActivityForSpot(spot);
   const dailyForecast = useDailyForecast({
     spot: spot?.apiId,
@@ -264,7 +264,7 @@ function SpotDetailPage() {
   const selectedSafety = localizedSafety(t, selectedView.safety.level);
   const forecastRows = dailyForecast.data?.results ?? [];
   const bestForecast = bestEligibleForecast(forecastRows);
-  const facilities = facilitySets[FACILITY_GROUP_BY_TYPE[spot.type]] ?? facilitySets.default;
+  const facilities = facilityItems(t)[FACILITY_GROUP_BY_TYPE[spot.type]] ?? facilityItems(t).default;
   const availableActivities = activityOptions.filter((activity) => (
     spot.conditionRecords?.[activity.id]
     || (spot.scores?.[activity.id] !== null && spot.scores?.[activity.id] !== undefined)
@@ -319,7 +319,7 @@ function SpotDetailPage() {
       `${t('spot.card.score')}: ${selectedView.score === null ? t('common.scoreMissing') : selectedView.score}`,
       `${t('spot.card.data')}: ${localizedDataState(t, selectedView.dataState)}`,
       selectedSafety.message,
-      ...selectedView.reasons.map((reason) => `${t('spot.card.reason')}: ${reason.code} — ${reason.label}`),
+      ...selectedView.reasons.map((reason) => `${t('spot.card.reason')}: ${reason.code} — ${formatGateReason(reason.code, t)}`),
       `${t('spot.evidence.provider')}: ${selectedView.provenance.provider}`,
       `${t('spot.evidence.scope')}: ${selectedView.provenance.spatialScope}`,
       `${t('spot.card.updated')}: ${selectedView.provenance.updatedLabel}`,
@@ -441,7 +441,7 @@ function SpotDetailPage() {
               </div>
               <div className="score-reasons">
                 <span>{t('spot.index.reasons')}</span>
-                {selectedView.reasons.map((reason) => <p key={reason.code}><Check size={14} /><code>{reason.code}</code> {reason.label}</p>)}
+                {selectedView.reasons.map((reason) => <p key={reason.code}><Check size={14} /><code>{reason.code}</code> {formatGateReason(reason.code, t)}</p>)}
                 {selectedView.reasons.length === 0 && selectedView.isDemoFallback
                   ? spot.reasons.map((reason) => <p key={reason}><Check size={14} /> {reason} <em>DEMO</em></p>)
                   : null}
@@ -489,13 +489,13 @@ function SpotDetailPage() {
               <div>
                 <span>{t('spot.evidence.missing')}</span>
                 {selectedView.missingMetrics.length > 0
-                  ? selectedView.missingMetrics.map((metric) => <strong key={metric}>{formatMetricName(metric)}</strong>)
+                  ? selectedView.missingMetrics.map((metric) => <strong key={metric}>{formatMetricName(metric, t)}</strong>)
                   : <small>{t('spot.evidence.noMissing')}</small>}
               </div>
               <div>
                 <span>{t('spot.evidence.stale')}</span>
                 {selectedView.staleMetrics.length > 0
-                  ? selectedView.staleMetrics.map((metric) => <strong key={metric}>{formatMetricName(metric)}</strong>)
+                  ? selectedView.staleMetrics.map((metric) => <strong key={metric}>{formatMetricName(metric, t)}</strong>)
                   : <small>{t('spot.evidence.noStale')}</small>}
               </div>
               <div>
@@ -510,7 +510,7 @@ function SpotDetailPage() {
                 <span>{t('spot.evidence.contributions')}</span>
                 {selectedView.contributions.slice(0, 6).map((contribution, index) => (
                   <div key={`${contribution.metric_name ?? 'metric'}-${index}`}>
-                    <strong>{formatMetricName(contribution.metric_name ?? 'metric')}</strong>
+                    <strong>{formatMetricName(contribution.metric_name ?? 'metric', t)}</strong>
                     <span>{contribution.weighted_points == null ? t('spot.evidence.reflected') : `${Number(contribution.weighted_points).toFixed(1)} pt`}</span>
                   </div>
                 ))}
@@ -599,19 +599,6 @@ function SpotDetailPage() {
           ) : null}
 
           <TypeSpecificPanel spot={spot} />
-
-          <section className="detail-panel analytics-panel">
-            <div className="detail-section-heading">
-              <div><span>WATER LIFE</span><h2>최근 5년과 비교하면</h2></div>
-              <span className="demo-label">설명용 데모</span>
-            </div>
-            <div className="analytics-layout">
-              <div className="analytics-copy"><strong>상위 12%</strong><p>올해 같은 계절의 평년 조건보다 좋은 상태를 가정했어요.</p></div>
-              <div className="analytics-bars" aria-label="5년 비교 데모 차트">
-                {analytics.map((value, index) => <div key={value}><span style={{ height: `${value}%` }} /><small>{2022 + index}</small></div>)}
-              </div>
-            </div>
-          </section>
         </div>
 
         <aside className="detail-sidebar">
@@ -620,7 +607,7 @@ function SpotDetailPage() {
             <div className={`sidebar-score score-${selectedView.score === null ? 'unknown' : 'known'}`} style={{ '--score': selectedView.score ?? 0 }}><strong>{scoreLabel(selectedView)}</strong></div>
             <h2>{spot.summary}</h2>
             <p>{spot.description}</p>
-            <div><Clock3 size={16} /><span>{isRecommendationEligible(selectedView) ? 'RECOMMENDABLE' : 'DECISION'}</span><strong>{selectedView.isDemoFallback ? t('home.hero.demo') : t(`concierge.decision.${selectedView.decision}`)}</strong></div>
+            <div><Clock3 size={16} /><span>{isRecommendationEligible(selectedView) ? t('spot.sidebar.recommendable') : t('spot.sidebar.decision')}</span><strong>{selectedView.isDemoFallback ? t('home.hero.demo') : t(`concierge.decision.${selectedView.decision}`)}</strong></div>
           </div>
           <div className={`source-card state-${selectedView.dataState}`}>
             <span>DATA STATUS · {localizedDataState(t, selectedView.dataState, true)}</span>
@@ -630,26 +617,29 @@ function SpotDetailPage() {
               <li>{selectedView.provenance.provider}</li>
               <li>{selectedView.provenance.spatialScope}</li>
               <li>{selectedView.provenance.updatedLabel}</li>
-              <li>정규화 관측 스냅샷 {spot.observations?.length ?? 0}건 연결</li>
+              <li>{t('spot.sidebar.observations', { count: spot.observations?.length ?? 0 })}</li>
             </ul>
           </div>
         </aside>
       </div>
 
       <div className="detail-sticky-actions">
-        <div><span>{spot.name} · {localizedDataState(t, selectedView.dataState)}</span><strong>{planned ? t('spot.plan.added') : selectedView.isDemoFallback ? `${spot.bestTime} · DEMO` : selectedSafety.label}</strong></div>
+        <div><span>{spot.name} · {localizedDataState(t, selectedView.dataState)}</span><strong>{selectedView.isDemoFallback ? `${spot.bestTime} · DEMO` : selectedSafety.label}</strong></div>
         <a
           className="directions"
           href={`https://map.kakao.com/?q=${encodeURIComponent(`${spot.name} ${spot.address}`)}`}
           target="_blank"
           rel="noreferrer"
         >
-          <ExternalLink size={17} /> 카카오맵
+          <ExternalLink size={17} /> {t('spot.sidebar.kakaoMap')}
         </a>
-        <button type="button" className={planned ? 'planned' : ''} onClick={() => setPlanned(true)}>
-          {planned ? <Check size={17} /> : <CalendarDays size={17} />}
-          {planned ? t('spot.plan.added') : t('spot.plan.add')}
-        </button>
+        <Link
+          className="plan-link"
+          to={`/concierge?activity=${encodeURIComponent(selectedActivity)}&spot=${encodeURIComponent(spot.apiId ?? spot.id)}`}
+        >
+          <CalendarDays size={17} />
+          {t('spot.plan.add')}
+        </Link>
       </div>
     </div>
   );

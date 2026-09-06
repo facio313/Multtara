@@ -255,6 +255,33 @@ class RecommendationApiTests(TestCase):
             "recommendation-v1",
         )
 
+    def test_demo_and_unverified_catalog_rows_are_not_recommended(self) -> None:
+        eligible = self.spot("검증된 해변")
+        demo = self.spot(
+            "데모 해변",
+            catalog_source="PONGDANG_DEMO",
+            catalog_verification="verified",
+        )
+        unverified = self.spot(
+            "미검증 해변",
+            catalog_verification="unknown",
+        )
+        self.condition(eligible)
+        self.condition(demo)
+        self.condition(unverified)
+
+        response = self.client.post(
+            "/api/v1/trips/recommendations/",
+            self.payload(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["spot"]["id"] for item in response.json()["recommendations"]],
+            [eligible.pk],
+        )
+
     def test_recommendation_image_url_is_public_and_credential_free(self) -> None:
         spot = self.spot(
             "공개 이미지",
@@ -459,6 +486,7 @@ class RecommendationApiTests(TestCase):
                     spot,
                     activity="surf",
                     official_grade_detail=grade_detail,
+                    participant_skill_level=skill_level,
                 )
                 payload = self.payload(activity="surf", region=region)
                 payload["party"]["participant_skill_level"] = skill_level
@@ -687,6 +715,7 @@ class RecommendationApiTests(TestCase):
                     lng=128.9,
                     region="강원",
                     address="강원특별자치도 강릉시",
+                    catalog_verification="verified",
                 )
                 for index in range(MAX_CANDIDATE_POOL)
             ]
@@ -1038,6 +1067,7 @@ class RecommendationApiTests(TestCase):
             candidate,
             activity="surf",
             official_grade_detail="초중급자에게 적합",
+            participant_skill_level="beginner",
         )
         self.route_matrix(start=start, end=end, candidate=candidate)
         owner = User.objects.create_user(
@@ -1079,7 +1109,7 @@ class RecommendationApiTests(TestCase):
         self.assertEqual(row["participant_skill_level"], "beginner")
         self.assertEqual(
             row["condition_score_participant_skill_level"],
-            "unspecified",
+            "beginner",
         )
         self.assertEqual(row["condition_score_id"], condition.pk)
         self.assertEqual(

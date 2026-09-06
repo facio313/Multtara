@@ -1025,6 +1025,7 @@
   cursor: pointer;
 }
 
+.detail-sticky-actions a.plan-link,
 .detail-sticky-actions button:last-child {
   color: #092b2e;
   border-color: transparent;

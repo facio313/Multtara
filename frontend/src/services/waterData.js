@@ -700,11 +700,28 @@ export function getSpotActivityView(spot, activity) {
 }
 
 export function isRecommendationEligible(view) {
-  if (view.isDemoFallback) return view.score !== null;
+  if (!view || view.isDemoFallback) return false;
   return view.safetyStatus === 'clear'
     && ['recommended', 'consider'].includes(view.decision)
     && view.score !== null
     && view.dataState === 'live';
+}
+
+export function catalogMix(spots, activity) {
+  let live = 0;
+  let demo = 0;
+  for (const spot of spots) {
+    const view = getSpotActivityView(spot, activity);
+    if (view.isDemoFallback || spot.dataState === 'demo' || spot.spotSource === 'demo') {
+      demo += 1;
+    } else if (view.dataState === 'live') {
+      live += 1;
+    }
+  }
+  if (live && demo) return 'mixed';
+  if (demo && !live) return 'demo';
+  if (live) return 'live';
+  return 'ready';
 }
 
 export function scoreLabel(view) {
@@ -712,7 +729,12 @@ export function scoreLabel(view) {
   return '—';
 }
 
-export function formatMetricName(value) {
+export function formatMetricName(value, t) {
+  const key = `metricName.${value}`;
+  if (typeof t === 'function') {
+    const translated = t(key);
+    if (translated !== key) return translated;
+  }
   const labels = {
     adult_supervision_status: '보호자 밀착 감독',
     designated_swim_zone_status: '지정 물놀이 구역',
@@ -725,4 +747,13 @@ export function formatMetricName(value) {
     weather_alert_level: '기상 특보',
   };
   return labels[value] ?? String(value).replaceAll('_', ' ');
+}
+
+export function formatGateReason(code, t) {
+  const key = `gate.reason.${code}`;
+  if (typeof t === 'function') {
+    const translated = t(key);
+    if (translated !== key) return translated;
+  }
+  return reasonLabels[code] ?? String(code).replaceAll('_', ' ');
 }

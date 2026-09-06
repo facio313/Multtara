@@ -932,14 +932,23 @@ class ConditionViewSetTests(TestCase):
         self.snapshot.valid_until = self.now - timedelta(seconds=1)
         self.snapshot.save(update_fields=("valid_from", "valid_until"))
 
-        response = self.client.get(
+        current = self.client.get(
             f"/api/v1/conditions/scores/{self.score.pk}/"
         )
+        historical = self.client.get(
+            f"/api/v1/conditions/scores/{self.score.pk}/?historical=1"
+        )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["safety_status"], "clear")
-        self.assertEqual(response.data["decision"], "recommended")
-        self.assertEqual(response.data["score"], 85.0)
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.data["safety_status"], "unknown")
+        self.assertEqual(current.data["decision"], "unknown")
+        self.assertIsNone(current.data["score"])
+        self.assertEqual(current.data["evidence_state"], "expired")
+        self.assertEqual(historical.status_code, 200)
+        self.assertEqual(historical.data["safety_status"], "clear")
+        self.assertEqual(historical.data["decision"], "recommended")
+        self.assertEqual(historical.data["score"], 85.0)
+        self.assertEqual(historical.data["evidence_state"], "historical")
 
     def test_latest_api_does_not_claim_an_expired_stop_is_current(self):
         self.score.score = None
@@ -968,14 +977,20 @@ class ConditionViewSetTests(TestCase):
         latest = self.client.get(
             f"/api/v1/conditions/scores/latest/?spot={self.spot.pk}&activity=swim"
         )
-        historical = self.client.get(
+        current_detail = self.client.get(
             f"/api/v1/conditions/scores/{self.score.pk}/"
+        )
+        historical = self.client.get(
+            f"/api/v1/conditions/scores/{self.score.pk}/?historical=1"
         )
 
         self.assertEqual(latest.status_code, 200)
         self.assertEqual(latest.data["results"][0]["safety_status"], "unknown")
         self.assertEqual(latest.data["results"][0]["decision"], "unknown")
         self.assertIsNone(latest.data["results"][0]["score"])
+        self.assertEqual(current_detail.data["safety_status"], "unknown")
+        self.assertEqual(current_detail.data["decision"], "unknown")
+        self.assertIsNone(current_detail.data["score"])
         self.assertEqual(historical.data["safety_status"], "stop")
         self.assertEqual(historical.data["decision"], "blocked")
 

@@ -138,7 +138,7 @@ function GuestAccount({ mode, setMode, onLogin, onRegister, busy, feedback, loca
     if (!keys.includes(event.key)) return;
     event.preventDefault();
     let nextIndex = currentIndex;
-    if (event.key === 'ArrowLeft') nextIndex = (currentIndex + 1) % 2;
+    if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + 2) % 2;
     if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % 2;
     if (event.key === 'Home') nextIndex = 0;
     if (event.key === 'End') nextIndex = 1;

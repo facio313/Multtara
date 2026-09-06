@@ -4,11 +4,23 @@ import test from 'node:test';
 import { messages } from './messages.js';
 
 const REQUIRED_SCREEN_KEYS = [
+  'nav.profile',
+  'nav.forecastShort',
+  'locale.ko',
+  'dataState.live.short',
+  'home.hero.statusNoLive',
   'map.eyebrow',
   'map.data.badge.error',
   'map.data.badge.loading',
   'map.data.badge.empty',
   'map.data.badge.ready',
+  'map.data.badge.demo',
+  'map.data.badge.mixed',
+  'map.data.badge.live',
+  'map.select.title',
+  'map.select.description',
+  'map.data.demo',
+  'map.data.mixed',
   'map.data.empty',
   'map.fallback.gangneung',
   'map.fallback.korea',

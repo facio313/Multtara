@@ -163,7 +163,13 @@ require("portfolio-auth-mode.sh contract" in auth_entrypoint, "frontend entrypoi
 require("if not settings.PONGDANG_SSO_ENABLED" in root_urls, "SSO mode still registers Django admin")
 require("dockerfile: frontend/Dockerfile" in compose, "frontend does not use the guarded root context")
 require("**" in dockerignore and "!frontend/**" in dockerignore, "root frontend context is not allowlisted")
+require("frontend/.env" in dockerignore, "frontend env files can enter the root frontend context")
+require("frontend/.env.*" in dockerignore, "frontend env variants can enter the root frontend context")
 require("!scripts/portfolio-auth-mode.sh" in dockerignore, "root context omits the canonical resolver")
+require("- cursor" in ci_workflow and '"cursor-*"' in ci_workflow, "CI does not run on cursor branches")
+require("- anthropic" in ci_workflow and '"anthropic-*"' in ci_workflow, "CI does not run on anthropic branches")
+require("production APPLICATION_BASE_PATH must be /multtara" in deploy_common, "deploy does not pin the portfolio application path")
+require("/api/health/ready/" in compose, "frontend healthcheck does not probe the backend through Nginx")
 require("file: ${{ matrix.dockerfile }}" in ci_workflow, "CI image matrix ignores its Dockerfile")
 require("file: ./frontend/Dockerfile" in release_workflow, "release frontend Dockerfile is not explicit")
 for command in ("dev", "preview"):

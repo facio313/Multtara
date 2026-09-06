@@ -32,7 +32,8 @@ confidence: 0..1
 
 | 활동 | v1의 1차 적합도 | 안전 판단 |
 |---|---|---|
-| 가족 해수욕 | KHOA 해수욕 공식 등급 + 기후·현장 쾌적도 | 입수 통제, 이안류, 수질, 낙뢰, 해양특보, 수온, 안전요원 |
+| 가족 해수욕 | KHOA 해수욕 공식 등급 + 기후·현장 쾌적도 | 입수 통제, 이안류, 수질, 낙뢰, 해양특보, 수온, 안전요원, 지정 수영구역, 성인 감독 |
+| 내륙 가족 수영 | 현장 수온·수질 적합도 (공식 해수욕지수를 내륙에 복사하지 않음) | 입수 통제, 하천 위험, 수질, 낙뢰, 수온, 성인 감독 |
 | 서핑 | KHOA 숙련도별 공식 지수 원형 보존 | 현장 통제, 이안류, 낙뢰, 풍랑·태풍 등 해양특보 |
 | 갯벌 | KHOA 공식 지수와 공식 체험 가능 시간 원형 보존 | 공식 시간창, 안개, 지정 진입로, 현장 통제, 해양특보 |
 | 물멍·해안 감상 | 검증된 HCI:Beach 기후 쾌적도 | 해안·산책로 통제, 낙뢰, 풍랑·태풍 등 해양특보 |
@@ -142,6 +143,8 @@ source priority가 기록된다. 원본 metric은 이를 참조하는 융합 근
 | 안전요원 미운영 | `caution`, 가족 추천 제외, 공개 점수 최대 39 |
 | 지정 수영구역 폐쇄·구역 밖 또는 성인 감독 불가 | `stop` |
 | 위 필수값 결측·stale·conflict·저신뢰·미인식 | `unknown` |
+
+내륙 하천·계곡·호수의 가족·초급 수영은 해변 전용 이안류·해양특보·안전요원·지정 수영구역을 요구하지 않는다. 대신 공식 접근 상태, 기상·낙뢰, 하천 위험, 수질, 수온, 성인 감독 확보를 필수로 한다. 성인 감독은 요청 세션 입력이며 전역 관측으로 저장하지 않는다.
 
 KHOA 이안류 시스템은 2021–2024년 9개 해변 검증에서 대부분 AUC 0.92–0.99와 양의 Brier skill을 보였고 경포·낙산·망상에서도 높은 성능을 보였다. 이것은 공식 지수를 우선할 근거지만, 경보 시스템이 현장 안전을 보증한다는 뜻은 아니다. [Choi & Kim, 2026, DOI 10.12652/Ksce.2026.46.1.0061](https://www.kci.go.kr/kciportal/ci/sereArticleSearch/ciSereArtiView.kci?sereArticleSearchBean.artiId=ART003301317)
 
@@ -282,6 +285,7 @@ rip_R == 55 => stop
 lightning_clearance < 30min => stop
 family_water_temp < 15 or > 31 => stop
 15 <= family_water_temp < 18 => caution
+inland_family_swim missing temp or supervision => unknown
 missing_optional_score_factor != redistributed_weight
 hot_tub_temperature > 40 => stop
 mudflat_outside_official_window => stop
