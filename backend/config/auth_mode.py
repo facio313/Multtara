@@ -31,7 +31,9 @@ def _normalize_branch(branch: str) -> str:
 
 def _mode_for_branch(branch: str) -> str:
     normalized = _normalize_branch(branch)
-    return "sso" if normalized in {"main", "dev"} else "local"
+    if normalized not in {"main", "dev"}:
+        raise ImproperlyConfigured("Unsupported branch; use main or dev.")
+    return "sso" if normalized == "main" else "local"
 
 
 def _strict_boolean(name: str, value: object) -> bool:

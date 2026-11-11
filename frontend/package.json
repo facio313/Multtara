@@ -7,12 +7,12 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "PORTFOLIO_AUTH_MODE=local ../scripts/portfolio-auth-mode.sh exec -- vite",
+    "dev": "../scripts/dev-only.sh vite",
     "build": "vite build",
     "build:sites": "vite build --config vite.sites.config.js",
     "lint": "eslint .",
     "test": "node --test",
-    "preview": "PORTFOLIO_AUTH_MODE=local ../scripts/portfolio-auth-mode.sh exec -- vite preview"
+    "preview": "../scripts/dev-only.sh vite preview"
   },
   "dependencies": {
     "axios": "^1.17.0",

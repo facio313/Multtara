@@ -54,7 +54,7 @@ git checkout -b codex-local-auth
 cp .env.example .env
 # .env에 실제 branch와 local mode를 반영하고 개발용 DB 비밀번호와
 # 50자 이상의 무작위 SECRET_KEY를 입력
-# PORTFOLIO_BRANCH=codex-local-auth
+# PORTFOLIO_BRANCH=dev
 # PORTFOLIO_AUTH_MODE=local
 # PONGDANG_SSO_ENABLED=False
 # VITE_SSO_ENABLED=false
@@ -109,17 +109,17 @@ workflow revision과 tag commit이 정확히 일치해야 하며, tag release가
 복원하고, 확인 전에는 이전 volume에 `down -v`를 사용하지 마세요.
 
 인증 모드는 Git branch에 묶입니다. `scripts/portfolio-auth-mode.sh`가 명시된
-`PORTFOLIO_BRANCH`, `GITHUB_REF_NAME`, 현재 Git branch 순으로 판정하며 `main`과
-`dev`는 항상 `sso`, 나머지는 `local`입니다. 명시한 `PORTFOLIO_AUTH_MODE`나 기존
+`PORTFOLIO_BRANCH`, `GITHUB_REF_NAME`, 현재 Git branch 순으로 판정하며 `main=sso`,
+`dev=local`만 허용합니다. 명시한 `PORTFOLIO_AUTH_MODE`나 기존
 backend/Vite SSO flag가 다르면 build/startup이 중단됩니다. 로컬 checkout만 Git
 자동 감지를 사용하고 CI·image build·container에는 branch를 명시 주입합니다.
 `npm run dev`와 `npm run preview`는 local mode를 명시적으로 assert하므로
-`main`/`dev`에서는 즉시 실패하고 다른 개발 branch에서만 실행됩니다.
+실제 `dev` checkout에서만 실행됩니다.
 
 Vite 인증 설정은 정적 번들에 build-time으로 고정됩니다. 최종 Nginx image의
 `PORTFOLIO_BRANCH`/`PORTFOLIO_AUTH_MODE` 환경값과 OCI label은 배포 provenance
 확인용일 뿐 runtime 전환 스위치가 아닙니다. 인증 모드를 바꾸려면 image를 다시
-build해야 하며 `main`/`dev` image는 항상 신뢰할 수 있는 SSO edge 뒤에 둡니다.
+build해야 하며 `main` image는 항상 신뢰할 수 있는 SSO edge 뒤에 둡니다.
 두 image는 정규화한 branch와 mode를 `/etc/portfolio-auth-build`의 mode-0444 두
 줄로 고정합니다. Django settings와 frontend Nginx resolver entrypoint가 runtime
 canonical pair와 비교하므로 container 환경변수 override로 build 계약을 바꿀 수
@@ -144,7 +144,7 @@ Nginx가 인증한 `Remote-*` 헤더와 퐁당 전용 `X-Portfolio-Edge-Secret`�
 결합하므로 관련 없는 다른 앱 권한이 바뀌어도 유지되지만, 매 요청의 전체 assertion
 형식과 subject·역할·현재 Multtara 권한은 다시 검증합니다. 운영에서는 별도 회원가입·비밀번호
 로그인/변경·계정 삭제가 비활성화되고 로그아웃은 중앙 `/sso/logout`으로
-연결됩니다. main/dev가 아닌 개발 branch에서 canonical mode와 두 adapter를
+연결됩니다. dev checkout에서 canonical mode와 두 adapter를
 `local`/`false`로 맞추면 중앙 SSO 없이 기존 로컬 계정 흐름을 사용할 수 있습니다.
 
 운영 계정 관리는 중앙 `/sso/admin/`에서만 수행합니다. Multtara의 독립 Django
@@ -326,14 +326,7 @@ python manage.py test
 
 ## Git 작업 경계
 
-| 경로 | 브랜치 | 소유자 |
-|---|---|---|
-| `Multtara/` | `main`/`dev` | 사용자 |
-| `worktrees/cursor/` | `cursor` | Cursor |
-| `worktrees/codex/` | `codex` | OpenAI Codex |
-| `worktrees/anthropic/` | `anthropic` | Claude Code |
-
-흐름은 `{tool}-feature-name → {tool} → dev → main`이며 상세 규칙은 [AGENTS.md](AGENTS.md)에 있습니다.
+개발과 로컬 실행은 실제 `dev` checkout에서 진행합니다. 변경 전 최신 `origin/main`을 가져와 개발 브랜치에 통합하고 검증합니다. 운영 승격과 배포는 승인된 `main`만 사용합니다. 이전 도구별 브랜치와 미커밋 파일은 백업·검토 후 정리하며 임의 삭제하지 않습니다. 상세 규칙은 [AGENTS.md](AGENTS.md)에 있습니다.
 
 ## 라이선스
 

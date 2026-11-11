@@ -7,22 +7,9 @@
 
 ## ⚠️ Agent Authority Boundaries — MUST READ FIRST
 
-### 1. Branch Scope per Agent
+### 1. Shared main/dev policy
 
-Each AI agent may only work within its own tool branch and below.
-**`main` and `dev` branches are managed exclusively by the user.**
-
-| Branch | Who controls it |
-|--------|----------------|
-| `main` | User only |
-| `dev` | User only |
-| `anthropic` | Claude Code |
-| `cursor` | Cursor |
-| `codex` | OpenAI Codex |
-| `{tool}-{feature}` | Each respective agent |
-
-- Agents **must not** commit, merge, or push to `main` or `dev` without an explicit user request.
-- When the user explicitly asks, agents may assist with `main`/`dev` operations.
+Only `main` (production) and `dev` (development) are active branches. All agents implement and run local apps on the actual `dev` checkout. Fetch the latest `origin/main` before changing code and integrate it into `dev` without overwriting local work. CI validates both branches; production publishing/deployment remains restricted to reviewed `main` history. Tool/feature branches are retired. Preserve their unique commits and dirty/untracked/ignored files before cleanup; archived worktrees must not run local services. Never force-push or discard uncommitted work.
 
 ### 2. Shared Project Information → Always Update `AGENTS.md`
 
@@ -101,43 +88,15 @@ Always use the skill `vowline` consistently, including for all sub-agents.
 
 ## Branch Strategy
 
-### Worktree Layout
+### Development flow
 
-| Directory | Branch | AI Tool |
-|-----------|--------|---------|
-| `Multtara/` (main repo) | `main` | — (release baseline) |
-| `Multtara/worktrees/codex/` | `codex` | OpenAI Codex |
-| `Multtara/worktrees/cursor/` | `cursor` | Cursor |
-| `Multtara/worktrees/anthropic/` | `anthropic` | Claude Code |
-
-### Flow
-
-```
-codex-feature-name ──┐
-cursor-feature-name ─┤→ {tool} → dev → main
-anthropic-feat-name ─┘
-```
-
-1. Branch off the tool branch for any new feature:
-   ```bash
-   git checkout -b cursor-water-index cursor
-   ```
-2. Merge completed feature back into the tool branch:
-   ```bash
-   git checkout cursor && git merge cursor-water-index
-   ```
-3. Merge tool branch into `dev` after validation (user):
-   ```bash
-   git checkout dev && git merge cursor
-   ```
-4. Merge `dev` into `main` after full verification only (user).
+Only `main` (production) and `dev` (development) are active branches. All agents implement and run local apps on the actual `dev` checkout. Fetch the latest `origin/main` before changing code and integrate it into `dev` without overwriting local work. CI validates both branches; production publishing/deployment remains restricted to reviewed `main` history. Tool/feature branches are retired. Preserve their unique commits and dirty/untracked/ignored files before cleanup; archived worktrees must not run local services. Never force-push or discard uncommitted work.
 
 ### Branch-bound authentication
 
 - `scripts/portfolio-auth-mode.sh` is the canonical resolver. Source priority is
   explicit `PORTFOLIO_BRANCH`, then `GITHUB_REF_NAME`, then the current Git
-  branch. `main` and `dev` resolve to `sso`; every other branch resolves to
-  `local`.
+  branch. `main` resolves to `sso`, `dev` to `local`; all other branches fail closed.
 - An explicit `PORTFOLIO_AUTH_MODE` mismatch fails closed.
   `PONGDANG_SSO_ENABLED` and `VITE_SSO_ENABLED` remain compatibility adapters
   and must agree with the canonical mode.
@@ -145,11 +104,10 @@ anthropic-feat-name ─┘
   containers must inject the branch explicitly. Release images and Pi runtime
   are pinned to `main`/`sso` and require the private edge secret.
 - `npm run dev` and `npm run preview` intentionally assert `local` and fail
-  immediately on `main` or `dev`; use them only from another development
-  branch.
+  immediately outside the actual `dev` checkout.
 - Vite auth is compiled into the static bundle. Final Nginx image environment
   and OCI branch/auth-mode labels are audit provenance only, not runtime
-  switches. Rebuild to change mode, and keep every `main`/`dev` image behind the
+  switches. Rebuild to change mode, and keep every `main` image behind the
   trusted SSO edge. Backend and frontend images also bake the normalized branch
   and mode into the mode-0444, two-line `/etc/portfolio-auth-build`; Django
   settings and the Nginx resolver entrypoint reject runtime mismatches.
@@ -162,19 +120,9 @@ anthropic-feat-name ─┘
   release images or request the production deployment; CI never publishes a
   `latest` image from `dev`.
 
-### Naming Rules
+### Local checkout
 
-- Tool branches: `codex`, `cursor`, `anthropic`
-- Feature branches: `{tool}-{kebab-case-feature}` — e.g. `cursor-water-index`.
-  A slash cannot be used because the resident tool branches already occupy the
-  exact Git refs `codex`, `cursor`, and `anthropic`.
-- English kebab-case only.
-
-워크트리 재생성:
-
-```bash
-./scripts/setup-worktrees.sh
-```
+`scripts/setup-worktrees.sh` prepares only a missing `dev` checkout. It never rebuilds or deletes existing worktrees.
 
 ---
 

@@ -14,7 +14,10 @@ function modeForBranch(value) {
   if (!branch || !branchPattern.test(branch)) {
     throw new Error('PORTFOLIO_BRANCH is missing or invalid')
   }
-  return ['main', 'dev'].includes(branch) ? 'sso' : 'local'
+  if (!['main', 'dev'].includes(branch)) {
+    throw new Error('Unsupported branch; use main or dev')
+  }
+  return branch === 'main' ? 'sso' : 'local'
 }
 
 function canonicalMode(environment, resolverAvailable) {

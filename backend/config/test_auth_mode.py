@@ -25,17 +25,24 @@ class PortfolioAuthModeTests(SimpleTestCase):
             build_mode=build_mode,
         )
 
-    def test_main_and_dev_resolve_to_sso(self):
-        for branch in ("main", "dev", "refs/heads/main", "refs/heads/dev"):
+    def test_main_resolves_to_sso(self):
+        for branch in ("main", "refs/heads/main"):
             with self.subTest(branch=branch):
                 contract = self.resolve(branch, "sso", legacy="true")
                 self.assertEqual(contract.mode, "sso")
                 self.assertTrue(contract.sso_enabled)
 
-    def test_every_other_branch_resolves_to_local(self):
-        contract = self.resolve("codex-auth-contract", "local", legacy="false")
+    def test_dev_resolves_to_local(self):
+        contract = self.resolve("dev", "local", legacy="false")
         self.assertEqual(contract.mode, "local")
         self.assertFalse(contract.sso_enabled)
+
+    def test_unsupported_branches_fail_closed(self):
+        for branch in ("codex", "feature/auth", "topic"):
+            for mode in ("sso", "local"):
+                with self.subTest(branch=branch, mode=mode):
+                    with self.assertRaises(ImproperlyConfigured):
+                        self.resolve(branch, mode)
 
     def test_explicit_mode_and_legacy_mismatches_fail_closed(self):
         with self.assertRaises(ImproperlyConfigured):
@@ -43,11 +50,11 @@ class PortfolioAuthModeTests(SimpleTestCase):
         with self.assertRaises(ImproperlyConfigured):
             self.resolve("main", "sso", legacy="false")
         with self.assertRaises(ImproperlyConfigured):
-            self.resolve("topic", "local", legacy="true")
+            self.resolve("dev", "local", legacy="true")
 
     def test_runtime_cannot_change_the_image_build_mode(self):
         with self.assertRaises(ImproperlyConfigured):
-            self.resolve("topic", "local", build_mode="sso")
+            self.resolve("dev", "local", build_mode="sso")
 
     def test_packaged_runtime_requires_branch_and_mode(self):
         with patch("config.auth_mode._resolver_path", return_value=None):
@@ -91,7 +98,7 @@ class PortfolioAuthModeTests(SimpleTestCase):
                 self.assertEqual(contract.branch, "main")
 
                 contract_path.chmod(0o644)
-                contract_path.write_text("dev\nsso\n", encoding="utf-8")
+                contract_path.write_text("dev\nlocal\n", encoding="utf-8")
                 contract_path.chmod(0o444)
                 with self.assertRaisesRegex(ImproperlyConfigured, "image build"):
                     resolve_portfolio_auth_contract(

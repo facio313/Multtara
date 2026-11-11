@@ -166,15 +166,14 @@ require("**" in dockerignore and "!frontend/**" in dockerignore, "root frontend 
 require("frontend/.env" in dockerignore, "frontend env files can enter the root frontend context")
 require("frontend/.env.*" in dockerignore, "frontend env variants can enter the root frontend context")
 require("!scripts/portfolio-auth-mode.sh" in dockerignore, "root context omits the canonical resolver")
-require("- cursor" in ci_workflow and '"cursor-*"' in ci_workflow, "CI does not run on cursor branches")
-require("- anthropic" in ci_workflow and '"anthropic-*"' in ci_workflow, "CI does not run on anthropic branches")
+require("- cursor" not in ci_workflow and "- codex" not in ci_workflow, "Retired tool branches remain in CI triggers")
+require("- anthropic" not in ci_workflow, "Retired anthropic branch remains in CI triggers")
 require("production APPLICATION_BASE_PATH must be /multtara" in deploy_common, "deploy does not pin the portfolio application path")
 require("/api/health/ready/" in compose, "frontend healthcheck does not probe the backend through Nginx")
 require("file: ${{ matrix.dockerfile }}" in ci_workflow, "CI image matrix ignores its Dockerfile")
 require("file: ./frontend/Dockerfile" in release_workflow, "release frontend Dockerfile is not explicit")
 for command in ("dev", "preview"):
-    require("PORTFOLIO_AUTH_MODE=local" in frontend_package["scripts"][command], f"{command} is not local-only")
-    require("../scripts/portfolio-auth-mode.sh exec --" in frontend_package["scripts"][command], f"{command} bypasses the resolver")
+    require("../scripts/dev-only.sh" in frontend_package["scripts"][command], f"{command} bypasses the actual dev checkout guard")
 require("base: environment.VITE_APP_BASE_PATH || '/'" in vite_config, "Vite base path is not configurable")
 require("<BrowserRouter basename={routerBaseName}>" in app_source, "React routes do not honor the Vite base path")
 require(index_html.count("%BASE_URL%") >= 3, "HTML metadata/assets are not rooted at the Vite base path")
@@ -311,7 +310,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     ALLOWED_HOSTS='localhost,127.0.0.1' \
     APPLICATION_BASE_PATH='/multtara' \
     FRONTEND_BIND_ADDRESS='127.0.0.1' \
-    PORTFOLIO_BRANCH='codex-auth-contract' \
+    PORTFOLIO_BRANCH='dev' \
     PORTFOLIO_AUTH_MODE='local' \
     PONGDANG_SSO_ENABLED='false' \
     VITE_SSO_ENABLED='false' \
@@ -382,7 +381,7 @@ for service in ("backend", "collector"):
         raise SystemExit(f"FAIL: {service} same-origin CORS default changed")
     if environment.get("SECURE_SSL_REDIRECT") != "True":
         raise SystemExit(f"FAIL: {service} SSL redirect default changed")
-    if environment.get("PORTFOLIO_BRANCH") != "codex-auth-contract":
+    if environment.get("PORTFOLIO_BRANCH") != "dev":
         raise SystemExit(f"FAIL: {service} did not receive the local branch")
     if environment.get("PORTFOLIO_AUTH_MODE") != "local":
         raise SystemExit(f"FAIL: {service} did not receive local auth mode")

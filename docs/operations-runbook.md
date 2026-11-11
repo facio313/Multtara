@@ -35,7 +35,7 @@ Dockerfile로 이미지를 직접 빌드하지 않는다. GitHub Actions가 만�
   `origin/main` 이력에 포함된 검증 tag release에만 허용된다.
 - Frontend Vite auth mode는 static bundle에 build-time으로 고정된다. 최종 Nginx
   image의 canonical 환경값과 OCI branch/auth-mode label은 audit provenance이며
-  runtime switch가 아니다. Mode 변경은 rebuild가 필요하고 `main`/`dev` image는
+  runtime switch가 아니다. Mode 변경은 rebuild가 필요하고 `main` image는
   신뢰 가능한 SSO edge 밖에서 실행하지 않는다. Backend/frontend image의
   `/etc/portfolio-auth-build`에는 normalized branch와 mode가 mode 0444 두 줄로
   고정되며 Django settings와 Nginx resolver entrypoint가 runtime pair와 비교한다.

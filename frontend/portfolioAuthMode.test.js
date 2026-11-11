@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { resolveFrontendAuthMode } from './portfolioAuthMode.js';
 
-for (const branch of ['main', 'dev', 'refs/heads/main', 'refs/heads/dev']) {
+for (const branch of ['main', 'refs/heads/main']) {
   test(`${branch} enables SSO`, () => {
     assert.deepEqual(resolveFrontendAuthMode({
       PORTFOLIO_BRANCH: branch,
@@ -13,9 +13,9 @@ for (const branch of ['main', 'dev', 'refs/heads/main', 'refs/heads/dev']) {
   });
 }
 
-test('a feature branch keeps local auth', () => {
+test('dev keeps local auth', () => {
   assert.deepEqual(resolveFrontendAuthMode({
-    PORTFOLIO_BRANCH: 'codex-auth-contract',
+    PORTFOLIO_BRANCH: 'dev',
     PORTFOLIO_AUTH_MODE: 'local',
     VITE_SSO_ENABLED: 'false',
   }), { mode: 'local', ssoEnabled: false });
@@ -43,3 +43,12 @@ test('a packaged build requires both canonical values', () => {
     /PORTFOLIO_AUTH_MODE/,
   );
 });
+
+for (const available of [true, false]) {
+  test(`unsupported branches fail closed; resolver=${available}`, () => {
+    for (const branch of ['codex', 'topic', 'feature/auth']) {
+      assert.throws(() => resolveFrontendAuthMode({ PORTFOLIO_BRANCH: branch, PORTFOLIO_AUTH_MODE: 'local' }, available));
+    }
+    assert.equal(resolveFrontendAuthMode({ PORTFOLIO_BRANCH: 'refs/heads/dev', PORTFOLIO_AUTH_MODE: 'local' }, available).ssoEnabled, false);
+  });
+}

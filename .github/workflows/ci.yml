@@ -8,15 +8,10 @@ on:
         required: true
         type: string
   pull_request:
+    branches: [main, dev]
   push:
     branches:
       - main
-      - cursor
-      - "cursor-*"
-      - anthropic
-      - "anthropic-*"
-      - codex
-      - "codex-*"
       - dev
 
 permissions:
@@ -30,9 +25,9 @@ env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "24"
   PORTFOLIO_BRANCH: ${{ inputs.portfolio_branch || github.head_ref || github.ref_name }}
-  PORTFOLIO_AUTH_MODE: ${{ (inputs.portfolio_branch == 'main' || inputs.portfolio_branch == 'dev' || github.head_ref == 'main' || github.head_ref == 'dev' || github.ref_name == 'main' || github.ref_name == 'dev') && 'sso' || 'local' }}
-  PONGDANG_SSO_ENABLED: ${{ (inputs.portfolio_branch == 'main' || inputs.portfolio_branch == 'dev' || github.head_ref == 'main' || github.head_ref == 'dev' || github.ref_name == 'main' || github.ref_name == 'dev') && 'true' || 'false' }}
-  VITE_SSO_ENABLED: ${{ (inputs.portfolio_branch == 'main' || inputs.portfolio_branch == 'dev' || github.head_ref == 'main' || github.head_ref == 'dev' || github.ref_name == 'main' || github.ref_name == 'dev') && 'true' || 'false' }}
+  PORTFOLIO_AUTH_MODE: ${{ (inputs.portfolio_branch || github.head_ref || github.ref_name) == 'main' && 'sso' || 'local' }}
+  PONGDANG_SSO_ENABLED: ${{ (inputs.portfolio_branch || github.head_ref || github.ref_name) == 'main' && 'true' || 'false' }}
+  VITE_SSO_ENABLED: ${{ (inputs.portfolio_branch || github.head_ref || github.ref_name) == 'main' && 'true' || 'false' }}
 
 jobs:
   backend:
