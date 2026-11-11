@@ -241,8 +241,8 @@ PY
     || pongdang_die "PORTFOLIO_AUTH_MODE must appear exactly once"
   PONGDANG_VITE_SSO_ENABLED="$(pongdang_env_value "$file" VITE_SSO_ENABLED)" \
     || pongdang_die "VITE_SSO_ENABLED must appear exactly once"
-  PONGDANG_APPLICATION_BASE_PATH="$(pongdang_optional_env_value "$file" APPLICATION_BASE_PATH)" \
-    || pongdang_die "APPLICATION_BASE_PATH may appear at most once"
+  PONGDANG_APPLICATION_BASE_PATH="$(pongdang_env_value "$file" APPLICATION_BASE_PATH)" \
+    || pongdang_die "APPLICATION_BASE_PATH must appear exactly once"
   PONGDANG_ROUTING_MATRIX_URL="$(pongdang_optional_env_value "$file" ROUTING_MATRIX_URL)" \
     || pongdang_die "ROUTING_MATRIX_URL may appear at most once"
   PONGDANG_SSO_ENABLED="$(pongdang_env_value "$file" PONGDANG_SSO_ENABLED)" \
@@ -434,9 +434,8 @@ if (
 PY
     fi
   fi
-  if [[ -n "$PONGDANG_APPLICATION_BASE_PATH" ]]; then
-    [[ "$PONGDANG_APPLICATION_BASE_PATH" =~ ^/[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*$ ]] \
-      || pongdang_die "APPLICATION_BASE_PATH must be an absolute URL path without a trailing slash"
+  if [[ "$PONGDANG_APPLICATION_BASE_PATH" != "/multtara" ]]; then
+    pongdang_die "production APPLICATION_BASE_PATH must be /multtara"
   fi
   if [[ -n "$PONGDANG_ROUTING_MATRIX_URL" ]]; then
     [[ "$PONGDANG_ROUTING_MATRIX_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~:/%-]*)?/?$ ]] \

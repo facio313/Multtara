@@ -471,18 +471,6 @@ class Itinerary(models.Model):
                     desired_skill,
                 )
             )
-            if (
-                latest is None
-                and self.activity == "surf"
-                and desired_skill != self.ParticipantSkillLevel.UNSPECIFIED
-            ):
-                latest = latest_by_identity.get(
-                    (
-                        score.spot_id,
-                        score.methodology_version,
-                        self.ParticipantSkillLevel.UNSPECIFIED,
-                    )
-                )
             if latest is None or latest.pk != score.pk:
                 return False
         return True

@@ -11,6 +11,10 @@ on:
   push:
     branches:
       - main
+      - cursor
+      - "cursor-*"
+      - anthropic
+      - "anthropic-*"
       - codex
       - "codex-*"
       - dev
@@ -225,6 +229,8 @@ jobs:
             PORTFOLIO_BRANCH=${{ env.PORTFOLIO_BRANCH }}
             PORTFOLIO_AUTH_MODE=${{ env.PORTFOLIO_AUTH_MODE }}
             VITE_SSO_ENABLED=${{ env.VITE_SSO_ENABLED }}
+            VITE_APP_BASE_PATH=${{ env.PORTFOLIO_AUTH_MODE == 'sso' && '/multtara/' || '/' }}
+            VITE_API_BASE_URL=${{ env.PORTFOLIO_AUTH_MODE == 'sso' && '/multtara/api/v1/' || '/api/v1/' }}
           platforms: linux/arm64
           push: false
           cache-from: type=gha,scope=${{ matrix.name }}-arm64

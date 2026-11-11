@@ -27,9 +27,14 @@ FORECAST_EVIDENCE_NOT_YET_FETCHED = "FORECAST_EVIDENCE_NOT_YET_FETCHED"
 FORECAST_EXPIRY_UNAVAILABLE = "FORECAST_EXPIRY_UNAVAILABLE"
 
 class WaterForecastSerializer(serializers.ModelSerializer):
+    data_state = serializers.SerializerMethodField()
+
     class Meta:
         model = WaterForecast
         fields = "__all__"
+
+    def get_data_state(self, _obj: WaterForecast) -> str:
+        return "legacy_unversioned"
 
 
 class DailyForecastQuerySerializer(serializers.Serializer):

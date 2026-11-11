@@ -84,6 +84,48 @@ def family_context() -> EvaluationContext:
     )
 
 
+def inland_family_swim_metrics(*extra: Metric) -> ObservationSet:
+    base = {
+        item.name: item
+        for item in (
+            metric("official_entry_status", "open"),
+            metric("weather_alert_level", "none"),
+            metric("lightning_clearance_minutes", 30),
+            metric("river_risk_level", "normal"),
+            metric("water_quality_status", "pass", valid_for=timedelta(days=1)),
+            metric("adult_supervision_status", "confirmed"),
+            metric("official_activity_grade", "very_good", valid_for=timedelta(hours=8)),
+            metric("water_temperature_c", 24),
+            metric("air_temperature_c", 26),
+            metric("wave_height_m", 0.3),
+            metric("wind_speed_ms", 3),
+            metric("precipitation_1h_mm", 0),
+            metric("uv_index", 3),
+            metric("crowd_level", "low"),
+        )
+    }
+    base.update({item.name: item for item in extra})
+    return ObservationSet(base)
+
+
+def inland_family_context() -> EvaluationContext:
+    return EvaluationContext(
+        activity=Activity.SWIM,
+        environment=Environment.INLAND_WATER,
+        participant_profile="family",
+        at=NOW,
+    )
+
+
+def inland_general_context() -> EvaluationContext:
+    return EvaluationContext(
+        activity=Activity.SWIM,
+        environment=Environment.INLAND_WATER,
+        participant_profile="general",
+        at=NOW,
+    )
+
+
 class DomainContractTests(TestCase):
     def test_metric_requires_timezone_aware_timestamps(self):
         with self.assertRaisesRegex(ValueError, "timezone-aware"):
@@ -440,6 +482,82 @@ class FamilySwimGateTests(TestCase):
             "DESIGNATED_SWIM_ZONE_UNAVAILABLE",
             {gate.reason_code for gate in closed_result.gates},
         )
+
+    def test_inland_family_swim_requires_temperature_and_supervision_not_beach_gates(self):
+        ready = evaluate_water_index(
+            inland_family_swim_metrics(),
+            inland_family_context(),
+        )
+        self.assertEqual(ready.safety_status, SafetyStatus.CLEAR)
+        self.assertIsNotNone(ready.score)
+
+        missing_supervision = ObservationSet(
+            {
+                key: value
+                for key, value in inland_family_swim_metrics().metrics.items()
+                if key != "adult_supervision_status"
+            }
+        )
+        supervision_result = evaluate_water_index(
+            missing_supervision,
+            inland_family_context(),
+        )
+        self.assertEqual(supervision_result.safety_status, SafetyStatus.UNKNOWN)
+        self.assertIsNone(supervision_result.score)
+        self.assertIn("adult_supervision_status", supervision_result.missing_metrics)
+        self.assertIn(
+            "ADULT_SUPERVISION_STATUS_MISSING",
+            {gate.reason_code for gate in supervision_result.gates},
+        )
+
+        missing_temperature = ObservationSet(
+            {
+                key: value
+                for key, value in inland_family_swim_metrics().metrics.items()
+                if key != "water_temperature_c"
+            }
+        )
+        temperature_result = evaluate_water_index(
+            missing_temperature,
+            inland_family_context(),
+        )
+        self.assertEqual(temperature_result.safety_status, SafetyStatus.UNKNOWN)
+        self.assertIsNone(temperature_result.score)
+        self.assertIn("water_temperature_c", temperature_result.missing_metrics)
+        self.assertIn(
+            "WATER_TEMPERATURE_MISSING",
+            {gate.reason_code for gate in temperature_result.gates},
+        )
+
+        without_beach_gates = evaluate_water_index(
+            inland_family_swim_metrics(),
+            inland_family_context(),
+        )
+        self.assertNotIn("patrol_status", without_beach_gates.missing_metrics)
+        self.assertNotIn(
+            "designated_swim_zone_status",
+            without_beach_gates.missing_metrics,
+        )
+
+        inland_general = evaluate_water_index(
+            ObservationSet(
+                {
+                    key: value
+                    for key, value in inland_family_swim_metrics().metrics.items()
+                    if key not in {
+                        "adult_supervision_status",
+                        "water_temperature_c",
+                    }
+                }
+            ),
+            inland_general_context(),
+        )
+        self.assertEqual(inland_general.safety_status, SafetyStatus.CLEAR)
+        self.assertIsNotNone(inland_general.score)
+        self.assertNotIn("adult_supervision_status", inland_general.missing_metrics)
+        inland_general_reasons = {gate.reason_code for gate in inland_general.gates}
+        self.assertNotIn("WATER_TEMPERATURE_MISSING", inland_general_reasons)
+        self.assertNotIn("ADULT_SUPERVISION_STATUS_MISSING", inland_general_reasons)
 
     def test_water_quality_advisory_blocks_water_contact(self):
         result = evaluate_water_index(

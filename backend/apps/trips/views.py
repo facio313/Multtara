@@ -477,7 +477,9 @@ def _serialize_ranked(item, *, result, domain_request):
 
 
 def _candidate_queryset(payload):
-    queryset = WaterSpot.objects.all()
+    queryset = WaterSpot.objects.filter(
+        catalog_verification=WaterSpot.VerificationState.VERIFIED,
+    ).exclude(catalog_source="PONGDANG_DEMO")
     if region := payload.get("region"):
         queryset = queryset.filter(region__icontains=region.strip())
     if spot_type := payload.get("spot_type"):

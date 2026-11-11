@@ -176,7 +176,7 @@ services:
       # container port directly while trusting X-Forwarded-Proto.
       - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-8080}:8080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/ >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/health/ready/ >/dev/null 2>&1"]
       interval: 30s
       timeout: 5s
       retries: 3

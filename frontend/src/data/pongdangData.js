@@ -61,7 +61,7 @@ export const spots = [
     index: 94,
     scores: { swim: 94, surf: 72, relax: 91, mudflat: null, onsen: null, rafting: null },
     safety: {
-      level: 'safe',
+      level: 'demo',
       label: '데모상 양호',
       message: '잔잔한 파고를 가정한 데모입니다. 입수 전 현장 안전요원 안내를 확인하세요.',
     },
@@ -109,7 +109,7 @@ export const spots = [
     index: 91,
     scores: { swim: 91, surf: 78, relax: 86, mudflat: null, onsen: null, rafting: null },
     safety: {
-      level: 'safe',
+      level: 'demo',
       label: '데모상 양호',
       message: '가족 물놀이에 무난한 조건을 가정했습니다. 개장·안전요원 정보는 현장에서 재확인하세요.',
     },
@@ -205,7 +205,7 @@ export const spots = [
     index: 86,
     scores: { swim: 82, surf: 81, relax: 93, mudflat: null, onsen: null, rafting: null },
     safety: {
-      level: 'safe',
+      level: 'demo',
       label: '데모상 양호',
       message: '일출·산책 중심의 물멍 점수입니다. 해상 활동은 당일 통제 정보를 따르세요.',
     },
@@ -253,7 +253,7 @@ export const spots = [
     index: 92,
     scores: { swim: null, surf: null, relax: 92, mudflat: null, onsen: 96, rafting: null },
     safety: {
-      level: 'safe',
+      level: 'demo',
       label: '실내 대안',
       message: '악천후 때 야외 활동을 대체하는 온수 자원 데모입니다. 운영시간과 이용조건을 확인하세요.',
     },
@@ -349,7 +349,7 @@ export const spots = [
     index: 89,
     scores: { swim: null, surf: null, relax: 95, mudflat: null, onsen: null, rafting: null },
     safety: {
-      level: 'safe',
+      level: 'demo',
       label: '산책 추천',
       message: '입수가 아닌 산책·물멍용 점수입니다. 지정된 탐방 동선을 이용하세요.',
     },
@@ -397,7 +397,7 @@ export const spots = [
     index: 84,
     scores: { swim: 86, surf: 80, relax: 82, mudflat: null, onsen: null, rafting: null },
     safety: {
-      level: 'safe',
+      level: 'demo',
       label: '데모상 양호',
       message: '가족형 물놀이 조건을 가정했습니다. 개장 여부와 안전 구역을 현장에서 확인하세요.',
     },
@@ -541,7 +541,7 @@ export const spots = [
     index: 88,
     scores: { swim: null, surf: null, relax: 91, mudflat: null, onsen: 94, rafting: null },
     safety: {
-      level: 'safe',
+      level: 'demo',
       label: '실내 대안',
       message: '전국 온천 확장용 데모입니다. 실제 운영시간·요금·시설 안내를 확인하세요.',
     },
@@ -637,7 +637,7 @@ export const spots = [
     index: 87,
     scores: { swim: 91, surf: 72, relax: 86, mudflat: null, onsen: null, rafting: null },
     safety: {
-      level: 'safe',
+      level: 'demo',
       label: '데모상 양호',
       message: '전국 해변 확장용 고정 값입니다. 자외선·바람·현장 통제를 다시 확인하세요.',
     },

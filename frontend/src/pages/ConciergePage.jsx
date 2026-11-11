@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import {
   Accessibility,
   AlertTriangle,
@@ -144,9 +144,14 @@ function readPersonaId() {
   }
 }
 
-function buildInitialForm(personaId) {
+function buildInitialForm(personaId, searchParams) {
   const preset = personaPresets[personaId] || {};
-  return { ...defaultForm, ...preset };
+  const next = { ...defaultForm, ...preset };
+  const activity = searchParams?.get?.('activity');
+  if (activity && activityOptions.some((item) => item.value === activity)) {
+    next.activity = activity;
+  }
+  return next;
 }
 
 function inferFormFromQuery(text, currentForm, { suggestion = false } = {}) {
@@ -1119,6 +1124,7 @@ function ItineraryWorkspace({ requestState, intlLocale, t }) {
 
 function ConciergePage() {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { intlLocale, locale, t } = useI18n();
   const locationPersonaId = typeof location.state?.personaId === 'string'
     ? location.state.personaId
@@ -1128,7 +1134,7 @@ function ConciergePage() {
   const persona = personas.find((item) => item.id === personaId) ?? null;
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
-  const [form, setForm] = useState(() => buildInitialForm(personaId));
+  const [form, setForm] = useState(() => buildInitialForm(personaId, searchParams));
   const [ageError, setAgeError] = useState('');
   const [requestState, setRequestState] = useState({ kind: 'idle' });
   const activeRequest = useRef(null);

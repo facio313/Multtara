@@ -29,6 +29,7 @@ import { livecams, personas, weeklyForecast } from '../data/pongdangData';
 import { useWaterSpots } from '../hooks/useWaterData';
 import { localizedDataState, localizedSafety, useI18n } from '../i18n';
 import {
+  formatGateReason,
   getSpotActivityView,
   isRecommendationEligible,
   scoreLabel,
@@ -142,6 +143,10 @@ function HomePage() {
     }
   });
 
+  const dataLoading = ['idle', 'loading'].includes(spotStatus)
+    || ['idle', 'loading'].includes(conditionStatus);
+  const dataError = spotStatus === 'error' || conditionStatus === 'error';
+  const dataEmpty = spotStatus === 'empty' || conditionStatus === 'empty';
   const rankedSpots = useMemo(
     () => [...spots]
       .map((spot) => ({ spot, view: getSpotActivityView(spot, activity) }))
@@ -151,6 +156,17 @@ function HomePage() {
     [activity, spots],
   );
   const heroResult = rankedSpots[0] ?? null;
+  const heroStatus = dataError
+    ? t('home.hero.statusError')
+    : dataLoading
+      ? t('home.hero.statusLoading')
+      : heroResult?.view?.isDemoFallback
+        ? t('home.hero.statusDemo')
+        : !heroResult || dataEmpty
+          ? t('home.hero.statusNoLive')
+          : persona
+            ? t('home.hero.statusPersona', { persona: persona.title })
+            : t('home.hero.statusGuest');
   const heroConditions = heroResult ? [
     { label: t('metric.waterTemp'), value: heroResult.view.conditions.waterTemp, icon: ThermometerSun },
     { label: t('metric.waveHeight'), value: heroResult.view.conditions.waveHeight, icon: Waves },
@@ -187,9 +203,7 @@ function HomePage() {
         <div className="hero-copy">
           <div className="hero-status">
             <span className="status-dot" aria-hidden="true" />
-            {persona
-              ? t('home.hero.statusPersona', { persona: persona.title })
-              : t('home.hero.statusGuest')}
+            {heroStatus}
           </div>
 
           <p className="hero-kicker">WATER TRAVEL, CURATED FOR TODAY</p>
@@ -370,7 +384,11 @@ function HomePage() {
                 <p>{spot.summary}</p>
                 <div className="spot-reason-row">
                   {view.reasons.length > 0
-                    ? view.reasons.slice(0, 2).map((reason) => <span title={reason.code} key={reason.code}>{reason.label}</span>)
+                    ? view.reasons.slice(0, 2).map((reason) => (
+                      <span title={reason.code} key={reason.code}>
+                        {formatGateReason(reason.code, t)}
+                      </span>
+                    ))
                     : spot.reasons.slice(0, 2).map((reason) => <span key={reason}>{reason}</span>)}
                 </div>
                 <div className="spot-card-footer">
@@ -458,17 +476,21 @@ function HomePage() {
           <Link to="/concierge"><Sparkles size={17} /> {t('nav.askAi')} <ArrowRight size={16} /></Link>
         </div>
         <div className="ai-result-preview">
-          {spots.filter((spot) => ['anmok-beach', 'gyeongpo-lake', 'geumjin-hotspring'].includes(spot.slug)).map((spot, index) => {
-            const view = getSpotActivityView(
-              spot,
-              ['hotspring', 'pool', 'waterpark'].includes(spot.type) ? 'onsen' : 'relax',
-            );
-            return (
+          {spots
+            .filter((spot) => ['anmok-beach', 'gyeongpo-lake', 'geumjin-hotspring'].includes(spot.slug))
+            .map((spot) => {
+              const view = getSpotActivityView(
+                spot,
+                ['hotspring', 'pool', 'waterpark'].includes(spot.type) ? 'onsen' : 'relax',
+              );
+              return { spot, view };
+            })
+            .filter(({ view }) => isRecommendationEligible(view))
+            .map(({ spot, view }, index) => (
               <Link to={`/spot/${spot.id}`} key={spot.id}>
                 <span>0{index + 1}</span><div><strong>{spot.name}</strong><small>{localizedDataState(t, view.dataState)} · {t('common.points', { score: scoreLabel(view) })}</small></div><ChevronRight size={17} />
               </Link>
-            );
-          })}
+            ))}
         </div>
       </section>
 

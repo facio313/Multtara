@@ -70,6 +70,18 @@ class ConditionScoreViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_class = ConditionScoreFilter
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        request = getattr(self, "request", None)
+        historical = False
+        if request is not None:
+            raw = str(request.query_params.get("historical", "")).strip().lower()
+            historical = raw in {"1", "true", "yes"}
+        context["historical"] = historical
+        if not historical:
+            context["effective_as_of"] = timezone.now()
+        return context
+
     @action(detail=False, methods=("get",), url_path="latest")
     def latest(self, request, *args, **kwargs):
         """Return the newest evaluation for each spot/activity/profile tuple."""
@@ -117,6 +129,7 @@ class ConditionScoreViewSet(viewsets.ReadOnlyModelViewSet):
         )
         serializer_context = {
             **self.get_serializer_context(),
+            "historical": False,
             "effective_as_of": as_of,
         }
         page = self.paginate_queryset(queryset)

@@ -29,6 +29,8 @@ import {
 import { useWaterSpots } from '../hooks/useWaterData';
 import { localizedDataState, localizedSafety, useI18n } from '../i18n';
 import {
+  catalogMix,
+  formatGateReason,
   getSpotActivityView,
   scoreLabel,
 } from '../services/waterData';
@@ -219,14 +221,13 @@ function MapPage() {
   const [activeActivity, setActiveActivity] = useState('swim');
   const [layerMode, setLayerMode] = useState('score');
   const [query, setQuery] = useState(() => searchParams.get('q')?.trim() ?? '');
-  const [selectedSpotId, setSelectedSpotId] = useState(1);
+  const [selectedSpotId, setSelectedSpotId] = useState(null);
   const [mapStatus, setMapStatus] = useState(KAKAO_MAP_KEY ? 'loading' : 'missing-key');
   const [locationState, setLocationState] = useState('idle');
   const [userLocation, setUserLocation] = useState(null);
   const {
     spots,
     spotStatus,
-    conditionStatus,
     retryData,
   } = useWaterSpots(activeActivity);
   const mapCanvasRef = useRef(null);
@@ -262,8 +263,7 @@ function MapPage() {
       });
   }, [activeActivity, activeType, locationState, query, scope, spots, userLocation]);
 
-  const selectedSpot =
-    filteredSpots.find((spot) => spot.id === selectedSpotId) ?? filteredSpots[0] ?? null;
+  const selectedSpot = filteredSpots.find((spot) => spot.id === selectedSpotId) ?? null;
   const selectedView = selectedSpot
     ? getSpotActivityView(selectedSpot, activeActivity)
     : null;
@@ -431,17 +431,38 @@ function MapPage() {
     setActiveType('all');
     setScope('gangneung');
   };
-  const dataLoading = ['idle', 'loading'].includes(spotStatus)
-    || ['idle', 'loading'].includes(conditionStatus);
-  const dataError = spotStatus === 'error' || conditionStatus === 'error';
-  const dataEmpty = spotStatus === 'empty' || conditionStatus === 'empty';
+  const dataLoading = ['idle', 'loading'].includes(spotStatus);
+  const dataError = spotStatus === 'error' && spots.length === 0;
+  const dataEmpty = !dataLoading && !dataError && spots.length === 0;
+  const catalogKind = dataError || dataLoading || dataEmpty
+    ? null
+    : catalogMix(spots, activeActivity);
   const dataBadge = dataError
     ? t('map.data.badge.error')
     : dataLoading
       ? t('map.data.badge.loading')
       : dataEmpty
         ? t('map.data.badge.empty')
-        : t('map.data.badge.ready');
+        : catalogKind === 'demo'
+          ? t('map.data.badge.demo')
+          : catalogKind === 'mixed'
+            ? t('map.data.badge.mixed')
+            : catalogKind === 'live'
+              ? t('map.data.badge.live')
+              : t('map.data.badge.ready');
+  const dataNoteState = dataError
+    ? 'error'
+    : dataLoading
+      ? 'loading'
+      : dataEmpty
+        ? 'demo'
+        : catalogKind === 'demo'
+          ? 'demo'
+          : catalogKind === 'mixed'
+            ? 'stale'
+            : catalogKind === 'live'
+              ? 'live'
+              : 'ready';
 
   return (
     <div className="pd-map-page">
@@ -455,19 +476,23 @@ function MapPage() {
           <p>{t('map.hero.description')}</p>
         </div>
 
-        <div className={`pd-map-data-note state-${dataError ? 'error' : dataLoading ? 'loading' : dataEmpty ? 'demo' : 'live'}`} role="status" aria-live="polite">
+        <div className={`pd-map-data-note state-${dataNoteState}`} role="status" aria-live="polite">
           <span className="pd-map-demo-badge">
             <Database size={14} aria-hidden="true" />
             {dataBadge}
           </span>
           <div>
-            <strong>{dataError
+            <strong>            {dataError
               ? t('map.data.error')
               : dataLoading
                 ? t('map.data.loading')
                 : dataEmpty
                   ? t('map.data.empty')
-                  : t('map.data.ready')}</strong>
+                  : catalogKind === 'demo'
+                    ? t('map.data.demo')
+                    : catalogKind === 'mixed'
+                      ? t('map.data.mixed')
+                      : t('map.data.ready')}</strong>
             <span>{t('common.unknownStopPolicy')}</span>
           </div>
           {dataError && <button type="button" onClick={retryData}>{t('common.retry')}</button>}
@@ -729,7 +754,7 @@ function MapPage() {
               {selectedView.reasons.length > 0 && (
                 <div className="pd-map-reason-codes" aria-label={t('map.reasons')}>
                   {selectedView.reasons.slice(0, 3).map((reason) => (
-                    <span title={reason.label} key={reason.code}>{reason.code}</span>
+                    <span title={formatGateReason(reason.code, t)} key={reason.code}>{reason.code}</span>
                   ))}
                 </div>
               )}
@@ -741,12 +766,18 @@ function MapPage() {
                 </Link>
               </div>
             </article>
-          ) : (
+          ) : filteredSpots.length === 0 ? (
             <div className="pd-map-no-results" role="status">
               <MapIcon size={30} aria-hidden="true" />
               <h3>{t('map.empty.title')}</h3>
               <p>{t('map.empty.description')}</p>
               <button type="button" onClick={clearFilters}>{t('common.resetFilters')}</button>
+            </div>
+          ) : (
+            <div className="pd-map-no-results" role="status">
+              <MapIcon size={30} aria-hidden="true" />
+              <h3>{t('map.select.title')}</h3>
+              <p>{t('map.select.description')}</p>
             </div>
           )}
 
@@ -754,7 +785,7 @@ function MapPage() {
             <div className="pd-map-result-list" role="list" aria-label={t('map.results.label')}>
               {filteredSpots.map((spot, index) => {
                 const view = getSpotActivityView(spot, activeActivity);
-                const isSelected = selectedSpot?.id === spot.id;
+                const isSelected = selectedSpotId === spot.id;
                 const spotDistance = userLocation ? distanceKm(userLocation, spot) : null;
                 return (
                   <article

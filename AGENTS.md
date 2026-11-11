@@ -91,6 +91,11 @@ Always use the skill `vowline` consistently, including for all sub-agents.
   explainable multi-criteria ranking, diversity reranking, then time-window
   itinerary optimization. LLM output may verbalize structured reasons but must
   not invent safety decisions, scores, sources, or routes.
+- The following models are operator/admin or internal storage only and are
+  out of the current public API contract: `SoundProfile`, `GoldenMoment`,
+  `SafetyCard`, `NearbyFacility`, `CatchGuide`, `HotspringDetail`,
+  `CrowdLevel`, and `SpotAnalytics`. Do not expose new client APIs for them
+  until a reviewed product contract exists.
 
 ---
 

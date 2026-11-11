@@ -5,8 +5,10 @@ import {
   apiSpotRouteId,
   applyConditionScores,
   applyObservations,
+  catalogMix,
   findSpotByRouteId,
   getSpotActivityView,
+  isRecommendationEligible,
   mergeSpotsWithDemo,
   normalizeConditionScore,
 } from './waterData.js';
@@ -300,4 +302,67 @@ test('API-prefixed routes cannot collide with a numeric DEMO id', () => {
   assert.equal(findSpotByRouteId(spots, 'api-'), null);
   assert.equal(apiSpotRouteId(0), null);
   assert.equal(apiSpotRouteId('not-an-id'), null);
+});
+
+test('demo fallback scores are never recommendation-eligible', () => {
+  assert.equal(isRecommendationEligible({
+    isDemoFallback: true,
+    score: 94,
+    safetyStatus: 'clear',
+    decision: 'recommended',
+    dataState: 'demo',
+  }), false);
+});
+
+test('live clear recommended scores remain eligible', () => {
+  assert.equal(isRecommendationEligible({
+    isDemoFallback: false,
+    score: 88,
+    safetyStatus: 'clear',
+    decision: 'recommended',
+    dataState: 'live',
+  }), true);
+  assert.equal(isRecommendationEligible({
+    isDemoFallback: false,
+    score: 88,
+    safetyStatus: 'clear',
+    decision: 'recommended',
+    dataState: 'stale',
+  }), false);
+});
+
+test('catalog mix labels demo-only, live-only, and mixed catalogs', () => {
+  const demoSpot = {
+    spotSource: 'demo',
+    scores: { swim: 91 },
+  };
+  const liveSpot = {
+    spotSource: 'api',
+    apiId: 4,
+    conditionRecords: {
+      swim: {
+        score: 80,
+        scoreRange: [70, 90],
+        safety: { level: 'clear' },
+        safetyStatus: 'clear',
+        decision: 'recommended',
+        confidence: 0.9,
+        coverage: 0.9,
+        dataState: 'live',
+        reasons: [],
+        contributions: [],
+        missingMetrics: [],
+        staleMetrics: [],
+        limitations: [],
+        methodologyVersion: 'water-index-v1.0.0',
+        metrics: [],
+        provenance: {},
+      },
+    },
+  };
+
+  assert.equal(catalogMix([], 'swim'), 'ready');
+  assert.equal(catalogMix([demoSpot], 'swim'), 'demo');
+  assert.equal(catalogMix([liveSpot], 'swim'), 'live');
+  assert.equal(catalogMix([demoSpot, liveSpot], 'swim'), 'mixed');
 });

@@ -53,6 +53,7 @@ class ForecastViewSetTests(TestCase):
             predicted_index=5.0
         )
 
+    @override_settings(PUBLIC_LEGACY_WATER_FORECASTS=True)
     def test_queryset_select_related(self):
         viewset = WaterForecastViewSet()
         queryset = viewset.get_queryset()
@@ -84,3 +85,12 @@ class ForecastViewSetTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+
+    def test_legacy_forecast_read_api_is_fail_closed_by_default(self):
+        request = APIRequestFactory().get("/api/v1/forecasts/")
+
+        response = WaterForecastViewSet.as_view({"get": "list"})(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])

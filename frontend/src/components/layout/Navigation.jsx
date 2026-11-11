@@ -15,6 +15,7 @@ const desktopNavItems = [
 const mobileNavItems = [
   { path: '/', labelKey: 'nav.home', icon: Droplets },
   { path: '/map', labelKey: 'nav.mapShort', icon: Compass },
+  { path: '/forecast', labelKey: 'nav.forecastShort', icon: CalendarDays },
   { path: '/concierge', labelKey: 'nav.concierge', icon: Sparkles, featured: true },
   { path: '/livecam', labelKey: 'nav.livecam', icon: Radio },
   { path: '/profile', labelKey: 'nav.profile', icon: CircleUserRound },

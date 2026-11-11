@@ -182,6 +182,7 @@ chmod 0640 "$SSO_SECRET_FILE"
   printf 'ALLOWED_HOSTS=localhost\n'
   printf 'SECURE_SSL_REDIRECT=True\n'
   printf 'FRONTEND_BIND_ADDRESS=127.0.0.1\n'
+  printf 'APPLICATION_BASE_PATH=/multtara\n'
   printf 'PORTFOLIO_BRANCH=main\n'
   printf 'PORTFOLIO_AUTH_MODE=sso\n'
   printf 'VITE_SSO_ENABLED=true\n'
@@ -448,6 +449,31 @@ if PATH="$FAKE_BIN:$PATH" bash -c '
   fail "file-backed SSO deployment retained a duplicate environment secret"
 fi
 mv "$TARGET/.env.valid-file-precedence" "$TARGET/.env"
+
+cp "$TARGET/.env" "$TARGET/.env.valid-base-path"
+sed 's#^APPLICATION_BASE_PATH=.*#APPLICATION_BASE_PATH=#' \
+  "$TARGET/.env.valid-base-path" > "$TARGET/.env"
+chmod 0600 "$TARGET/.env"
+if PATH="$FAKE_BIN:$PATH" bash -c '
+    set -euo pipefail
+    PONGDANG_TARGET="$1"
+    source "$2/deploy-common.sh"
+    pongdang_validate_secret_env
+  ' _ "$TARGET" "$TARGET/scripts" >/dev/null 2>&1; then
+  fail "empty APPLICATION_BASE_PATH was accepted"
+fi
+sed 's#^APPLICATION_BASE_PATH=.*#APPLICATION_BASE_PATH=/#' \
+  "$TARGET/.env.valid-base-path" > "$TARGET/.env"
+chmod 0600 "$TARGET/.env"
+if PATH="$FAKE_BIN:$PATH" bash -c '
+    set -euo pipefail
+    PONGDANG_TARGET="$1"
+    source "$2/deploy-common.sh"
+    pongdang_validate_secret_env
+  ' _ "$TARGET" "$TARGET/scripts" >/dev/null 2>&1; then
+  fail "origin-root APPLICATION_BASE_PATH was accepted"
+fi
+mv "$TARGET/.env.valid-base-path" "$TARGET/.env"
 
 if PONGDANG_FAKE_COMPOSE_VERSION=v2.24.3 PATH="$FAKE_BIN:$PATH" \
     "$TARGET/scripts/postgres-backup.sh" --target "$TARGET" >/dev/null 2>&1; then
@@ -744,6 +770,7 @@ YAML
   printf 'ALLOWED_HOSTS=localhost\n'
   printf 'SECURE_SSL_REDIRECT=True\n'
   printf 'FRONTEND_BIND_ADDRESS=127.0.0.1\n'
+  printf 'APPLICATION_BASE_PATH=/multtara\n'
   printf 'PORTFOLIO_BRANCH=main\n'
   printf 'PORTFOLIO_AUTH_MODE=sso\n'
   printf 'VITE_SSO_ENABLED=true\n'

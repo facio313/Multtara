@@ -41,7 +41,15 @@ ENV PORTFOLIO_BRANCH=${PORTFOLIO_BRANCH} \
     PORTFOLIO_AUTH_MODE=${PORTFOLIO_AUTH_MODE}
 LABEL org.opencontainers.image.ref.name="${PORTFOLIO_BRANCH}" \
       io.bonifacio.portfolio.auth-mode="${PORTFOLIO_AUTH_MODE}"
-RUN normalized_branch="${PORTFOLIO_BRANCH#refs/heads/}" \
+RUN case "$PORTFOLIO_BRANCH" in ""|*[!A-Za-z0-9._/-]*) exit 1 ;; esac \
+    && normalized_branch="${PORTFOLIO_BRANCH#refs/heads/}" \
+    && case "$normalized_branch" in ""|*[!A-Za-z0-9._/-]*) exit 1 ;; esac \
+    && case "$normalized_branch:$PORTFOLIO_AUTH_MODE" in \
+         main:sso|dev:sso) ;; \
+         main:*|dev:*) exit 1 ;; \
+         *:local) ;; \
+         *) exit 1 ;; \
+       esac \
     && printf '%s\n%s\n' "$normalized_branch" "$PORTFOLIO_AUTH_MODE" \
          > /etc/portfolio-auth-build \
     && chmod 0444 /etc/portfolio-auth-build

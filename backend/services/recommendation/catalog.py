@@ -139,33 +139,13 @@ def _latest_condition_scores(
         if activity == Activity.SURF.value
         else ParticipantSkillLevel.UNSPECIFIED.value
     )
-    selected = _condition_scores_for_skill(
+    return _condition_scores_for_skill(
         spots,
         activity=activity,
         participant_profile=participant_profile,
         participant_skill_level=requested_skill,
         at=at,
     )
-    if (
-        activity == Activity.SURF.value
-        and requested_skill != ParticipantSkillLevel.UNSPECIFIED.value
-        and len(selected) < len(spots)
-    ):
-        missing_spots = tuple(
-            spot for spot in spots if spot.pk not in selected
-        )
-        selected.update(
-            _condition_scores_for_skill(
-                missing_spots,
-                activity=activity,
-                participant_profile=participant_profile,
-                participant_skill_level=(
-                    ParticipantSkillLevel.UNSPECIFIED.value
-                ),
-                at=at,
-            )
-        )
-    return selected
 
 
 def _condition_scores_for_skill(
