@@ -31,7 +31,9 @@ trap 'rm -rf "$fixture"' EXIT HUP INT TERM
 mkdir "$fixture/scripts"
 cp "$resolver" "$script_directory/dev-only.sh" "$fixture/scripts/"
 git -C "$fixture" init -q -b dev
-PORTFOLIO_BRANCH=dev PORTFOLIO_AUTH_MODE=local "$fixture/scripts/dev-only.sh" sh -c '[ "$PORTFOLIO_BRANCH:$PORTFOLIO_AUTH_MODE" = dev:local ]'
+guard_environment=$(PORTFOLIO_BRANCH=dev PORTFOLIO_AUTH_MODE=local "$fixture/scripts/dev-only.sh" env)
+printf '%s\n' "$guard_environment" | grep -Fqx 'PORTFOLIO_BRANCH=dev'
+printf '%s\n' "$guard_environment" | grep -Fqx 'PORTFOLIO_AUTH_MODE=local'
 git -C "$fixture" symbolic-ref HEAD refs/heads/main
 if PORTFOLIO_BRANCH=dev PORTFOLIO_AUTH_MODE=local "$fixture/scripts/dev-only.sh" true 2>/dev/null; then
   printf '%s\n' 'A main checkout bypassed the local dev guard.' >&2; exit 1
